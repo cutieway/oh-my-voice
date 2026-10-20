@@ -33,6 +33,9 @@ services:
       TORCH_HOME: /cache/torch
       PYTHONUNBUFFERED: "1"
       HIP_VISIBLE_DEVICES: "0"
+      # MIOpen's default exhaustive per-shape find dominated every new line
+      # on gfx1200. FAST selects a solver immediately; quality is unchanged.
+      MIOPEN_FIND_MODE: "FAST"
       # Known gfx1200 workspace-fallback warnings are noise for batch runs.
       MIOPEN_LOG_LEVEL: "3"
     command:
@@ -75,6 +78,9 @@ services:
       TORCH_HOME: /cache/torch
       PYTHONUNBUFFERED: "1"
       HIP_VISIBLE_DEVICES: "0"
+      # MIOpen's default exhaustive per-shape find took ~46 s of BigVGAN and
+      # ~12 s of s2mel per new line on gfx1200. FAST avoids that find.
+      MIOPEN_FIND_MODE: "FAST"
       MIOPEN_LOG_LEVEL: "3"
       OMV_INDEXTTS_MODEL_DIR: /models/checkpoints
       # Do not let a dependency silently fall back to a CUDA/CPU wheel.
