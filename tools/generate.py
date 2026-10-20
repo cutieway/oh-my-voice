@@ -299,6 +299,9 @@ def main():
         tts = Qwen3TTSModel.from_pretrained(
             str(Path(args.qwen3_model).expanduser()), device_map=args.device,
             dtype=torch.bfloat16, attn_implementation=args.qwen3_attn)
+        if getattr(tts.model, "tts_model_type", None) != "base":
+            sys.exit("REFUSING TO RUN: Qwen3-TTS voice cloning needs a "
+                     "*-Base model (CustomVoice/VoiceDesign do not clone).")
         synthesize = synthesize_qwen3
     else:
         model_dir = Path(args.indextts_model_dir).expanduser()

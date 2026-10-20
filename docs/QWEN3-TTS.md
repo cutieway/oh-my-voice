@@ -65,6 +65,15 @@ is experimental).
 
 ## Quality
 
+`non_streaming_mode` is **not** a different model and does not disable
+cloning. It changes how text is fed to the same Base model: full text at
+once vs simulated streaming chunks. Measured with the model's speaker
+encoder, cosine similarity to the reference clip was 0.986-0.992 for all
+three modes (1.7B, 0.6B, 1.7B non-streaming), so speaker identity is
+preserved; the audible difference is prosody/pacing. Qwen's non-cloning
+models are `CustomVoice` and `VoiceDesign`; the generator refuses anything
+that is not a `*-Base` model.
+
 Local listening set: `/home/lexi/omv-quality-test/clips/15-qwen3-1.7b`,
 `16-qwen3-0.6b`, and `17-qwen3-1.7b-nonstream`, with the same three synthetic
 reference voices and lines as the IndexTTS matrix. `ratings.csv` includes all
