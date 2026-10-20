@@ -5,7 +5,7 @@ local playback, silent on cache miss. Never doubles real voice-over.
 
 AGPL-3.0. See `LICENSE.md`.
 
-## Status: P1 skeleton
+## Status: P1 plugin / P2 batch generator
 
 - ARR MSQ `AddonTalk` + `TalkSubtitle` capture, EN only.
 - `id = md5(lang:voiceId:npcId:sentence)` over sanitized text (`OhMyVoice.Common`).
@@ -35,11 +35,13 @@ OhMyVoice/            # Dalamud plugin (net10.0-windows)
   Windows/            # /omv status + settings UI
 OhMyVoice.Common/     # net10.0 shared: Sanitizer v1, VoiceId, PackTypes
 scripts/check-refs.sh # Q6 guard: no reference audio in repo
-Data/                 # pack fixtures only (small .ogg allowed)
 compose.yaml          # batch TTS services (ROCm IndexTTS + ROCm XTTS)
 tools/generate.py     # misses.jsonl -> .ogg pack generator (both backends)
 tools/tts/            # XTTS Dockerfile + pinned Python requirements
 tools/tts-indextts/   # IndexTTS-2.5 Dockerfile + model-download entrypoint
+models/               # local IndexTTS weights (gitignored, ~11 GB)
+.cache/               # local HF/XTTS caches (gitignored)
+pack/                 # local generated packs (gitignored)
 ```
 
 ## Build (Linux)

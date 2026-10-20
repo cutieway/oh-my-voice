@@ -6,7 +6,7 @@
     <Author>cutieway</Author>
     <Name>Oh My Voice</Name>
     <Punchline>Cloned voices for unvoiced FFXIV dialogue.</Punchline>
-    <Description>Pre-generated XTTS voice pack that voices unvoiced NPC dialogue and cutscenes. ARR MSQ, EN only in P1. Silent on cache miss, never doubles real voice-over.</Description>
+    <Description>Pre-generated TTS voice pack (IndexTTS-2.5 or XTTS-v2) that voices unvoiced NPC dialogue and cutscenes. ARR MSQ, EN only in P1. Silent on cache miss, never doubles real voice-over.</Description>
     <RepoUrl>https://github.com/cutieway/oh-my-voice.git</RepoUrl>
     <Tags>tts;voice;dialogue;cutscene</Tags>
   </PropertyGroup>
