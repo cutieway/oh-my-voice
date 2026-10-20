@@ -19,6 +19,7 @@ public sealed class Playback : IDisposable
 
     private readonly object gate = new();
     private WaveOut? device;
+    private RawSourceWaveStream? activePcm;
     private string? playingId;
 
     public event EventHandler<string>? LineStopped;
@@ -64,10 +65,11 @@ public sealed class Playback : IDisposable
     public void Play(string id, string oggPath)
     {
         StopInternal(locked: false);
+        RawSourceWaveStream? pcm = null;
         try
         {
             using FileStream fs = File.OpenRead(oggPath);
-            using var pcm = DecodeOggOpusToPcm(fs);
+            pcm = DecodeOggOpusToPcm(fs);
 
             var mixer = new MixingSampleProvider(WaveFormat.CreateIeeeFloatWaveFormat(48000, 2));
             var mono = new WdlResamplingSampleProvider(pcm.ToSampleProvider(), 48000);
@@ -82,6 +84,8 @@ public sealed class Playback : IDisposable
             lock (gate)
             {
                 device = player;
+                activePcm = pcm;
+                pcm = null; // ownership moved to field; disposed on stop
                 playingId = id;
             }
             player.Play();
@@ -89,6 +93,7 @@ public sealed class Playback : IDisposable
         }
         catch (Exception ex)
         {
+            pcm?.Dispose();
             log.Warning($"Playback failed for {id}: {ex.Message}");
             StopInternal(locked: false);
         }
@@ -105,6 +110,8 @@ public sealed class Playback : IDisposable
                 notify = true;
                 device?.Dispose();
                 device = null;
+                activePcm?.Dispose();
+                activePcm = null;
                 playingId = null;
             }
         }
@@ -119,29 +126,35 @@ public sealed class Playback : IDisposable
     private void StopInternal(bool locked)
     {
         WaveOut? old = null;
+        RawSourceWaveStream? oldPcm = null;
         string? oldId = null;
         if (locked)
         {
-            old = device; oldId = playingId;
-            device = null; playingId = null;
+            old = device; oldPcm = activePcm; oldId = playingId;
+            device = null; activePcm = null; playingId = null;
         }
         else
         {
             lock (gate)
             {
-                old = device; oldId = playingId;
-                device = null; playingId = null;
+                old = device; oldPcm = activePcm; oldId = playingId;
+                device = null; activePcm = null; playingId = null;
             }
         }
         if (old != null)
         {
             try { old.Stop(); } catch { }
             try { old.Dispose(); } catch { }
+            try { oldPcm?.Dispose(); } catch { }
             if (oldId != null)
             {
                 if (config.DebugLogging) log.Debug($"Stopped {oldId}");
                 LineStopped?.Invoke(this, oldId);
             }
+        }
+        else
+        {
+            try { oldPcm?.Dispose(); } catch { }
         }
     }
 
