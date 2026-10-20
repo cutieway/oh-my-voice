@@ -1,7 +1,8 @@
 # Oh My Voice
 
-Cloned voices for unvoiced FFXIV dialogue. Pre-generated XTTS voice pack,
-local playback, silent on cache miss. Never doubles real voice-over.
+Cloned voices for unvoiced FFXIV dialogue. Pre-generated TTS voice pack
+(IndexTTS-2.5 default, XTTS-v2 fallback), local playback, silent on cache
+miss. Never doubles real voice-over.
 
 AGPL-3.0. See `LICENSE.md`.
 
