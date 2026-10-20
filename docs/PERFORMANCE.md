@@ -48,6 +48,11 @@ workload as the single-line benchmarks.
    stack with FP16. All are opt-in in `tools/generate.py`; none changes the
    defaults, and none has had a listening/ASR quality gate.
 
+Qwen3-TTS is a separate backend, not an IndexTTS optimization. Its
+integration and measured warm performance (RTF ~3.3 on the same host) are
+in [QWEN3-TTS.md](QWEN3-TTS.md); it does not use the IndexTTS steps/CFG/fp16
+knobs.
+
 ## Baseline
 
 | Measurement | Audio / line | Total | RTF | Notes |

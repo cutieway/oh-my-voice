@@ -22,8 +22,14 @@ case "$BACKEND" in
     export OMV_MODELS="${OMV_MODELS:-$ROOT/models}"
     mkdir -p "$OMV_MODELS"
     ;;
+  qwen3tts)
+    SERVICE=tts-qwen
+    IMAGE=oh-my-voice/tts-qwen:0.1.0
+    export OMV_MODELS="${OMV_MODELS:-$ROOT/models}"
+    mkdir -p "$OMV_MODELS/qwen3-tts"
+    ;;
   *)
-    echo "OMV_BACKEND must be xtts or indextts2 (got: $BACKEND)" >&2
+    echo "OMV_BACKEND must be xtts, indextts2, or qwen3tts (got: $BACKEND)" >&2
     exit 2
     ;;
 esac

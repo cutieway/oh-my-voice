@@ -4,11 +4,15 @@
 Usage:
   generate.py --misses <misses.jsonl> --refs ~/oh-my-voice-refs \\
       --map voice-map.json --out <packdir> --sanitizer-pin <v1:sha> [--lang en] \\
-      [--backend xtts|indextts2]
+      [--backend xtts|indextts2|qwen3tts]
 
 Backends:
   indextts2  IndexTTS-2.5, loaded from the ROCm image (default). Pass
              --indextts-model-dir /models/checkpoints.
+  qwen3tts   Qwen3-TTS Base (0.6B/1.7B) voice clone, loaded from the
+             tts-qwen image. Pass --qwen3-model, or use the compose service.
+             A sibling <voiceId>.txt supplies the reference transcript; without
+             it, Qwen falls back to x-vector-only cloning (lower quality).
   xtts       Coqui XTTS-v2, loaded from the XTTS image. Explicit fallback;
              pass --backend xtts.
 
@@ -28,7 +32,7 @@ a mismatch means the rows and this pack would disagree on IDs. Refusing to run.
 Encoder pin (pack v1): libopus, 32 kbps, constrained VBR, 48 kHz mono.
 Duration is read back from the encoded Ogg (granule), not the source WAV.
 
-Both backends occasionally append an invented sentence to otherwise correct
+All backends occasionally append an invented sentence to otherwise correct
 speech. Each synthesized WAV is measured; implausibly long audio is retried
 with lower-temperature sampling and, after --max-attempts, left as a miss
 rather than being installed.
@@ -105,6 +109,51 @@ def override_cfm(tts, steps, cfg_rate):
     cfm.inference = inference
 
 
+_QWEN_PROMPTS = {}
+_QWEN_LANGS = {
+    "en": "English", "zh": "Chinese", "ja": "Japanese", "ko": "Korean",
+    "de": "German", "fr": "French", "ru": "Russian", "pt": "Portuguese",
+    "es": "Spanish", "it": "Italian",
+}
+
+
+def qwen3_ref_text(ref, force_x_vector):
+    if force_x_vector:
+        return None
+    sidecar = ref.with_suffix(".txt")
+    if sidecar.is_file():
+        text = sidecar.read_text(encoding="utf-8").strip()
+        if text:
+            return text
+    return None
+
+
+def synthesize_qwen3(tts, args, p, ref, wav_tmp, retry_kwargs):
+    import soundfile as sf
+
+    key = (str(ref), args.qwen3_x_vector_only)
+    prompt = _QWEN_PROMPTS.get(key)
+    if prompt is None:
+        ref_text = qwen3_ref_text(ref, args.qwen3_x_vector_only)
+        x_vector_only = ref_text is None
+        if x_vector_only and not args.qwen3_x_vector_only:
+            print(f"  qwen3: no transcript for {ref.name}; "
+                  "x-vector-only clone (lower quality)", file=sys.stderr)
+        prompt = tts.create_voice_clone_prompt(
+            ref_audio=str(ref), ref_text=ref_text,
+            x_vector_only_mode=x_vector_only)
+        _QWEN_PROMPTS[key] = prompt
+    kwargs = {
+        "text": p["sentence"],
+        "language": _QWEN_LANGS.get(args.lang.lower(), "Auto"),
+        "voice_clone_prompt": prompt,
+        "non_streaming_mode": args.qwen3_non_streaming,
+    }
+    kwargs.update(retry_kwargs)
+    wavs, sr = tts.generate_voice_clone(**kwargs)
+    sf.write(str(wav_tmp), wavs[0], sr)
+
+
 def synthesize_indextts(tts, args, p, ref, wav_tmp, retry_kwargs):
     kwargs = {
         "spk_audio_prompt": str(ref),
@@ -131,7 +180,7 @@ def main():
                     help="Runtime Sanitizer.Pin from the plugin build; generation refuses to run without it.")
     ap.add_argument("--default-male", default="generic-male-01")
     ap.add_argument("--default-female", default="generic-female-01")
-    ap.add_argument("--backend", choices=["xtts", "indextts2"], default="indextts2")
+    ap.add_argument("--backend", choices=["xtts", "indextts2", "qwen3tts"], default="indextts2")
     ap.add_argument("--xtts-model", default="tts_models/multilingual/multi-dataset/xtts_v2")
     ap.add_argument("--indextts-model-dir", default="checkpoints",
                     help="Directory containing config.yaml + gpt.pth (IndexTTS-2.5).")
@@ -161,6 +210,17 @@ def main():
                     help="Optional 8-float emotion vector; default uses reference emotion.")
     ap.add_argument("--indextts-duration-factor", type=float, default=1.0,
                     help="IndexTTS duration factor, 0.5-2.0 (default: 1.0).")
+    ap.add_argument("--qwen3-model", default="Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+                    help="Qwen3-TTS model id or local dir (default: 1.7B Base).")
+    ap.add_argument("--qwen3-attn", choices=["sdpa", "eager", "flash_attention_2"],
+                    default="sdpa",
+                    help="Qwen3 attention backend; sdpa works on ROCm.")
+    ap.add_argument("--qwen3-x-vector-only", action=argparse.BooleanOptionalAction,
+                    default=False,
+                    help="Ignore <ref>.txt and clone from the speaker embedding only.")
+    ap.add_argument("--qwen3-non-streaming", action=argparse.BooleanOptionalAction,
+                    default=False,
+                    help="Qwen non-streaming mode (default: upstream streaming simulation).")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--min-wps", type=float, default=2.2,
@@ -233,6 +293,13 @@ def main():
         from TTS.api import TTS
         tts = TTS(args.xtts_model).to(args.device)
         synthesize = synthesize_xtts
+    elif args.backend == "qwen3tts":
+        from qwen_tts import Qwen3TTSModel
+        import torch
+        tts = Qwen3TTSModel.from_pretrained(
+            str(Path(args.qwen3_model).expanduser()), device_map=args.device,
+            dtype=torch.bfloat16, attn_implementation=args.qwen3_attn)
+        synthesize = synthesize_qwen3
     else:
         model_dir = Path(args.indextts_model_dir).expanduser()
         cfg = (Path(args.indextts_cfg).expanduser() if args.indextts_cfg
