@@ -1,0 +1,45 @@
+name: Build OhMyVoice
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+
+jobs:
+  refs-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Reference-audio guard (Q6)
+        run: bash scripts/check-refs.sh
+
+  build:
+    runs-on: ubuntu-latest
+    needs: refs-guard
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Download Dalamud
+        run: |
+          curl -fL -o latest.zip https://goatcorp.github.io/dalamud-distrib/latest.zip
+          mkdir -p "$HOME/.xlcore/dalamud/Hooks/dev"
+          unzip -q latest.zip -d "$HOME/.xlcore/dalamud/Hooks/dev"
+
+      - name: Build with dotnet
+        run: dotnet build --configuration Release
+
+      - name: Store artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: OhMyVoice
+          path: OhMyVoice/bin/x64/Release/OhMyVoice/*
+          if-no-files-found: error
+          retention-days: 7

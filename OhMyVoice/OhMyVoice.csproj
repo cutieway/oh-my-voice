@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Dalamud.NET.Sdk/15.0.0">
+  <PropertyGroup>
+    <Version>0.1.0.0</Version>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <Author>cutieway</Author>
+    <Name>Oh My Voice</Name>
+    <Punchline>Cloned voices for unvoiced FFXIV dialogue.</Punchline>
+    <Description>Pre-generated XTTS voice pack that voices unvoiced NPC dialogue and cutscenes. ARR MSQ, EN only in P1. Silent on cache miss, never doubles real voice-over.</Description>
+    <RepoUrl>https://github.com/cutieway/oh-my-voice.git</RepoUrl>
+    <Tags>tts;voice;dialogue;cutscene</Tags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\OhMyVoice.Common\OhMyVoice.Common.csproj" />
+    <PackageReference Include="NAudio" Version="3.3.0" />
+    <PackageReference Include="Concentus" Version="2.2.2" />
+    <PackageReference Include="Concentus.Oggfile" Version="1.0.7" />
+  </ItemGroup>
+</Project>

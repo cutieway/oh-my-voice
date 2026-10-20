@@ -1,0 +1,16 @@
+.vs/
+obj/
+bin/
+*.user
+WATCHDOG.yml
+
+# oh-my-voice: reference-voice guard (Q6).
+# Real-actor reference audio must NEVER be committed. It lives in
+# ~/oh-my-voice-refs/ or a gitignored references/ directory.
+# CI (scripts/check-refs.sh) rejects audio blobs and any references/ path.
+references/
+*.wav
+*.ogg
+*.flac
+*.mp3
+!Data/**/*.ogg
