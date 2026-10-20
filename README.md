@@ -114,13 +114,13 @@ docker compose run --rm tts-indextts  # -> pack/voicelines/*.ogg + pack/manifest
 - Optional IndexTTS controls exist on `tools/generate.py`:
   `--indextts-emo-vector` (8 floats), `--indextts-duration-factor`, and
   `--no-indextts-bf16`. Defaults use the reference clip's emotion, bf16 on.
-- Measured on the RX 9060 XT dev host with `MIOPEN_FIND_MODE=FAST`
-  (compose default): IndexTTS-2.5 warm RTF ~2.7. A 5 s line takes ~16 s
-  once the model is loaded; the first line after load is ~40 s because
+- Measured on the RX 9060 XT dev host with the real `generic-male-01`
+  reference and `MIOPEN_FIND_MODE=FAST` (compose default): warm RTF ~4.0.
+  A 7 s line takes ~28 s; the first line after load is ~58 s because
   GPT/MIOpen still warm once. Without FAST, MIOpen's per-shape find made
-  the same line ~64 s (RTF ~13). That is ~7 GPU-hours per 1,000 8-second
-  lines instead of ~30. Batch only; do not put it in the live dialogue
-  path.
+  the same class of line ~64 s (RTF ~13). That is ~9 GPU-hours per 1,000
+  8-second lines instead of ~30. Batch only; do not put it in the live
+  dialogue path.
 
 ### Live dev loop
 
