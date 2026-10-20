@@ -30,7 +30,7 @@ OhMyVoice/            # Dalamud plugin (net10.0-windows)
   Dispatcher.cs       # ID, VO-wait, dedupe, miss logging, play
   Playback.cs         # Concentus decode + NAudio WaveOut
   PackStore.cs        # manifest + override resolution + sanitizer gate
-  MissLog.cs          # atomic JSONL worklist
+  MissLog.cs          # deduped JSONL worklist (compacted on load)
   Windows/            # /omv status + settings UI
 OhMyVoice.Common/     # net10.0 shared: Sanitizer v1, VoiceId, PackTypes
 scripts/check-refs.sh # Q6 guard: no reference audio in repo
@@ -78,6 +78,27 @@ docker compose run --rm tts          # -> pack/voicelines/*.ogg + pack/manifest.
 - Torch/torchaudio come from the base image. `tools/tts/requirements.txt`
   deliberately pins `transformers` to the 4.57 line, because `coqui-tts`
   accepts an unbounded `>=4.57` and 5.x is untested.
+
+### Live dev loop
+
+`tools/voice.sh` is the one-command loop: it stages the installed pack,
+generates every missed line, validates the manifest, and installs it into
+`~/.xlcore/pluginConfigs/OhMyVoice`. It reads the sanitizer pin from the
+installed manifest, so no env exports are needed. Then use `/omv` →
+**Reload pack**.
+
+```bash
+./tools/voice.sh
+```
+
+The old manifest is kept as `manifest.json.bak`. Existing `.ogg` files are
+preserved and skipped; only new ids are synthesized.
+
+XTTS occasionally appends an invented sentence to otherwise correct speech.
+The generator measures every new WAV and retries audio longer than
+`max(4.5s, words / 2.2 + 1s)` with lower-temperature sampling; after three
+attempts it rejects the line, leaves it in the worklist, and installs no bad
+audio.
 
 ## Playtest (Wine)
 

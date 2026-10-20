@@ -20,6 +20,11 @@ a mismatch means the rows and this pack would disagree on IDs. Refusing to run.
 
 Encoder pin (pack v1): libopus, 32 kbps, constrained VBR, 48 kHz mono.
 Duration is read back from the encoded Ogg (granule), not the source WAV.
+
+XTTS occasionally appends an invented sentence to otherwise correct speech.
+Each synthesized WAV is measured; implausibly long audio is retried with
+lower-temperature sampling and, after --max-attempts, left as a miss rather
+than being installed.
 """
 import argparse
 import hashlib
@@ -31,10 +36,12 @@ def voice_id(lang, voice, npc, sentence):
     return hashlib.md5(f"{lang}:{voice}:{npc}:{sentence}".encode("utf-8")).hexdigest()
 
 
-def ogg_duration(path):
+def media_duration(path):
     out = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
                           "format=duration", "-of", "csv=p=0", str(path)],
                          capture_output=True, text=True)
+    if out.returncode != 0 or not out.stdout.strip():
+        raise RuntimeError(f"ffprobe failed for {path}: {out.stderr.strip()}")
     return float(out.stdout.strip())
 
 
@@ -52,7 +59,18 @@ def main():
     ap.add_argument("--xtts-model", default="tts_models/multilingual/multi-dataset/xtts_v2")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--min-wps", type=float, default=2.2,
+                    help="Retry audio slower than this words/sec (default 2.2).")
+    ap.add_argument("--max-attempts", type=int, default=3,
+                    help="Synthesis attempts before leaving a line as a miss.")
+    ap.add_argument("--retry-temperature", type=float, default=0.55,
+                    help="Sampling temperature for retry attempts.")
     args = ap.parse_args()
+
+    if args.min_wps <= 0:
+        ap.error("--min-wps must be > 0")
+    if args.max_attempts < 1:
+        ap.error("--max-attempts must be >= 1")
 
     refs = Path(args.refs).expanduser()
     out = Path(args.out)
@@ -116,6 +134,7 @@ def main():
     for p in plan:
         manifest["Npcs"].setdefault(p["npc"], {"NpcId": p["npc"], "VoiceId": p["voice"]})
 
+    rejected = 0
     for p in plan:
         target = vdir / (p["id"] + ".ogg")
         if target.exists():
@@ -126,19 +145,38 @@ def main():
                 print(f"  MISSING REF {ref}; skipping {p['id']}", file=sys.stderr)
                 continue
             wav_tmp = vdir / (p["id"] + ".tmp.wav")
-            tts.tts_to_file(text=p["sentence"], speaker_wav=str(ref),
-                            language=args.lang, file_path=str(wav_tmp))
+            limit = max(4.5, len(p["sentence"].split()) / args.min_wps + 1.0)
+            for attempt in range(1, args.max_attempts + 1):
+                retry_kwargs = {} if attempt == 1 else {
+                    "temperature": args.retry_temperature, "top_p": 0.80}
+                tts.tts_to_file(text=p["sentence"], speaker_wav=str(ref),
+                                language=args.lang, file_path=str(wav_tmp),
+                                **retry_kwargs)
+                dur = media_duration(wav_tmp)
+                if dur <= limit:
+                    break
+                print(f"  retry {p['id']}: {dur:.2f}s > {limit:.2f}s "
+                      f"(attempt {attempt})", file=sys.stderr)
+            else:
+                wav_tmp.unlink(missing_ok=True)
+                print(f"  REJECT {p['id']}: {dur:.2f}s > {limit:.2f}s "
+                      f"after {args.max_attempts} attempts", file=sys.stderr)
+                rejected += 1
+                continue
             subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(wav_tmp),
                             "-c:a", "libopus", "-b:a", "32k", "-vbr", "constrained",
                             "-ar", "48000", "-ac", "1",
                             "-application", "voip", str(target)], check=True)
             wav_tmp.unlink()
-            print(f"  wrote {p['id']}")
+            print(f"  wrote {p['id']} ({dur:.2f}s)")
         manifest["Voicelines"][p["id"]] = {
             "Lang": args.lang, "VoiceId": p["voice"], "NpcId": p["npc"],
             "Sentence": p["sentence"], "Bytes": target.stat().st_size,
-            "DurationSeconds": ogg_duration(target), "Codec": "opus"}
+            "DurationSeconds": media_duration(target), "Codec": "opus"}
 
+    if rejected:
+        print(f"{rejected} line(s) rejected for implausible duration; "
+              f"they remain in the worklist.", file=sys.stderr)
     (out / "manifest.json").write_text(json.dumps(manifest, indent=1, ensure_ascii=False))
     print(f"pack: {len(manifest['Voicelines'])} lines -> {out}")
 
