@@ -51,6 +51,9 @@ public sealed class PackManifestJson
     /// <summary>Sanitizer pin, e.g. "v1:&lt;sha256(golden-vectors)&gt;".</summary>
     public string Sanitizer { get; set; } = "";
 
+    /// <summary>Generator backend that produced this pack, e.g. "indextts2".</summary>
+    public string Backend { get; set; } = "";
+
     public EncoderSettings Encoder { get; set; } = new();
     public Dictionary<string, VoiceDef> Voices { get; set; } = new();
     public Dictionary<string, NpcDef> Npcs { get; set; } = new();

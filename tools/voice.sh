@@ -72,9 +72,9 @@ echo "worklist: $ROWS rows"
 echo "backend:  $BACKEND"
 echo "staging:  $TMP"
 echo "Do not click new dialogue until generation finishes."
-if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
-  docker compose build "$SERVICE"
-fi
+# Rebuild so the image always contains the current tools/generate.py; the
+# layer cache makes an unchanged run a no-op.
+docker compose build "$SERVICE"
 docker compose run --rm "$SERVICE"
 
 [[ -s "$TMP/manifest.json" ]] || { echo "generator produced no manifest" >&2; exit 1; }

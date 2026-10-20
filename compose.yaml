@@ -39,6 +39,8 @@ services:
       # Known gfx1200 workspace-fallback warnings are noise for batch runs.
       MIOPEN_LOG_LEVEL: "3"
     command:
+      - --backend
+      - xtts
       - --misses
       - /work/misses.jsonl
       - --refs

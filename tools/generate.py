@@ -7,9 +7,10 @@ Usage:
       [--backend xtts|indextts2]
 
 Backends:
-  xtts       Coqui XTTS-v2, loaded from the XTTS image (default).
-  indextts2  IndexTTS-2.5, loaded from the ROCm image. Pass
+  indextts2  IndexTTS-2.5, loaded from the ROCm image (default). Pass
              --indextts-model-dir /models/checkpoints.
+  xtts       Coqui XTTS-v2, loaded from the XTTS image. Explicit fallback;
+             pass --backend xtts.
 
 voice-map.json: { "<NpcId or RawSpeaker>": "<voiceId>" }
   Unmapped speakers fall back to generic voices by --default-male/--default-female
@@ -96,7 +97,7 @@ def main():
                     help="Runtime Sanitizer.Pin from the plugin build; generation refuses to run without it.")
     ap.add_argument("--default-male", default="generic-male-01")
     ap.add_argument("--default-female", default="generic-female-01")
-    ap.add_argument("--backend", choices=["xtts", "indextts2"], default="xtts")
+    ap.add_argument("--backend", choices=["xtts", "indextts2"], default="indextts2")
     ap.add_argument("--xtts-model", default="tts_models/multilingual/multi-dataset/xtts_v2")
     ap.add_argument("--indextts-model-dir", default="checkpoints",
                     help="Directory containing config.yaml + gpt.pth (IndexTTS-2.5).")
@@ -192,6 +193,7 @@ def main():
     vdir = out / "voicelines"
     vdir.mkdir(parents=True, exist_ok=True)
     manifest = {"Schema": 1, "Language": args.lang, "Sanitizer": args.sanitizer_pin,
+                "Backend": args.backend,
                 "Encoder": {"Codec": "opus", "Container": "ogg", "Encoder": "libopus",
                             "BitrateKbps": 32, "SampleRateHz": 48000, "Channels": 1,
                             "Vbr": "constrained", "Application": "voip"},
