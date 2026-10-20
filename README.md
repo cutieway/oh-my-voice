@@ -118,9 +118,10 @@ docker compose run --rm tts-indextts  # -> pack/voicelines/*.ogg + pack/manifest
   reference and `MIOPEN_FIND_MODE=FAST` (compose default): warm RTF ~4.0.
   A 7 s line takes ~28 s; the first line after load is ~58 s because
   GPT/MIOpen still warm once. Without FAST, MIOpen's per-shape find made
-  the same class of line ~64 s (RTF ~13). That is ~9 GPU-hours per 1,000
+  the same class of line ~64-71 s (RTF ~13). That is ~9 GPU-hours per 1,000
   8-second lines instead of ~30. Batch only; do not put it in the live
-  dialogue path.
+  dialogue path. Full benchmark matrix, rejected candidates, and untested
+  options: [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 
 ### Live dev loop
 
