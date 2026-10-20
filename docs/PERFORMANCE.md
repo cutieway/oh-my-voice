@@ -40,6 +40,13 @@ workload as the single-line benchmarks.
    bar. Neither is in the tree.
 5. The warm budget is now roughly **GPT 6.9 s + s2mel 12.4 s + BigVGAN
    8.5 s**. s2mel is the largest stage and the next place to look.
+6. Follow-up audit (2026-10-20, same line/reference): **FP16 autocast on
+   s2mel/BigVGAN** cuts the warm line from **29.9 s to 19.1 s (1.56x)**;
+   FP16 + `torch.compile` reaches **14.3-15.1 s (≈2x)** after a 5-7 minute
+   first-line compile; fp32 compile alone reaches 26.0 s because BigVGAN
+   per-shape work dominates; fewer CFM steps / CFG 0 mainly cut s2mel and
+   stack with FP16. All are opt-in in `tools/generate.py`; none changes the
+   defaults, and none has had a listening/ASR quality gate.
 
 ## Baseline
 
@@ -69,6 +76,26 @@ comparison.
 | T6 | FAST, real reference | `/refs/generic-male-01.wav` | **57.66 s first / 27.86 s warm**; GPT 6.86 + s2mel 12.43 + BigVGAN 8.54; RTF 3.97 | Shipped |
 | T7 | FAST + 1024-frame vocoder bucket | Synthetic reference; hardcoded 256 trim | 44.49 s first / 14.01 s warm; ~11% over T5 | Rejected; not tested real |
 | T8 | Compose env validation | `docker compose config` | Both `tts` and `tts-indextts` show `MIOPEN_FIND_MODE: FAST` | Shipped |
+| T9 | FAST + FP16 autocast s2mel/BigVGAN | Real reference, 2 runs | Warm **19.13 s**, audio 7.42 s, RTF 2.58; GPT 7.87 + s2mel 6.92 + BigVGAN 4.31 | Opt-in; quality unaudited |
+| T10 | FAST + `torch.compile` s2mel DiT | Real reference, 2 runs | Warm **26.03 s**, RTF 3.58; s2mel 1.40 but BigVGAN 17.02; first line 192 s (compile) | Opt-in; limited net win |
+| T11 | FAST + 16 CFM steps | Real reference, first line | 48.58 s; s2mel **6.97** (vs 13.83 cold), BigVGAN 11.26, audio 7.34 | Opt-in |
+| T12 | FAST + 12 CFM steps | Real reference, first line | 46.61 s; s2mel **3.97**, BigVGAN 11.69, audio 7.66 | Opt-in; quality risk |
+| T13 | FAST + CFG rate 0 | Real reference, first line | 46.61 s; s2mel **7.31**, BigVGAN 8.17, audio 7.34 | Opt-in; quality risk |
+| T14 | FP16 + 12 steps + CFG 0 | Real reference, first line | **44.70 s**; GPT 15.15 (cold) + s2mel 6.46 + BigVGAN 6.73, audio 7.38 | Fastest measured; quality unaudited |
+| T15 | FP16 + `torch.compile` | Real reference, 3 runs | First line 372.7 s (compile 333 s); warm **14.34 s** (RTF 2.01; BigVGAN 0.63 cached shape) and **15.11 s** (RTF 2.13; BigVGAN 6.75 new shape) | Best warm total; quality unaudited |
+
+T14 with `torch.compile` also enabled was smoke-tested end to end: the first
+line took **425 s** (s2mel compile alone 386 s). A second run measured 333 s
+first line (compile 333 s), so expect roughly 5-7 minutes of one-time compile.
+Compile only pays in a long-lived process. Without compile, T14 is the
+recommended opt-in preset, pending a quality gate; the shipped defaults stay
+fp32/25 steps/CFG 0.7.
+
+T15 also explains the T10 BigVGAN anomaly: warm BigVGAN was 0.63 s on the
+same output shape and 6.75 s on a new shape, so the 17.02 s in T10 is
+per-shape MIOpen work plus run variance, not a persistent `torch.compile`
+side effect. Under compile+FP16, warm total is ~14-15 s (≈2x the fp32
+baseline).
 
 ### MIOpen find/search details
 
@@ -119,7 +146,11 @@ work: 57.66 s cold, 27.86 s warm.
 
 - Loader passes `use_cuda_kernel=False`, avoiding the CUDA-only BigVGAN
   kernel path on ROCm.
-- Model runs in bf16 by default; no custom CUDA-only code is required.
+- `--indextts-bf16` (default on) applies bf16 to the **GPT stage only**.
+  The live dtypes in the container are GPT bf16; semantic model, semantic
+  codec, s2mel, BigVGAN, and campplus fp32. The earlier "full model bf16"
+  statement was incorrect; T9 is the opt-in path that moves s2mel/BigVGAN
+  to fp16 autocast.
 
 ## What did not work / was rejected
 
@@ -131,8 +162,9 @@ work: 57.66 s cold, 27.86 s warm.
 | `MIOPEN_LOG_LEVEL=3` as a speed fix | Verbose warnings only | Diagnostics, not performance |
 | `use_accel` / flash-attn | Not installed | No ROCm flash-attn path in this image; adding it is a dependency project |
 | DeepSpeed | Not installed | Same; no measured ROCm benefit |
-| `torch.compile` / bf16 BigVGAN | Not tested | Not enough evidence to ship; see open questions |
-| Reducing inference steps / CFG / beams | Not tested | Quality tradeoff; would need listening/ASR gates |
+| `torch.compile` on s2mel DiT | Warm 26.03 vs 29.92 s; s2mel 13.15 -> 1.40 s; BigVGAN 9.12 -> 17.02 s on a new output shape (0.63 s cached, 6.75 s new under FP16); first line 333-386 s | fp32 compile alone only ~13%; per-shape BigVGAN work dominates. Compile+FP16 warm 14-15 s, opt-in |
+| bf16/fp16 for the whole model | Not attempted | GPT bf16 is the only stage that benefits from bf16; s2mel/BigVGAN use fp16 autocast opt-in (T9) |
+| Reducing CFM steps / CFG | 12 steps 46.61 s cold; CFG 0 46.61 s cold; combined with FP16 44.70 s | Quality tradeoff untested; opt-in flags only |
 | ONNX Runtime / TensorRT | Not tried | TensorRT is NVIDIA-only; ORT ROCm path not established here |
 
 The earlier 4.1x figure is explicitly withdrawn. The defensible summary is
@@ -143,10 +175,9 @@ estimate.
 
 Ordered by expected value:
 
-1. **s2mel is now the largest stage (12.43 s warm).** Try upstream
-   `use_torch_compile` / `torch.compile` on the DiT or the s2mel module.
-   Measure cold compile time separately; check ROCm support and output
-   quality. This is the most promising remaining single-process change.
+1. **Quality gate for the opt-in speed paths.** FP16 s2mel/BigVGAN, 12-16
+   CFM steps, and CFG 0 all need listening/ASR/speaker-similarity checks
+   against the 25-step fp32 output before any becomes a default.
 2. **Real multi-line post-FAST run.** The current evidence is two runs of
    one line. Generate the original 3-line worklist with the real reference
    and compare against 316 s / 23.17 s; also measure a varied-length pack
@@ -158,8 +189,9 @@ Ordered by expected value:
    and whether the DiT actually uses it. No evidence yet.
 5. **DeepSpeed.** Only if flash/compile options fail; dependency and
    compatibility risk is high.
-6. **bf16 BigVGAN.** The full model is bf16, but the BigVGAN/conv path was
-   not measured in bf16; check MIOpen accuracy and speed.
+6. **Separate FP16 for s2mel and BigVGAN.** T9 enabled both together; the
+   BigVGAN regression under `torch.compile` suggests per-stage gating may
+   matter. Measure s2mel-only and BigVGAN-only warm.
 7. **MIOpen variants and persistence.** `MIOPEN_FIND_MODE=HYBRID`,
    `MIOPEN_FIND_ENFORCE`, and an explicit `MIOPEN_USER_DB_PATH` were not
    compared. `HOME=/cache/home` is on the cache volume, but cross-container
@@ -167,9 +199,8 @@ Ordered by expected value:
 8. **Batching / multi-line GPT or vocoder.** Upstream is single-line in this
    path; no batching was attempted. Serial generation remains the model.
 9. **Quality evaluation.** No listening test, ASR/WER, or speaker-similarity
-   comparison was run. FAST should not change output semantics, but the
-   generated WAVs were not compared sample-by-sample against the no-FAST
-   outputs.
+   comparison was run for FAST or for T9-T14. FAST should not change output
+   semantics; the fp16/steps/CFG outputs were not compared sample-by-sample.
 10. **XTTS-v2 with FAST.** The env is applied, but XTTS was not benchmarked
     in this round.
 11. **ONNX Runtime ROCm / other runtimes.** No attempt.
@@ -234,12 +265,15 @@ The first call vs second call is the find/search signal. Run once with
 ## Decision log
 
 - Keep `MIOPEN_FIND_MODE=FAST` as the compose default.
+- Keep fp32 s2mel/BigVGAN, 25 CFM steps, and CFG 0.7 as defaults. FP16,
+  `torch.compile`, steps, and CFG overrides are opt-in generator flags until
+  a quality gate passes.
 - Do not ship the custom HIP BigVGAN kernel.
 - Do not ship `BucketedVocoder` without a real-reference/varied-length win.
 - Do not optimize against synthetic references.
 - Keep `MIOPEN_LOG_LEVEL=3` only for diagnostics; it is not a speed setting.
-- Next performance work is s2mel compile/attention, gated on real-reference
-  multi-line measurements and a quality check.
+- Next performance work is a quality gate + real multi-line measurements,
+  plus per-stage FP16 gating.
 - Batch only; no live dialogue path until warm latency and quality are both
   acceptable.
 

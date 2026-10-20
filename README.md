@@ -112,16 +112,23 @@ docker compose run --rm tts-indextts  # -> pack/voicelines/*.ogg + pack/manifest
   the 4.57 line for coqui-tts; IndexTTS uses its upstream `pyproject.toml`
   with torch/torchaudio filtered out.
 - Optional IndexTTS controls exist on `tools/generate.py`:
-  `--indextts-emo-vector` (8 floats), `--indextts-duration-factor`, and
-  `--no-indextts-bf16`. Defaults use the reference clip's emotion, bf16 on.
+  `--indextts-emo-vector` (8 floats), `--indextts-duration-factor`,
+  `--no-indextts-bf16` (GPT stage only), and the experimental speed flags
+  `--indextts-fp16` (s2mel/BigVGAN fp16 autocast), `--indextts-steps`,
+  `--indextts-cfg-rate`, and `--indextts-torch-compile`. Defaults are fp32
+  s2mel/BigVGAN, 25 steps, CFG 0.7, no compile, bf16 GPT. The speed flags
+  are not quality-gated yet; see the report. The image bakes `generate.py`
+  at build time: rebuild (`docker compose build tts-indextts`) after
+  changing the generator, or a mounted script is required.
 - Measured on the RX 9060 XT dev host with the real `generic-male-01`
-  reference and `MIOPEN_FIND_MODE=FAST` (compose default): warm RTF ~4.0.
-  A 7 s line takes ~28 s; the first line after load is ~58 s because
-  GPT/MIOpen still warm once. Without FAST, MIOpen's per-shape find made
-  the same class of line ~64-71 s (RTF ~13). That is ~9 GPU-hours per 1,000
-  8-second lines instead of ~30. Batch only; do not put it in the live
-  dialogue path. Full benchmark matrix, rejected candidates, and untested
-  options: [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
+  reference and `MIOPEN_FIND_MODE=FAST` (compose default): warm RTF ~3.8
+  (7-8 s line ~30 s; first line ~58 s). `--indextts-fp16` alone measured
+  **19.1 s warm (RTF 2.58, 1.56x)**; FP16 + 12 steps + CFG 0 measured 44.7 s
+  for a cold line. Quality of those paths is unaudited. Without FAST,
+  MIOpen's per-shape find made the same class of line ~64-71 s (RTF ~13).
+  Batch only; do not put it in the live dialogue path. Full benchmark
+  matrix, rejected candidates, and untested options:
+  [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 
 ### Live dev loop
 

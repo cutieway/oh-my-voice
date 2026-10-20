@@ -71,6 +71,40 @@ def synthesize_xtts(tts, args, p, ref, wav_tmp, retry_kwargs):
                     **retry_kwargs)
 
 
+def force_fp16_s2mel(torch):
+    """Route the s2mel/BigVGAN block through float16 autocast.
+
+    Upstream wraps that block in ``autocast(enabled=False, dtype=None)``,
+    which pins it to fp32. Only disabled autocast regions are rewritten, so
+    the GPT stage keeps its bf16 autocast.
+    """
+    real_autocast = torch.amp.autocast
+
+    def autocast(device_type, enabled=True, dtype=None, **kwargs):
+        if dtype is None and not enabled:
+            return real_autocast(device_type, enabled=True,
+                                 dtype=torch.float16, **kwargs)
+        return real_autocast(device_type, enabled=enabled, dtype=dtype,
+                             **kwargs)
+
+    torch.amp.autocast = autocast
+
+
+def override_cfm(tts, steps, cfg_rate):
+    """Override CFM diffusion steps / inference CFG rate at call time."""
+    cfm = tts.s2mel.models["cfm"]
+    original = cfm.inference
+
+    def inference(mu, x_lens, prompt, style, f0, n_timesteps,
+                  temperature=1.0, inference_cfg_rate=0.5):
+        return original(mu, x_lens, prompt, style, f0,
+                        steps if steps is not None else n_timesteps,
+                        temperature,
+                        cfg_rate if cfg_rate is not None else inference_cfg_rate)
+
+    cfm.inference = inference
+
+
 def synthesize_indextts(tts, args, p, ref, wav_tmp, retry_kwargs):
     kwargs = {
         "spk_audio_prompt": str(ref),
@@ -104,7 +138,25 @@ def main():
     ap.add_argument("--indextts-cfg", default=None,
                     help="Override config.yaml; defaults to <model-dir>/config.yaml.")
     ap.add_argument("--indextts-bf16", action=argparse.BooleanOptionalAction,
-                    default=True, help="Use bfloat16 on GPU (default: true).")
+                    default=True,
+                    help="Use bfloat16 for the GPT stage (default: true). "
+                         "s2mel/BigVGAN stay fp32 unless --indextts-fp16.")
+    ap.add_argument("--indextts-fp16", action=argparse.BooleanOptionalAction,
+                    default=False,
+                    help="Experimental: autocast s2mel/BigVGAN to float16. "
+                         "Measured 1.56x warm on RX 9060 XT; quality not "
+                         "audited (default: false).")
+    ap.add_argument("--indextts-torch-compile", action=argparse.BooleanOptionalAction,
+                    default=False,
+                    help="Experimental: torch.compile the s2mel DiT estimator. "
+                         "The first line pays compilation; later lines are "
+                         "faster (default: false).")
+    ap.add_argument("--indextts-steps", type=int, default=None,
+                    help="Override CFM diffusion steps (model default: 25). "
+                         "Fewer steps is faster, lower quality.")
+    ap.add_argument("--indextts-cfg-rate", type=float, default=None,
+                    help="Override CFM inference CFG rate (model default: 0.7). "
+                         "0 halves the DiT batch; lower quality.")
     ap.add_argument("--indextts-emo-vector", type=parse_emo_vector, default=None,
                     help="Optional 8-float emotion vector; default uses reference emotion.")
     ap.add_argument("--indextts-duration-factor", type=float, default=1.0,
@@ -125,6 +177,10 @@ def main():
         ap.error("--max-attempts must be >= 1")
     if not 0.5 <= args.indextts_duration_factor <= 2.0:
         ap.error("--indextts-duration-factor must be between 0.5 and 2.0")
+    if args.indextts_steps is not None and args.indextts_steps < 1:
+        ap.error("--indextts-steps must be >= 1")
+    if args.indextts_cfg_rate is not None and not 0.0 <= args.indextts_cfg_rate <= 1.0:
+        ap.error("--indextts-cfg-rate must be between 0.0 and 1.0")
 
     refs = Path(args.refs).expanduser()
     out = Path(args.out)
@@ -185,9 +241,20 @@ def main():
             sys.exit(f"REFUSING TO RUN: {model_dir / 'config.yaml'} missing; "
                      "download IndexTeam/IndexTTS-2.5 into that directory first.")
         from indextts.infer_v2_5 import IndexTTS2
+        import torch
         tts = IndexTTS2(cfg_path=str(cfg), model_dir=str(model_dir),
                         use_bf16=args.indextts_bf16, use_cuda_kernel=False,
+                        use_torch_compile=args.indextts_torch_compile,
                         device=args.device)
+        if args.indextts_fp16:
+            force_fp16_s2mel(torch)
+            print("indextts: fp16 autocast on (s2mel/BigVGAN)")
+        if args.indextts_steps is not None or args.indextts_cfg_rate is not None:
+            override_cfm(tts, args.indextts_steps, args.indextts_cfg_rate)
+            print(f"indextts: CFM steps={args.indextts_steps} "
+                  f"cfg_rate={args.indextts_cfg_rate}")
+        if args.indextts_torch_compile:
+            print("indextts: torch.compile on (first line pays compilation)")
         synthesize = synthesize_indextts
 
     vdir = out / "voicelines"
