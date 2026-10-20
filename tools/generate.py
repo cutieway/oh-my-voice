@@ -49,7 +49,7 @@ def main():
                     help="Runtime Sanitizer.Pin from the plugin build; generation refuses to run without it.")
     ap.add_argument("--default-male", default="generic-male-01")
     ap.add_argument("--default-female", default="generic-female-01")
-    ap.add_argument("--xtts-model", default="xtts_v2")
+    ap.add_argument("--xtts-model", default="tts_models/multilingual/multi-dataset/xtts_v2")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()

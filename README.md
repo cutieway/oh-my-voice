@@ -13,6 +13,8 @@ AGPL-3.0. See `LICENSE.md`.
 - Silent miss + deduped `misses.jsonl` worklist. No live TTS fallback in P1.
 - Real-VO suppression: ~100 ms wait before start, stop-if-started, data-driven blocklist.
 - Playback: NAudio `WaveOut` + Concentus decode. Zero native dependencies.
+- Batch generator: `docker compose` (ROCm XTTS) consumes `misses.jsonl`,
+  emits the Opus pack. Host needs no Python/ROCm toolchain.
 - Linux dev + Wine playtest. CI on `ubuntu-latest`.
 
 ## Layout
@@ -33,6 +35,9 @@ OhMyVoice/            # Dalamud plugin (net10.0-windows)
 OhMyVoice.Common/     # net10.0 shared: Sanitizer v1, VoiceId, PackTypes
 scripts/check-refs.sh # Q6 guard: no reference audio in repo
 Data/                 # pack fixtures only (small .ogg allowed)
+compose.yaml          # batch TTS service (ROCm image)
+tools/generate.py     # misses.jsonl -> .ogg pack generator
+tools/tts/            # Dockerfile + pinned Python requirements
 ```
 
 ## Build (Linux)
@@ -44,6 +49,35 @@ $DOTNET build -c Release
 ```
 
 Dalamud dev DLLs resolve from `~/.xlcore/dalamud/Hooks/dev` (`DALAMUD_HOME` overrides).
+
+## Batch generation (Docker, ROCm)
+
+The generator runs in a pinned ROCm/PyTorch image; the host needs only the
+amdgpu driver, `/dev/kfd`, `/dev/dri`, and Docker. No host Python, CUDA, or
+Nix TTS package.
+
+```bash
+mkdir -p .cache/tts pack
+export OMV_MISSES="$HOME/.xlcore/pluginConfigs/OhMyVoice/misses.jsonl"
+export OMV_REFS="$HOME/oh-my-voice-refs"
+export OMV_SANITIZER_PIN="v1:..."   # from the plugin's manifest / settings
+
+docker compose build tts
+docker compose run --rm tts          # -> pack/voicelines/*.ogg + pack/manifest.json
+```
+
+- First run downloads XTTS v2 (~1.9 GB) into `.cache/tts`. Keep that directory
+  between runs; delete it to force a re-download.
+- The pinned ROCm image is ~40 GB uncompressed (the first build pulls ~10 GB).
+  Keep ~50 GB free; `docker builder prune` reclaims build cache if needed.
+- Do not run batch generation while the game is running (VRAM contention).
+- `OMV_OUT` (default `./pack`), `OMV_LANG` (default `en`), `OMV_VOICE_MAP`
+  (default `tools/voice-map.json`), and `OMV_UID`/`OMV_GID` are overridable.
+- The base image is pinned by tag and digest in `tools/tts/Dockerfile`;
+  `docker compose build --build-arg BASE_IMAGE=...` overrides it.
+- Torch/torchaudio come from the base image. `tools/tts/requirements.txt`
+  deliberately pins `transformers` to the 4.57 line, because `coqui-tts`
+  accepts an unbounded `>=4.57` and 5.x is untested.
 
 ## Playtest (Wine)
 

@@ -1,0 +1,51 @@
+name: oh-my-voice
+
+# Batch voice-pack generation. The host only provides the amdgpu driver,
+# /dev/kfd, /dev/dri, and Docker; Python/ROCm/torch live in the image.
+#
+#   mkdir -p .cache/tts pack
+#   export OMV_MISSES="$HOME/.xlcore/pluginConfigs/OhMyVoice/misses.jsonl"
+#   export OMV_REFS="$HOME/oh-my-voice-refs"
+#   export OMV_SANITIZER_PIN="v1:..."
+#   docker compose build tts
+#   docker compose run --rm tts
+services:
+  tts:
+    build:
+      context: ./tools
+      dockerfile: tts/Dockerfile
+    image: oh-my-voice/tts:0.1.0
+    user: "${OMV_UID:-1000}:${OMV_GID:-1000}"
+    # gfx1200 compute. card1/video is not used; the render node is 0666.
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    volumes:
+      - ${OMV_MISSES:?set OMV_MISSES to the plugin misses.jsonl}:/work/misses.jsonl:ro
+      - ${OMV_VOICE_MAP:-./tools/voice-map.json}:/work/voice-map.json:ro
+      - ${OMV_REFS:?set OMV_REFS to the reference directory}:/refs:ro
+      - ${OMV_OUT:-./pack}:/out
+      - ${OMV_CACHE:-./.cache/tts}:/cache
+    environment:
+      HOME: /cache/home
+      TTS_HOME: /cache/tts
+      HF_HOME: /cache/hf
+      TORCH_HOME: /cache/torch
+      PYTHONUNBUFFERED: "1"
+      HIP_VISIBLE_DEVICES: "0"
+      # Known gfx1200 workspace-fallback warnings are noise for batch runs.
+      MIOPEN_LOG_LEVEL: "3"
+    command:
+      - --misses
+      - /work/misses.jsonl
+      - --refs
+      - /refs
+      - --map
+      - /work/voice-map.json
+      - --out
+      - /out
+      - --lang
+      - ${OMV_LANG:-en}
+      - --sanitizer-pin
+      - ${OMV_SANITIZER_PIN:?set OMV_SANITIZER_PIN from /omv Settings}
+    stop_grace_period: 10s

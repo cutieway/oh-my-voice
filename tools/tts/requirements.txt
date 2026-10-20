@@ -1,0 +1,6 @@
+# Python packages only. torch/torchaudio come from the ROCm base image and
+# must not be listed here (PyPI would install the CUDA/CPU build).
+coqui-tts==0.28.0
+# coqui-tts allows transformers>=4.57 with no upper bound; 5.x is a breaking
+# major and untested against 0.28. Keep it on the 4.57 line.
+transformers==4.57.6
