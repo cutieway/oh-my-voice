@@ -114,9 +114,10 @@ docker compose run --rm tts-indextts  # -> pack/voicelines/*.ogg + pack/manifest
 - Optional IndexTTS controls exist on `tools/generate.py`:
   `--indextts-emo-vector` (8 floats), `--indextts-duration-factor`, and
   `--no-indextts-bf16`. Defaults use the reference clip's emotion, bf16 on.
-- Measured on the RX 9060 XT dev host: IndexTTS-2.5 runs at RTF ~12-15
-  (the three-line test pack took ~4 min including model load). Batch only;
-  do not put it in the live dialogue path.
+- Measured on the RX 9060 XT dev host: IndexTTS-2.5 RTF 12-15.
+  A 5.5 s line takes ~71 s; a 10 s line ~152 s. The 3-line test pack took
+  6.2 min including ~55 s model load. That is ~30 GPU-hours per 1,000
+  8-second lines. Batch only; do not put it in the live dialogue path.
 
 ### Live dev loop
 
