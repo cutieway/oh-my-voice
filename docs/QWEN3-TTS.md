@@ -38,10 +38,10 @@ docker compose build tts-qwen
 docker compose run --rm tts-qwen
 ```
 
-First run downloads the model into `models/qwen3-tts/<model>`; HF cache
-lives at `models/hf`.
+First run downloads the model into `models/qwen3-tts/<model>`; the HF
+cache lives in the compose cache volume (`/cache/hf`), not beside the model.
 
-## Measured on RX 9060 XT (16 GB), real Piper refs, EN
+## Measured on RX 9060 XT (16 GB), Piper reference clips, EN
 
 The three lines are the listening-set lines (4-13 s). `sdpa` attention,
 bf16, no flash-attn (not installed; ROCm warns that flash/mem-efficient SDPA
@@ -51,7 +51,7 @@ is experimental).
 |---|---:|---:|---:|---:|---:|---:|---:|
 | 1.7B Base | 7.9 s | 29.3 s | 0.45 s | 15.1 s / 4.4 s | 20.6 s / 6.2 s | 40.7 s / 12.6 s | 3.24-3.42 |
 | 0.6B Base | 5.8 s | 30.4 s | 0.50 s | 13.7 s / 4.1 s | 21.0 s / 6.2 s | 44.2 s / 13.0 s | 3.35-3.41 |
-| 1.7B, non-streaming | 6.7 s | 29.0 s | 0.47-0.49 s | 17.9 s / 4.0 s | 19.8 s / 6.3 s | 43.8 s / 13.7 s | 3.12-4.47 |
+| 1.7B, non-streaming | 6.7 s | 29.0 s | 0.47-0.49 s | 17.9 s / 4.0 s | 19.8 s / 6.3 s | 43.8 s / 13.7 s | 3.12-3.20 |
 
 - End-to-end generator runs (3 lines, model load included): **143 s** for
   1.7B, **129 s** for 0.6B.

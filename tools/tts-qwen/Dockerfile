@@ -8,7 +8,7 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     HOME=/cache/home \
-    HF_HOME=/models/hf \
+    HF_HOME=/cache/hf \
     TORCH_HOME=/cache/torch \
     OMV_QWEN_MODEL_DIR=/models/qwen3-tts/Qwen3-TTS-12Hz-1.7B-Base
 
