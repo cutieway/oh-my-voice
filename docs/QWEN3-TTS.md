@@ -24,7 +24,7 @@ integration code only.
 - `tools/voice.sh`: `OMV_BACKEND=qwen3tts`.
 - `tools/generate.py`: `--backend qwen3tts`, `--qwen3-model`,
   `--qwen3-attn` (`sdpa` default), `--qwen3-x-vector-only`,
-  `--qwen3-non-streaming`.
+  `--qwen3-non-streaming`, `--qwen3-seed`.
 - Reference transcript: a sibling `<voiceId>.txt` next to
   `<voiceId>.wav`. Without it, the backend falls back to x-vector-only and
   prints a warning. The Piper references in the listening set have `.txt`
@@ -70,13 +70,18 @@ cloning. It changes how text is fed to the same Base model: full text at
 once vs simulated streaming chunks. Measured with the model's speaker
 encoder, cosine similarity to the reference clip was 0.986-0.992 for all
 three modes (1.7B, 0.6B, 1.7B non-streaming), so speaker identity is
-preserved; the audible difference is prosody/pacing. Qwen's non-cloning
-models are `CustomVoice` and `VoiceDesign`; the generator refuses anything
-that is not a `*-Base` model.
+preserved. The first 15/17 comparison was unseeded and confounded by sampling
+variance; groups 18/19 in the listening set are the controlled A/B (same
+process, same prompt, seed 1234): default 4.16/6.16/12.32 s vs non-streaming
+4.24/6.24/11.68 s. The difference is small; use those two groups to judge
+`non_streaming_mode` by ear.
+Qwen's non-cloning models are `CustomVoice` and `VoiceDesign`; the generator
+refuses anything that is not a `*-Base` model.
 
 Local listening set: `/home/lexi/omv-quality-test/clips/15-qwen3-1.7b`,
-`16-qwen3-0.6b`, and `17-qwen3-1.7b-nonstream`, with the same three synthetic
-reference voices and lines as the IndexTTS matrix. `ratings.csv` includes all
+`16-qwen3-0.6b`, `17-qwen3-1.7b-nonstream`, `18-qwen3-1.7b-seeded`, and
+`19-qwen3-1.7b-nonstream-seeded`, with the same three synthetic reference
+voices and lines as the IndexTTS matrix. `ratings.csv` includes all
 three groups. No subjective quality verdict is recorded here; listen before
 choosing.
 

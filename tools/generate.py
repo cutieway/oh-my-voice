@@ -143,6 +143,14 @@ def synthesize_qwen3(tts, args, p, ref, wav_tmp, retry_kwargs):
             ref_audio=str(ref), ref_text=ref_text,
             x_vector_only_mode=x_vector_only)
         _QWEN_PROMPTS[key] = prompt
+    if args.qwen3_seed is not None:
+        import random
+        import numpy as np
+        import torch
+        random.seed(args.qwen3_seed)
+        np.random.seed(args.qwen3_seed)
+        torch.manual_seed(args.qwen3_seed)
+        torch.cuda.manual_seed_all(args.qwen3_seed)
     kwargs = {
         "text": p["sentence"],
         "language": _QWEN_LANGS.get(args.lang.lower(), "Auto"),
@@ -221,6 +229,8 @@ def main():
     ap.add_argument("--qwen3-non-streaming", action=argparse.BooleanOptionalAction,
                     default=False,
                     help="Qwen non-streaming mode (default: upstream streaming simulation).")
+    ap.add_argument("--qwen3-seed", type=int, default=None,
+                    help="Seed Qwen sampling before each line (default: unseeded).")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--min-wps", type=float, default=2.2,
