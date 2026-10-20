@@ -54,9 +54,9 @@ public sealed class PackStore
                 log.Warning("manifest.json failed to parse; pack disabled.");
                 return;
             }
-            if (!string.IsNullOrEmpty(manifest.Sanitizer) && manifest.Sanitizer != Sanitizer.Pin)
+            if (manifest.Sanitizer != Sanitizer.Pin)
             {
-                log.Warning($"Sanitizer mismatch: pack={manifest.Sanitizer} runtime={Sanitizer.Pin}. Pack DISABLED to avoid silent misses.");
+                log.Warning($"Sanitizer mismatch (pack='{manifest.Sanitizer}' runtime='{Sanitizer.Pin}'). Pack DISABLED to avoid silent misses.");
                 return;
             }
             if (!Sanitizer.SelfCheck())

@@ -5,8 +5,9 @@ namespace OhMyVoice;
 
 /// <summary>
 /// Silent-miss JSONL worklist (Q3/Q7). Appends are deduped by final ID and
-/// flushed atomically. Records source addon + game context so the miner can
-/// replay without reverse lookup. NEVER includes reference-audio paths (Q6).
+/// written append-only (a torn final line is fine; the miner skips it).
+/// Records source addon + game context so the miner can replay without
+/// reverse lookup. NEVER includes reference-audio paths (Q6).
 /// </summary>
 public sealed class MissLog
 {
@@ -33,11 +34,7 @@ public sealed class MissLog
             try
             {
                 Directory.CreateDirectory(pluginInterface.ConfigDirectory.FullName);
-                string line = JsonSerializer.Serialize(entry);
-                string tmp = Path + ".tmp";
-                string existing = File.Exists(Path) ? File.ReadAllText(Path) : "";
-                File.WriteAllText(tmp, existing + line + "\n");
-                File.Move(tmp, Path, overwrite: true);
+                File.AppendAllText(Path, JsonSerializer.Serialize(entry) + "\n");
             }
             catch (Exception ex)
             {

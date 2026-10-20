@@ -76,6 +76,20 @@ public sealed class TalkCapture : IDisposable
         {
             if (config.DebugLogging) log.Debug($"Talk poll failed: {ex.Message}");
         }
+        try
+        {
+            // Reset the subtitle frame-guard when the addon hides, so a later
+            // byte-identical line ("...", "Hm.") re-dispatches instead of being
+            // dropped for the rest of the session. True dupes are still caught
+            // by the dispatcher's final-ID + time-window dedupe.
+            var sub = (AddonTalkSubtitle*)gameGui.GetAddonByName("TalkSubtitle").Address;
+            if (sub == null || !sub->IsVisible)
+                lastSubtitle = "";
+        }
+        catch (Exception ex)
+        {
+            if (config.DebugLogging) log.Debug($"Subtitle hide-check failed: {ex.Message}");
+        }
     }
 
     private unsafe void OnSubtitlePostDraw(AddonEvent type, AddonArgs args)
