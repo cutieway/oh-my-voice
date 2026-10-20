@@ -156,15 +156,16 @@ installed manifest, so no env exports are needed. Then use `/omv` →
 **Reload pack**.
 
 ```bash
-./tools/voice.sh                    # IndexTTS-2.5 (default)
-OMV_BACKEND=xtts ./tools/voice.sh   # XTTS-v2 fallback
+./tools/voice.sh                      # IndexTTS-2.5 (default)
+OMV_BACKEND=xtts ./tools/voice.sh     # XTTS-v2 fallback
+OMV_BACKEND=qwen3tts ./tools/voice.sh # Qwen3-TTS 1.7B Base
 ```
 
 The old manifest is kept as `manifest.json.bak`. Existing `.ogg` files are
 preserved and skipped; only new ids are synthesized. The first IndexTTS run
 builds the image and downloads the checkpoint.
 
-Both backends occasionally append an invented sentence to otherwise correct
+All backends occasionally append an invented sentence to otherwise correct
 speech. The generator measures every new WAV and retries audio longer than
 `max(4.5s, words / 2.2 + 1s)` with lower-temperature sampling; after three
 attempts it rejects the line, leaves it in the worklist, and installs no bad
