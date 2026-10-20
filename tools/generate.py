@@ -3,7 +3,13 @@
 
 Usage:
   generate.py --misses <misses.jsonl> --refs ~/oh-my-voice-refs \\
-      --map voice-map.json --out <packdir> --sanitizer-pin <v1:sha> [--lang en]
+      --map voice-map.json --out <packdir> --sanitizer-pin <v1:sha> [--lang en] \\
+      [--backend xtts|indextts2]
+
+Backends:
+  xtts       Coqui XTTS-v2, loaded from the XTTS image (default).
+  indextts2  IndexTTS-2.5, loaded from the ROCm image. Pass
+             --indextts-model-dir /models/checkpoints.
 
 voice-map.json: { "<NpcId or RawSpeaker>": "<voiceId>" }
   Unmapped speakers fall back to generic voices by --default-male/--default-female
@@ -21,10 +27,10 @@ a mismatch means the rows and this pack would disagree on IDs. Refusing to run.
 Encoder pin (pack v1): libopus, 32 kbps, constrained VBR, 48 kHz mono.
 Duration is read back from the encoded Ogg (granule), not the source WAV.
 
-XTTS occasionally appends an invented sentence to otherwise correct speech.
-Each synthesized WAV is measured; implausibly long audio is retried with
-lower-temperature sampling and, after --max-attempts, left as a miss rather
-than being installed.
+Both backends occasionally append an invented sentence to otherwise correct
+speech. Each synthesized WAV is measured; implausibly long audio is retried
+with lower-temperature sampling and, after --max-attempts, left as a miss
+rather than being installed.
 """
 import argparse
 import hashlib
@@ -32,6 +38,8 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+
+
 def voice_id(lang, voice, npc, sentence):
     return hashlib.md5(f"{lang}:{voice}:{npc}:{sentence}".encode("utf-8")).hexdigest()
 
@@ -45,6 +53,38 @@ def media_duration(path):
     return float(out.stdout.strip())
 
 
+def parse_emo_vector(raw):
+    if raw is None or raw == "":
+        return None
+    parts = [float(x) for x in raw.split(",")]
+    if len(parts) != 8:
+        raise argparse.ArgumentTypeError(
+            "must be 8 comma-separated floats: happy,angry,sad,afraid,"
+            "disgusted,melancholic,surprised,calm")
+    return parts
+
+
+def synthesize_xtts(tts, args, p, ref, wav_tmp, retry_kwargs):
+    tts.tts_to_file(text=p["sentence"], speaker_wav=str(ref),
+                    language=args.lang, file_path=str(wav_tmp),
+                    **retry_kwargs)
+
+
+def synthesize_indextts(tts, args, p, ref, wav_tmp, retry_kwargs):
+    kwargs = {
+        "spk_audio_prompt": str(ref),
+        "text": p["sentence"],
+        "output_path": str(wav_tmp),
+        "lang": args.lang.upper(),
+        "emo_vector": args.indextts_emo_vector,
+        "duration_factor": args.indextts_duration_factor,
+        "use_random": False,
+        "verbose": False,
+    }
+    kwargs.update(retry_kwargs)
+    tts.infer(**kwargs)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--misses", required=True)
@@ -56,7 +96,18 @@ def main():
                     help="Runtime Sanitizer.Pin from the plugin build; generation refuses to run without it.")
     ap.add_argument("--default-male", default="generic-male-01")
     ap.add_argument("--default-female", default="generic-female-01")
+    ap.add_argument("--backend", choices=["xtts", "indextts2"], default="xtts")
     ap.add_argument("--xtts-model", default="tts_models/multilingual/multi-dataset/xtts_v2")
+    ap.add_argument("--indextts-model-dir", default="checkpoints",
+                    help="Directory containing config.yaml + gpt.pth (IndexTTS-2.5).")
+    ap.add_argument("--indextts-cfg", default=None,
+                    help="Override config.yaml; defaults to <model-dir>/config.yaml.")
+    ap.add_argument("--indextts-bf16", action=argparse.BooleanOptionalAction,
+                    default=True, help="Use bfloat16 on GPU (default: true).")
+    ap.add_argument("--indextts-emo-vector", type=parse_emo_vector, default=None,
+                    help="Optional 8-float emotion vector; default uses reference emotion.")
+    ap.add_argument("--indextts-duration-factor", type=float, default=1.0,
+                    help="IndexTTS duration factor, 0.5-2.0 (default: 1.0).")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--min-wps", type=float, default=2.2,
@@ -71,6 +122,8 @@ def main():
         ap.error("--min-wps must be > 0")
     if args.max_attempts < 1:
         ap.error("--max-attempts must be >= 1")
+    if not 0.5 <= args.indextts_duration_factor <= 2.0:
+        ap.error("--indextts-duration-factor must be between 0.5 and 2.0")
 
     refs = Path(args.refs).expanduser()
     out = Path(args.out)
@@ -119,8 +172,22 @@ def main():
     if args.dry_run:
         return
 
-    from TTS.api import TTS
-    tts = TTS(args.xtts_model).to(args.device)
+    if args.backend == "xtts":
+        from TTS.api import TTS
+        tts = TTS(args.xtts_model).to(args.device)
+        synthesize = synthesize_xtts
+    else:
+        model_dir = Path(args.indextts_model_dir).expanduser()
+        cfg = (Path(args.indextts_cfg).expanduser() if args.indextts_cfg
+               else model_dir / "config.yaml")
+        if not (model_dir / "config.yaml").is_file():
+            sys.exit(f"REFUSING TO RUN: {model_dir / 'config.yaml'} missing; "
+                     "download IndexTeam/IndexTTS-2.5 into that directory first.")
+        from indextts.infer_v2_5 import IndexTTS2
+        tts = IndexTTS2(cfg_path=str(cfg), model_dir=str(model_dir),
+                        use_bf16=args.indextts_bf16, use_cuda_kernel=False,
+                        device=args.device)
+        synthesize = synthesize_indextts
 
     vdir = out / "voicelines"
     vdir.mkdir(parents=True, exist_ok=True)
@@ -149,9 +216,7 @@ def main():
             for attempt in range(1, args.max_attempts + 1):
                 retry_kwargs = {} if attempt == 1 else {
                     "temperature": args.retry_temperature, "top_p": 0.80}
-                tts.tts_to_file(text=p["sentence"], speaker_wav=str(ref),
-                                language=args.lang, file_path=str(wav_tmp),
-                                **retry_kwargs)
+                synthesize(tts, args, p, ref, wav_tmp, retry_kwargs)
                 dur = media_duration(wav_tmp)
                 if dur <= limit:
                     break

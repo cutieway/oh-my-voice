@@ -9,6 +9,24 @@ PLUGIN_CFG="${OMV_PLUGIN_CONFIG:-$HOME/.xlcore/pluginConfigs/OhMyVoice}"
 MISSES="${OMV_MISSES:-$PLUGIN_CFG/misses.jsonl}"
 REFS="${OMV_REFS:-$HOME/oh-my-voice-refs}"
 PIN="${OMV_SANITIZER_PIN:-}"
+BACKEND="${OMV_BACKEND:-indextts2}"
+
+case "$BACKEND" in
+  xtts)
+    SERVICE=tts
+    IMAGE=oh-my-voice/tts:0.1.0
+    ;;
+  indextts2)
+    SERVICE=tts-indextts
+    IMAGE=oh-my-voice/tts-indextts:0.1.0
+    export OMV_MODELS="${OMV_MODELS:-$ROOT/models}"
+    mkdir -p "$OMV_MODELS"
+    ;;
+  *)
+    echo "OMV_BACKEND must be xtts or indextts2 (got: $BACKEND)" >&2
+    exit 2
+    ;;
+esac
 
 command -v docker >/dev/null 2>&1 || { echo "docker not found" >&2; exit 1; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 not found" >&2; exit 1; }
@@ -51,12 +69,13 @@ export OMV_MISSES="$MISSES" OMV_REFS="$REFS" OMV_SANITIZER_PIN="$PIN"
 export OMV_OUT="$TMP" OMV_UID="$(id -u)" OMV_GID="$(id -g)"
 
 echo "worklist: $ROWS rows"
+echo "backend:  $BACKEND"
 echo "staging:  $TMP"
 echo "Do not click new dialogue until generation finishes."
-if ! docker image inspect oh-my-voice/tts:0.1.0 >/dev/null 2>&1; then
-  docker compose build tts
+if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+  docker compose build "$SERVICE"
 fi
-docker compose run --rm tts
+docker compose run --rm "$SERVICE"
 
 [[ -s "$TMP/manifest.json" ]] || { echo "generator produced no manifest" >&2; exit 1; }
 

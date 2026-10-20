@@ -16,6 +16,7 @@ references/
 !Data/**/*.ogg
 
 # TTS batch (Docker): weights/caches and generated packs stay local.
+models/
 .cache/
 pack/
 voicelines/

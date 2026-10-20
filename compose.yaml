@@ -49,3 +49,51 @@ services:
       - --sanitizer-pin
       - ${OMV_SANITIZER_PIN:?set OMV_SANITIZER_PIN from /omv Settings}
     stop_grace_period: 10s
+
+  # IndexTTS-2.5 on ROCm. The image is separate because upstream requires
+  # Python 3.10-3.11 + torch 2.8, while the XTTS image is Python 3.12.
+  #   OMV_BACKEND=indextts2 tools/voice.sh
+  tts-indextts:
+    build:
+      context: ./tools
+      dockerfile: tts-indextts/Dockerfile
+    image: oh-my-voice/tts-indextts:0.1.0
+    user: "${OMV_UID:-1000}:${OMV_GID:-1000}"
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    volumes:
+      - ${OMV_MISSES:?set OMV_MISSES to the plugin misses.jsonl}:/work/misses.jsonl:ro
+      - ${OMV_VOICE_MAP:-./tools/voice-map.json}:/work/voice-map.json:ro
+      - ${OMV_REFS:?set OMV_REFS to the reference directory}:/refs:ro
+      - ${OMV_OUT:-./pack}:/out
+      - ${OMV_CACHE:-./.cache/tts}:/cache
+      - ${OMV_MODELS:-./models}:/models
+    environment:
+      HOME: /cache/home
+      HF_HOME: /cache/hf
+      TORCH_HOME: /cache/torch
+      PYTHONUNBUFFERED: "1"
+      HIP_VISIBLE_DEVICES: "0"
+      MIOPEN_LOG_LEVEL: "3"
+      OMV_INDEXTTS_MODEL_DIR: /models/checkpoints
+      # Do not let a dependency silently fall back to a CUDA/CPU wheel.
+      PIP_NO_CACHE_DIR: "1"
+    command:
+      - --backend
+      - indextts2
+      - --indextts-model-dir
+      - /models/checkpoints
+      - --misses
+      - /work/misses.jsonl
+      - --refs
+      - /refs
+      - --map
+      - /work/voice-map.json
+      - --out
+      - /out
+      - --lang
+      - ${OMV_LANG:-en}
+      - --sanitizer-pin
+      - ${OMV_SANITIZER_PIN:?set OMV_SANITIZER_PIN from /omv Settings}
+    stop_grace_period: 30s

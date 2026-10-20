@@ -13,8 +13,9 @@ AGPL-3.0. See `LICENSE.md`.
 - Silent miss + deduped `misses.jsonl` worklist. No live TTS fallback in P1.
 - Real-VO suppression: ~100 ms wait before start, stop-if-started, data-driven blocklist.
 - Playback: NAudio `WaveOut` + Concentus decode. Zero native dependencies.
-- Batch generator: `docker compose` (ROCm XTTS) consumes `misses.jsonl`,
-  emits the Opus pack. Host needs no Python/ROCm toolchain.
+- Batch generator: `docker compose` on ROCm. IndexTTS-2.5 is the default
+  backend (zero-shot, reference clip); XTTS-v2 remains the fallback. Consumes
+  `misses.jsonl`, emits the Opus pack. Host needs no Python/ROCm toolchain.
 - Linux dev + Wine playtest. CI on `ubuntu-latest`.
 
 ## Layout
@@ -35,9 +36,10 @@ OhMyVoice/            # Dalamud plugin (net10.0-windows)
 OhMyVoice.Common/     # net10.0 shared: Sanitizer v1, VoiceId, PackTypes
 scripts/check-refs.sh # Q6 guard: no reference audio in repo
 Data/                 # pack fixtures only (small .ogg allowed)
-compose.yaml          # batch TTS service (ROCm image)
-tools/generate.py     # misses.jsonl -> .ogg pack generator
-tools/tts/            # Dockerfile + pinned Python requirements
+compose.yaml          # batch TTS services (ROCm IndexTTS + ROCm XTTS)
+tools/generate.py     # misses.jsonl -> .ogg pack generator (both backends)
+tools/tts/            # XTTS Dockerfile + pinned Python requirements
+tools/tts-indextts/   # IndexTTS-2.5 Dockerfile + model-download entrypoint
 ```
 
 ## Build (Linux)
@@ -52,32 +54,66 @@ Dalamud dev DLLs resolve from `~/.xlcore/dalamud/Hooks/dev` (`DALAMUD_HOME` over
 
 ## Batch generation (Docker, ROCm)
 
-The generator runs in a pinned ROCm/PyTorch image; the host needs only the
-amdgpu driver, `/dev/kfd`, `/dev/dri`, and Docker. No host Python, CUDA, or
-Nix TTS package.
+Two pinned ROCm/PyTorch images. IndexTTS-2.5 is the default; XTTS-v2 remains
+for A/B comparison and fallback. Both are zero-shot: 10-30 s of clean speech
+per speaker, no training. They emit the same pack format, so the plugin does
+not know which backend produced a line. The host needs only the amdgpu
+driver, `/dev/kfd`, `/dev/dri`, and Docker - no host Python, CUDA, or Nix
+TTS package.
+
+IndexTTS-2.5 upstream assumes CUDA. Its image starts from ROCm/PyTorch
+(Python 3.10, torch 2.8.0+rocm7.2.4), installs IndexTTS with `--no-deps`,
+then installs upstream's dependency list minus torch/torchaudio. That keeps
+pip from replacing the ROCm wheel with a CUDA/CPU one. The loader passes
+`use_cuda_kernel=False` to skip the CUDA-only BigVGAN kernel, and the build
+asserts `torch.version.hip` at the end.
+
+IndexTTS-2.5 code and weights are released under Bilibili's
+`LicenseRef-Bilibili-IndexTTS` / model license, not AGPL-3.0. This repository's
+AGPL-3.0 covers oh-my-voice code; review the upstream model license before
+redistributing weights or generated packs.
 
 ```bash
-mkdir -p .cache/tts pack
+mkdir -p .cache/tts models pack
 export OMV_MISSES="$HOME/.xlcore/pluginConfigs/OhMyVoice/misses.jsonl"
 export OMV_REFS="$HOME/oh-my-voice-refs"
 export OMV_SANITIZER_PIN="v1:..."   # from the plugin's manifest / settings
 
-docker compose build tts
-docker compose run --rm tts          # -> pack/voicelines/*.ogg + pack/manifest.json
+docker compose build tts-indextts
+docker compose run --rm tts-indextts  # -> pack/voicelines/*.ogg + pack/manifest.json
+
+# XTTS-v2 fallback:
+# docker compose build tts
+# docker compose run --rm tts
 ```
 
-- First run downloads XTTS v2 (~1.9 GB) into `.cache/tts`. Keep that directory
-  between runs; delete it to force a re-download.
-- The pinned ROCm image is ~40 GB uncompressed (the first build pulls ~10 GB).
-  Keep ~50 GB free; `docker builder prune` reclaims build cache if needed.
+- IndexTTS first run downloads `IndexTeam/IndexTTS-2.5` (weights plus the
+  w2v-BERT/BigVGAN auxiliary models; ~11 GB) into
+  `models/checkpoints`. The auxiliary Hugging Face cache goes to
+  `.cache/tts`. Keep both between runs.
+- XTTS first run downloads XTTS v2 (~1.9 GB) into `.cache/tts`. The XTTS
+  image is ~40 GB uncompressed; the IndexTTS image is ~42 GB. Keep ~50 GB
+  free during the first build; `docker builder prune` reclaims build cache
+  if needed.
 - Do not run batch generation while the game is running (VRAM contention).
 - `OMV_OUT` (default `./pack`), `OMV_LANG` (default `en`), `OMV_VOICE_MAP`
-  (default `tools/voice-map.json`), and `OMV_UID`/`OMV_GID` are overridable.
-- The base image is pinned by tag and digest in `tools/tts/Dockerfile`;
-  `docker compose build --build-arg BASE_IMAGE=...` overrides it.
-- Torch/torchaudio come from the base image. `tools/tts/requirements.txt`
-  deliberately pins `transformers` to the 4.57 line, because `coqui-tts`
-  accepts an unbounded `>=4.57` and 5.x is untested.
+  (default `tools/voice-map.json`), `OMV_UID`/`OMV_GID`, and
+  `OMV_MODELS` (default `./models`) are overridable.
+- `models/` is gitignored and mounted at `/models`; keep weights out of git.
+  `models/checkpoints` holds the IndexTTS main and auxiliary weights.
+- The base images are pinned by tag and digest in `tools/tts/Dockerfile` and
+  `tools/tts-indextts/Dockerfile`; `docker compose build --build-arg
+  BASE_IMAGE=...` overrides them.
+- Torch/torchaudio come from the ROCm base image. Never add a CUDA torch
+  wheel. `tools/tts/requirements.txt` deliberately pins `transformers` to
+  the 4.57 line for coqui-tts; IndexTTS uses its upstream `pyproject.toml`
+  with torch/torchaudio filtered out.
+- Optional IndexTTS controls exist on `tools/generate.py`:
+  `--indextts-emo-vector` (8 floats), `--indextts-duration-factor`, and
+  `--no-indextts-bf16`. Defaults use the reference clip's emotion, bf16 on.
+- Measured on the RX 9060 XT dev host: IndexTTS-2.5 runs at RTF ~12-15
+  (the three-line test pack took ~4 min including model load). Batch only;
+  do not put it in the live dialogue path.
 
 ### Live dev loop
 
@@ -88,14 +124,16 @@ installed manifest, so no env exports are needed. Then use `/omv` →
 **Reload pack**.
 
 ```bash
-./tools/voice.sh
+./tools/voice.sh                    # IndexTTS-2.5 (default)
+OMV_BACKEND=xtts ./tools/voice.sh   # XTTS-v2 fallback
 ```
 
 The old manifest is kept as `manifest.json.bak`. Existing `.ogg` files are
-preserved and skipped; only new ids are synthesized.
+preserved and skipped; only new ids are synthesized. The first IndexTTS run
+builds the image and downloads the checkpoint.
 
-XTTS occasionally appends an invented sentence to otherwise correct speech.
-The generator measures every new WAV and retries audio longer than
+Both backends occasionally append an invented sentence to otherwise correct
+speech. The generator measures every new WAV and retries audio longer than
 `max(4.5s, words / 2.2 + 1s)` with lower-temperature sampling; after three
 attempts it rejects the line, leaves it in the worklist, and installs no bad
 audio.
