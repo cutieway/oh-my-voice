@@ -1,0 +1,4 @@
+{
+  "_comment": "NpcId (or RawSpeaker fallback) -> voiceId. voiceId must exist as <refs>/<voiceId>.wav. Unmapped speakers use --default-male/--default-female.",
+  "Storm Mage": "generic-male-01"
+}

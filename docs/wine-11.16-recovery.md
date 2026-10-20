@@ -20,10 +20,12 @@ When `nixpkgs-unstable` moved past 11.16, the old closure was collected.
   plus the `symlinkJoin` wrapper from `default.nix:70-85`
 - Result: `/nix/store/79fjvrvj02rji96q7b1ag93h7y0pv6wk-wine-staging-11.16-xivlauncher/bin`
   (`wine-11.16 (Staging)`, verified)
-- GC roots: `~/.local/share/nix-gcroots/wine-11.16-{raw,wrapped,store}`
-- `~/.xlcore/launcher.ini` `WineBinaryPath` updated to the recovered path
-
-## Prevention
-
-Add a `nix-store --add-root` GC root (done above) or pin the wrapper output
-in nixway so future `update-system` runs don't collect the working Wine.
+- GC roots (verified via `nix-store --gc --print-roots` +
+- `/nix/var/nix/gcroots/auto/`): the `--out-link`
+- `~/.local/share/wine-11.16-wrapped` and `~/.local/share/wine-11.16-raw`
+- out-links, plus `~/.local/share/nix-gcroots/wine-11.16-store`
+- (`nix-store --add-root`). The plain `ln -s` copies under
+- `~/.local/share/nix-gcroots/` alone would NOT root anything.
+- `~/.xlcore/launcher.ini` `WineBinaryPath` points at the rooted out-link
+- `~/.local/share/wine-11.16-wrapped/bin` (not the raw store path), so the
+- working path survives GC and future cleanups.

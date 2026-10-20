@@ -96,12 +96,14 @@ public sealed class Dispatcher
         string? path = pack.Resolve(id);
         if (path == null)
         {
-            // (Q3) Silent miss + worklist.
+            // (Q3) Silent miss + worklist. Sentence/Speaker are the
+            // plugin-sanitized forms — the generator uses them verbatim.
             misses.Record(new MissEntry
             {
                 Lang = Lang,
                 VoiceId = voiceId,
                 NpcId = npcId,
+                Speaker = speaker,
                 Sentence = sentence,
                 RawSpeaker = rawSpeaker,
                 RawSentence = rawSentence,

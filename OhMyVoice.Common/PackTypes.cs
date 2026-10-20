@@ -67,6 +67,9 @@ public sealed class MissEntry
     public string Lang { get; set; } = "en";
     public string VoiceId { get; set; } = "Unknown";
     public string NpcId { get; set; } = "Unknown";
+    /// <summary>Cleaned speaker at capture time. NpcId becomes the mapped id
+    /// once a manifest is loaded, so the cleaned name is kept separately.</summary>
+    public string Speaker { get; set; } = "";
     public string Sentence { get; set; } = "";
     public string RawSpeaker { get; set; } = "";
     public string RawSentence { get; set; } = "";
