@@ -3,6 +3,7 @@ obj/
 bin/
 *.user
 WATCHDOG.yml
+docs/advisor.md
 
 # oh-my-voice: reference-voice guard (Q6).
 # Real-actor reference audio must NEVER be committed. It lives in
