@@ -238,7 +238,13 @@ dotnet run --project tools/xivdata -- export \
 The output uses the plugin miss-event shape (`Result="miss"`, `Id`,
 `VoiceId`, `NpcId`, `Speaker`, `Sentence`, `RawSpeaker`, `RawSentence`,
 `Source`, `Npc`, `Utc`). `Id` is exactly `dialogs.voice_line_id`, and
-`Speaker` is `npc_key`. The existing generator consumes it directly:
+`Speaker` is `npc_key`.
+
+**Do not install a speaker-scoped worklist over an existing pack.** The
+generator writes a manifest containing only the rows it planned, so feeding
+this JSONL to `tools/voice.sh` would replace the pack and drop every other
+speaker. Generate to a separate `--out` for tests, or add merge support
+first. The existing generator consumes it directly:
 
 ```bash
 python3 tools/qwen/generate.py \

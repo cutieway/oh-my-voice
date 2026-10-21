@@ -239,6 +239,12 @@ same voice/token and plans the same ids. Manifest `Npcs` is keyed by the
 cleaned speaker name (`Speaker`), with `NpcId` set to the numeric id used in
 the hash.
 
+**Do not install a speaker-scoped export over an existing pack.** The
+generator's manifest contains only the rows it planned, so using
+`tools/voice.sh` with a one-character worklist would drop every other
+speaker. Generate to a separate `--out` for tests until merge support
+exists.
+
 ### Live dev loop
 
 `tools/voice.sh` is the one-command loop: it stages the installed pack,

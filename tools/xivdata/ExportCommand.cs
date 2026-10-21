@@ -181,6 +181,7 @@ internal static class ExportCommand
         Console.WriteLine($"exported {exported} queued lines -> {outPath}");
         foreach (var (source, count) in bySource.OrderBy(kv => kv.Key, StringComparer.Ordinal))
             Console.WriteLine($"  {source,-25} {count}");
+        Console.WriteLine("note: speaker-scoped worklist; generate to a separate --out, do not install over a multi-speaker pack.");
         return 0;
     }
 
