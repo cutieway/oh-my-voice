@@ -438,6 +438,7 @@ internal static class Program
     {
         static string Csv(string value) => $"\"{value.Replace("\"", "\"\"")}\"";
         using var writer = new StreamWriter(path, false, new UTF8Encoding(false));
+        writer.NewLine = "\n";
         writer.WriteLine("sheet,row_id,text_key,audio_base,speaker_token,npc_id,npc_name,race_id,gender,scd_path,scd_bytes,text");
         foreach (var r in rows)
         {
