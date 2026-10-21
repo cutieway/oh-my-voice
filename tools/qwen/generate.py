@@ -223,7 +223,15 @@ _QWEN_LANGS = {
 }
 
 
-def synthesize_qwen3(tts, args, p, xvector, wav_tmp, retry_kwargs):
+def auto_max_new_tokens(sentence, min_wps):
+    words = max(1, len(sentence.split()))
+    seconds = max(4.5, words / min_wps + 1.0)
+    # 12 tokens/s codec, 25% headroom, plus a small floor.
+    return max(64, min(2048, int(seconds * 12 * 1.25) + 32))
+
+
+def synthesize_qwen3(tts, args, p, xvector, wav_tmp, retry_kwargs,
+                     max_new_tokens):
     import numpy as np
     import soundfile as sf
     import torch
@@ -254,6 +262,10 @@ def synthesize_qwen3(tts, args, p, xvector, wav_tmp, retry_kwargs):
         "language": _QWEN_LANGS.get(args.lang.lower(), "Auto"),
         "voice_clone_prompt": prompt,
         "non_streaming_mode": args.qwen3_non_streaming,
+        # The upstream default is 2048 tokens. A single stuck/looping line
+        # can then spend many minutes decoding. Cap by the same duration
+        # budget the retry loop already uses (Qwen3-TTS codec is 12 Hz).
+        "max_new_tokens": max_new_tokens,
     }
     kwargs.update(retry_kwargs)
     wavs, sr = tts.generate_voice_clone(**kwargs)
@@ -291,12 +303,17 @@ def main():
                     help="Synthesis attempts before leaving a line as a miss.")
     ap.add_argument("--retry-temperature", type=float, default=0.55,
                     help="Sampling temperature for retry attempts.")
+    ap.add_argument("--max-new-tokens", type=int, default=0,
+                    help="Hard cap per attempt; 0 derives a cap from the sentence's "
+                         "duration limit (12 Hz codec).")
     args = ap.parse_args()
 
     if args.min_wps <= 0:
         ap.error("--min-wps must be > 0")
     if args.max_attempts < 1:
         ap.error("--max-attempts must be >= 1")
+    if args.max_new_tokens < 0:
+        ap.error("--max-new-tokens must be >= 0")
 
     xvectors = Path(args.xvectors).expanduser()
     if not xvectors.is_dir():
@@ -493,11 +510,14 @@ def main():
             continue
         wav_tmp = vdir / (p["id"] + ".tmp.wav")
         limit = max(4.5, len(p["sentence"].split()) / args.min_wps + 1.0)
+        max_new_tokens = (args.max_new_tokens
+                          or auto_max_new_tokens(p["sentence"], args.min_wps))
         try:
             for attempt in range(1, args.max_attempts + 1):
                 retry_kwargs = {} if attempt == 1 else {
                     "temperature": args.retry_temperature, "top_p": RETRY_TOP_P}
-                synthesize(tts, args, p, xvector, wav_tmp, retry_kwargs)
+                synthesize(tts, args, p, xvector, wav_tmp, retry_kwargs,
+                           max_new_tokens)
                 dur = media_duration(wav_tmp)
                 if dur <= limit:
                     break

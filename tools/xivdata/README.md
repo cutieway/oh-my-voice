@@ -247,11 +247,15 @@ speaker. Generate to a separate `--out` for tests, or add merge support
 first. The existing generator consumes it directly:
 
 ```bash
+# Docker bind mounts do not create a writable directory for a non-root
+# OMV_UID; make the test pack directory as your host user first.
+mkdir -p data/out/alphinaud-test
+
 python3 tools/qwen/generate.py \
   --events data/worklists/alphinaud.jsonl \
   --xvectors data/xvectors \
   --map tools/voice-map.json \
-  --out data/out \
+  --out data/out/alphinaud-test \
   --sanitizer-pin "<v1:... from /omv>" \
   --dry-run
 ```

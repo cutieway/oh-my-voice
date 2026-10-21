@@ -228,10 +228,14 @@ dotnet run --project tools/xivdata -- export \
   --db data/dialogue.db --speaker alphinaud \
   --out data/worklists/alphinaud.jsonl
 
+# create the output directory as your host user first; Docker will not
+# create a writable bind-mount target for a non-root OMV_UID.
+mkdir -p data/out/alphinaud-test
+
 python3 tools/qwen/generate.py \
   --events data/worklists/alphinaud.jsonl \
   --xvectors data/xvectors --map tools/voice-map.json \
-  --out data/out --sanitizer-pin "v1:..." --dry-run
+  --out data/out/alphinaud-test --sanitizer-pin "v1:..." --dry-run
 ```
 
 The exported `Id` is `voice_line_id` from the DB; the generator resolves the

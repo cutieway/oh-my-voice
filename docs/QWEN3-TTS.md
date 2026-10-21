@@ -79,6 +79,16 @@ ffprobe, then atomically renamed to `<id>.ogg`; only after that rename is the
 line recorded in the manifest. A crash during encoding leaves only a temp file,
 which the next run removes before encoding any line.
 
+`--max-new-tokens` defaults to 0, which derives a per-line cap from the same
+duration budget used for the retry check (Qwen3-TTS is a 12 Hz codec). Passing
+a positive value overrides it. This matters for unattended batches: the
+upstream default is 2048 tokens, and a single looping line can otherwise spend
+many minutes decoding. A 20-line Sphene pilot hit one short line that took
+655 s on an uncapped retry; the capped run completed 20/20 in 9m12s with no
+rejections. The output pack directory must exist and be writable by
+`OMV_UID` before Docker starts; a bind mount created by root leaves
+`/out/voicelines` unwritable.
+
 Prefer a local `--qwen3-model` directory: `model_revision` hashes every weight
 file (ignoring `README.md`/`.gitattributes`), so the revision is exact. A repo
 id resolves through the HF cache after `from_pretrained`; if it stays
