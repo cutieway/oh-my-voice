@@ -74,6 +74,11 @@ line. Manifests written before fingerprints cause one full rebuild.
 kept if its audio already exists (it cannot be validated or rebuilt), and is
 skipped if it has no audio.
 
+Each Ogg is encoded to `<id>.tmp.ogg` in the pack directory, validated with
+ffprobe, then atomically renamed to `<id>.ogg`; only after that rename is the
+line recorded in the manifest. A crash during encoding leaves only a temp file,
+which the next run removes before encoding any line.
+
 Prefer a local `--qwen3-model` directory: `model_revision` hashes every weight
 file (ignoring `README.md`/`.gitattributes`), so the revision is exact. A repo
 id resolves through the HF cache after `from_pretrained`; if it stays

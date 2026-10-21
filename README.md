@@ -139,7 +139,9 @@ docker compose run --rm tts-qwen    # -> data/out/voicelines/*.ogg + manifest.js
   before fingerprints cause a one-time rebuild. Use
   `./tools/voice.sh --force` (or `--force` directly) to regenerate every
   planned line. `tools/voice.sh` stages the installed manifest so profiles
-  survive the dev loop.
+  survive the dev loop. Ogg writes are crash-safe: each line is encoded to a
+  sibling `.tmp.ogg`, ffprobe-validated, then atomically renamed; orphaned
+  temp files are removed before any line is encoded.
 - Prefer a local `--qwen3-model` directory for the cache key: its weight
   files are hashed, so the recorded revision is exact. A repo id resolves to
   the Hugging Face cache commit after download; if it remains unresolved the

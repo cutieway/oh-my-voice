@@ -33,6 +33,9 @@ a mismatch means the rows and this pack would disagree on IDs. Refusing to run.
 
 Encoder pin (pack v1): libopus, 32 kbps, constrained VBR, 48 kHz mono.
 Duration is read back from the encoded Ogg (granule), not the source WAV.
+Ogg writes are crash-safe: ffmpeg targets <id>.tmp.ogg in the pack directory,
+ffprobe validates it, then it is atomically renamed to <id>.ogg. Orphaned
+.tmp.wav/.tmp.ogg files are removed before any line is encoded.
 
 Existing .ogg files are reused only when the manifest's per-line
 GenerationFingerprint still matches the exact model revision, generation
@@ -174,6 +177,33 @@ def line_entry(p, target, generation_fp):
         "DurationSeconds": media_duration(target), "Codec": "opus",
         "GenerationFingerprint": generation_fp,
     }
+
+
+def remove_orphan_temps(vdir):
+    """Delete temporary WAV/Ogg files left by an interrupted earlier run."""
+    removed = 0
+    for pattern in ("*.tmp.wav", "*.tmp.ogg"):
+        for path in vdir.glob(pattern):
+            path.unlink(missing_ok=True)
+            removed += 1
+    return removed
+
+
+def encode_ogg(wav_path, target):
+    """Encode to a sibling temp file, validate it, then atomically publish it."""
+    tmp = target.with_name(target.stem + ".tmp.ogg")
+    try:
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(wav_path),
+                        "-c:a", "libopus", "-b:a", "32k", "-vbr", "constrained",
+                        "-ar", "48000", "-ac", "1",
+                        "-application", "voip", str(tmp)], check=True)
+        duration = media_duration(tmp)
+        if not duration > 0:
+            raise RuntimeError(f"ffprobe reported invalid duration for {tmp}")
+        tmp.replace(target)
+        return duration
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def media_duration(path):
@@ -369,6 +399,11 @@ def main():
         return
 
     previous_lines = load_previous_lines(out)
+    vdir = out / "voicelines"
+    vdir.mkdir(parents=True, exist_ok=True)
+    orphans = remove_orphan_temps(vdir)
+    if orphans:
+        print(f"removed {orphans} orphaned temp file(s)", file=sys.stderr)
     model_id = args.qwen3_model
     if plan:
         revision = model_revision(model_id)
@@ -402,8 +437,6 @@ def main():
                   file=sys.stderr)
     synthesize = synthesize_qwen3
 
-    vdir = out / "voicelines"
-    vdir.mkdir(parents=True, exist_ok=True)
     manifest = {"Schema": 1, "Language": args.lang, "Sanitizer": args.sanitizer_pin,
                 "Backend": "qwen3tts",
                 "Model": {"Id": model_id, "Revision": revision},
@@ -456,27 +489,25 @@ def main():
             continue
         wav_tmp = vdir / (p["id"] + ".tmp.wav")
         limit = max(4.5, len(p["sentence"].split()) / args.min_wps + 1.0)
-        for attempt in range(1, args.max_attempts + 1):
-            retry_kwargs = {} if attempt == 1 else {
-                "temperature": args.retry_temperature, "top_p": RETRY_TOP_P}
-            synthesize(tts, args, p, xvector, wav_tmp, retry_kwargs)
-            dur = media_duration(wav_tmp)
-            if dur <= limit:
-                break
-            print(f"  retry {p['id']}: {dur:.2f}s > {limit:.2f}s "
-                  f"(attempt {attempt})", file=sys.stderr)
-        else:
+        try:
+            for attempt in range(1, args.max_attempts + 1):
+                retry_kwargs = {} if attempt == 1 else {
+                    "temperature": args.retry_temperature, "top_p": RETRY_TOP_P}
+                synthesize(tts, args, p, xvector, wav_tmp, retry_kwargs)
+                dur = media_duration(wav_tmp)
+                if dur <= limit:
+                    break
+                print(f"  retry {p['id']}: {dur:.2f}s > {limit:.2f}s "
+                      f"(attempt {attempt})", file=sys.stderr)
+            else:
+                print(f"  REJECT {p['id']}: {dur:.2f}s > {limit:.2f}s "
+                      f"after {args.max_attempts} attempts", file=sys.stderr)
+                rejected += 1
+                continue
+            encoded_duration = encode_ogg(wav_tmp, target)
+        finally:
             wav_tmp.unlink(missing_ok=True)
-            print(f"  REJECT {p['id']}: {dur:.2f}s > {limit:.2f}s "
-                  f"after {args.max_attempts} attempts", file=sys.stderr)
-            rejected += 1
-            continue
-        subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(wav_tmp),
-                        "-c:a", "libopus", "-b:a", "32k", "-vbr", "constrained",
-                        "-ar", "48000", "-ac", "1",
-                        "-application", "voip", str(target)], check=True)
-        wav_tmp.unlink()
-        print(f"  wrote {p['id']} ({dur:.2f}s)")
+        print(f"  wrote {p['id']} ({encoded_duration:.2f}s)")
         manifest["Voicelines"][p["id"]] = line_entry(
             p, target, generation_fp)
 
