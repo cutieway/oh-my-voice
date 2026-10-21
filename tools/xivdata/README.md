@@ -42,15 +42,15 @@ Requires .NET 10. On this machine both are in the NixOS home packages
 ## Run
 
 ```bash
-# scan only; writes dialogue.csv
-dotnet run -- --out ./xivdata-out
+# from the repo root; output stays under the gitignored data/ root
+dotnet run --project tools/xivdata -- --out data/xivdata/scan
 
 # one character, extract SCD + WAV
-dotnet run -- --out ./sphene --speaker sphene --extract \
-  --vgmstream "$(command -v vgmstream-cli)"
+dotnet run --project tools/xivdata -- --out data/xivdata/sphene \
+  --speaker sphene --extract --vgmstream "$(command -v vgmstream-cli)"
 
 # pilot
-dotnet run -- --out ./pilot --limit 20 --extract
+dotnet run --project tools/xivdata -- --out data/xivdata/pilot --limit 20 --extract
 ```
 
 `--sqpack` defaults to `~/Public/xlcore/ffxiv/game/sqpack`.

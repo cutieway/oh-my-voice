@@ -1,20 +1,19 @@
 name: oh-my-voice
 
-# Batch voice-pack generation. The host only provides the amdgpu driver,
-# /dev/kfd, /dev/dri, and Docker; Python/ROCm/torch live in the image.
+# Qwen3-TTS Base batch voice-pack generation. The host only provides the
+# amdgpu driver, /dev/kfd, /dev/dri, and Docker; Python/ROCm/torch live in the
+# image. Runtime data is consolidated under ./data (gitignored).
 #
-#   mkdir -p .cache/tts pack
+#   mkdir -p data/{models,cache,refs,out}
 #   export OMV_MISSES="$HOME/.xlcore/pluginConfigs/OhMyVoice/misses.jsonl"
-#   export OMV_REFS="$HOME/oh-my-voice-refs"
 #   export OMV_SANITIZER_PIN="v1:..."
-#   docker compose build tts
-#   docker compose run --rm tts
+#   docker compose build tts-qwen
+#   docker compose run --rm tts-qwen
 services:
-  tts:
+  tts-qwen:
     build:
-      context: ./tools
-      dockerfile: tts/Dockerfile
-    image: oh-my-voice/tts:0.1.0
+      context: ./tools/qwen
+    image: oh-my-voice/tts-qwen:0.1.0
     user: "${OMV_UID:-1000}:${OMV_GID:-1000}"
     # gfx1200 compute. card1/video is not used; the render node is 0666.
     devices:
@@ -23,75 +22,19 @@ services:
     volumes:
       - ${OMV_MISSES:?set OMV_MISSES to the plugin misses.jsonl}:/work/misses.jsonl:ro
       - ${OMV_VOICE_MAP:-./tools/voice-map.json}:/work/voice-map.json:ro
-      - ${OMV_REFS:?set OMV_REFS to the reference directory}:/refs:ro
-      - ${OMV_OUT:-./pack}:/out
-      - ${OMV_CACHE:-./.cache/tts}:/cache
-    environment:
-      HOME: /cache/home
-      TTS_HOME: /cache/tts
-      HF_HOME: /cache/hf
-      TORCH_HOME: /cache/torch
-      PYTHONUNBUFFERED: "1"
-      HIP_VISIBLE_DEVICES: "0"
-      # MIOpen's default exhaustive per-shape find dominated every new line
-      # on gfx1200. FAST selects a solver immediately; quality is unchanged.
-      MIOPEN_FIND_MODE: "FAST"
-      # Known gfx1200 workspace-fallback warnings are noise for batch runs.
-      MIOPEN_LOG_LEVEL: "3"
-    command:
-      - --backend
-      - xtts
-      - --misses
-      - /work/misses.jsonl
-      - --refs
-      - /refs
-      - --map
-      - /work/voice-map.json
-      - --out
-      - /out
-      - --lang
-      - ${OMV_LANG:-en}
-      - --sanitizer-pin
-      - ${OMV_SANITIZER_PIN:?set OMV_SANITIZER_PIN from /omv Settings}
-    stop_grace_period: 10s
-
-  # IndexTTS-2.5 on ROCm. The image is separate because upstream requires
-  # Python 3.10-3.11 + torch 2.8, while the XTTS image is Python 3.12.
-  #   OMV_BACKEND=indextts2 tools/voice.sh
-  tts-indextts:
-    build:
-      context: ./tools
-      dockerfile: tts-indextts/Dockerfile
-    image: oh-my-voice/tts-indextts:0.1.0
-    user: "${OMV_UID:-1000}:${OMV_GID:-1000}"
-    devices:
-      - /dev/kfd
-      - /dev/dri
-    volumes:
-      - ${OMV_MISSES:?set OMV_MISSES to the plugin misses.jsonl}:/work/misses.jsonl:ro
-      - ${OMV_VOICE_MAP:-./tools/voice-map.json}:/work/voice-map.json:ro
-      - ${OMV_REFS:?set OMV_REFS to the reference directory}:/refs:ro
-      - ${OMV_OUT:-./pack}:/out
-      - ${OMV_CACHE:-./.cache/tts}:/cache
-      - ${OMV_MODELS:-./models}:/models
+      - ${OMV_REFS:-./data/refs}:/refs:ro
+      - ${OMV_OUT:-./data/out}:/out
+      - ${OMV_CACHE:-./data/cache}:/cache
+      - ${OMV_MODELS:-./data/models}:/models
     environment:
       HOME: /cache/home
       HF_HOME: /cache/hf
       TORCH_HOME: /cache/torch
       PYTHONUNBUFFERED: "1"
       HIP_VISIBLE_DEVICES: "0"
-      # MIOpen's default exhaustive per-shape find took ~46 s of BigVGAN and
-      # ~12 s of s2mel per new line on gfx1200. FAST avoids that find.
-      MIOPEN_FIND_MODE: "FAST"
-      MIOPEN_LOG_LEVEL: "3"
-      OMV_INDEXTTS_MODEL_DIR: /models/checkpoints
-      # Do not let a dependency silently fall back to a CUDA/CPU wheel.
+      OMV_QWEN_MODEL_DIR: /models/qwen3-tts/Qwen3-TTS-12Hz-1.7B-Base
       PIP_NO_CACHE_DIR: "1"
     command:
-      - --backend
-      - indextts2
-      - --indextts-model-dir
-      - /models/checkpoints
       - --misses
       - /work/misses.jsonl
       - --refs
@@ -102,50 +45,8 @@ services:
       - /out
       - --lang
       - ${OMV_LANG:-en}
-      - --sanitizer-pin
-      - ${OMV_SANITIZER_PIN:?set OMV_SANITIZER_PIN from /omv Settings}
-    stop_grace_period: 30s
-
-  # Qwen3-TTS Base (voice clone) on ROCm. Separate image because qwen-tts
-  # pins transformers 4.57.3 and has its own runtime deps.
-  #   OMV_BACKEND=qwen3tts tools/voice.sh
-  tts-qwen:
-    build:
-      context: ./tools
-      dockerfile: tts-qwen/Dockerfile
-    image: oh-my-voice/tts-qwen:0.1.0
-    user: "${OMV_UID:-1000}:${OMV_GID:-1000}"
-    devices:
-      - /dev/kfd
-      - /dev/dri
-    volumes:
-      - ${OMV_MISSES:?set OMV_MISSES to the plugin misses.jsonl}:/work/misses.jsonl:ro
-      - ${OMV_VOICE_MAP:-./tools/voice-map.json}:/work/voice-map.json:ro
-      - ${OMV_REFS:?set OMV_REFS to the reference directory}:/refs:ro
-      - ${OMV_OUT:-./pack}:/out
-      - ${OMV_CACHE:-./.cache/tts}:/cache
-      - ${OMV_MODELS:-./models}:/models
-    environment:
-      HOME: /cache/home
-      HF_HOME: /cache/hf
-      TORCH_HOME: /cache/torch
-      PYTHONUNBUFFERED: "1"
-      HIP_VISIBLE_DEVICES: "0"
-      OMV_QWEN_MODEL_DIR: ${OMV_QWEN_MODEL_DIR:-/models/qwen3-tts/Qwen3-TTS-12Hz-1.7B-Base}
-      PIP_NO_CACHE_DIR: "1"
-    command:
-      - --backend
-      - qwen3tts
-      - --misses
-      - /work/misses.jsonl
-      - --refs
-      - /refs
-      - --map
-      - /work/voice-map.json
-      - --out
-      - /out
-      - --lang
-      - ${OMV_LANG:-en}
+      - --qwen3-model
+      - /models/qwen3-tts/Qwen3-TTS-12Hz-1.7B-Base
       - --sanitizer-pin
       - ${OMV_SANITIZER_PIN:?set OMV_SANITIZER_PIN from /omv Settings}
     stop_grace_period: 30s

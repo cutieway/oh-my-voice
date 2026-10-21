@@ -1,24 +1,26 @@
 # Oh My Voice
 
-Cloned voices for unvoiced FFXIV dialogue. Pre-generated TTS voice pack
-(IndexTTS-2.5 default; XTTS-v2 and Qwen3-TTS alternatives), local playback, silent on cache
-miss. Never doubles real voice-over.
+Cloned voices for unvoiced FFXIV dialogue. Pre-generated Qwen3-TTS voice
+packs, local playback, silent on cache miss. Never doubles real voice-over.
 
 AGPL-3.0. See `LICENSE.md`.
 
-## Status: P1 plugin / P2 batch generator
+## Status
 
 - ARR MSQ `AddonTalk` + `TalkSubtitle` capture, EN only.
-- `id = md5(lang:voiceId:npcId:sentence)` over sanitized text (`OhMyVoice.Common`).
-- Pack: `voicelines/{id}.ogg` (Opus 48 kHz mono, 32 kbps), `voicelines_override/` wins.
-- Silent miss + deduped `misses.jsonl` worklist. No live TTS fallback in P1.
-- Real-VO suppression: ~100 ms wait before start, stop-if-started, data-driven blocklist.
+- `id = md5(lang:voiceId:npcId:sentence)` over sanitized text
+  (`OhMyVoice.Common`).
+- Pack: `voicelines/{id}.ogg` (Opus 48 kHz mono, 32 kbps),
+  `voicelines_override/` wins.
+- Silent miss + deduped `misses.jsonl` worklist. No live TTS fallback.
+- Real-VO suppression: ~100 ms wait before start, stop-if-started,
+  data-driven blocklist.
 - Playback: NAudio `WaveOut` + Concentus decode. Zero native dependencies.
-- Batch generator: `docker compose` on ROCm. IndexTTS-2.5 is the default
-  backend (zero-shot, reference clip); XTTS-v2 and Qwen3-TTS Base are
-  alternatives. Consumes
-  `misses.jsonl`, emits the Opus pack. Host needs no Python/ROCm toolchain.
-- Linux dev + Wine playtest. CI on `ubuntu-latest`.
+- Batch generator: Qwen3-TTS Base zero-shot voice clone on ROCm, in Docker.
+  It consumes `misses.jsonl`, emits the Opus pack, and installs it into the
+  plugin config. Host needs no Python/ROCm toolchain.
+- No fine-tuning and no LoRA. The pack generator uses reference audio at
+  inference only.
 
 ## Layout
 
@@ -37,15 +39,25 @@ OhMyVoice/            # Dalamud plugin (net10.0-windows)
   Windows/            # /omv status + settings UI
 OhMyVoice.Common/     # net10.0 shared: Sanitizer v1, VoiceId, PackTypes
 scripts/check-refs.sh # Q6 guard: no reference audio in repo
-compose.yaml          # batch TTS services (ROCm IndexTTS/XTTS/Qwen3-TTS)
-tools/generate.py     # misses.jsonl -> .ogg pack generator (three backends)
-tools/tts/            # XTTS Dockerfile + pinned Python requirements
-tools/tts-indextts/   # IndexTTS-2.5 Dockerfile + model-download entrypoint
-tools/tts-qwen/       # Qwen3-TTS Base Dockerfile + model-download entrypoint
-models/               # local TTS weights (gitignored; IndexTTS ~11 GB, Qwen 2.5-4.5 GB)
-.cache/               # local HF/XTTS caches (gitignored)
-pack/                 # local generated packs (gitignored)
+compose.yaml          # one batch service: tts-qwen
+tools/
+  qwen/               # Qwen3-TTS Dockerfile, entrypoint, generator
+  voice.sh            # one-command live dev loop
+  voice-map.json      # NPC -> voiceId
+  xivdata/            # optional cutscene SCD extractor (Lumina)
+data/                 # gitignored runtime root
+  models/             # Qwen3-TTS Base weights
+  cache/              # HF/Torch/MIOpen caches
+  refs/               # reference WAVs + optional .txt transcripts
+  out/                # generated pack
+archive/tts-backends/ # XTTS/IndexTTS code, reference only, not built
+docs/
+  QWEN3-TTS.md        # Qwen integration, quality, measurements
+  archive/            # superseded IndexTTS performance report
 ```
+
+Only `data/` is runtime state. It is gitignored; back it up separately from
+the repo. `archive/` is source-only and is never built or composed.
 
 ## Build (Linux)
 
@@ -55,96 +67,58 @@ DOTNET=/nix/store/j8zkmcl067q2aqlg8r3lhm7kbv8iwx6v-dotnet-sdk-wrapped-10.0.401/b
 $DOTNET build -c Release
 ```
 
-Dalamud dev DLLs resolve from `~/.xlcore/dalamud/Hooks/dev` (`DALAMUD_HOME` overrides).
+Dalamud dev DLLs resolve from `~/.xlcore/dalamud/Hooks/dev`
+(`DALAMUD_HOME` overrides).
 
 ## Batch generation (Docker, ROCm)
 
-Three pinned ROCm/PyTorch images. IndexTTS-2.5 is the default; XTTS-v2 and
-Qwen3-TTS Base are alternatives. All are zero-shot: 3-30 s of clean speech
-per speaker, no training. They emit the same pack format, so the plugin does
-not know which backend produced a line. The host needs only the amdgpu
-driver, `/dev/kfd`, `/dev/dri`, and Docker - no host Python, CUDA, or Nix
-TTS package.
-
-IndexTTS-2.5 upstream assumes CUDA. Its image starts from ROCm/PyTorch
-(Python 3.10, torch 2.8.0+rocm7.2.4), installs IndexTTS with `--no-deps`,
-then installs upstream's dependency list minus torch/torchaudio. That keeps
-pip from replacing the ROCm wheel with a CUDA/CPU one. The loader passes
-`use_cuda_kernel=False` to skip the CUDA-only BigVGAN kernel, and the build
-asserts `torch.version.hip` at the end.
-
-IndexTTS-2.5 code and weights are released under Bilibili's
-`LicenseRef-Bilibili-IndexTTS` / model license, not AGPL-3.0. This repository's
-AGPL-3.0 covers oh-my-voice code; review the upstream model license before
-redistributing weights or generated packs.
+One pinned ROCm/PyTorch image. Qwen3-TTS Base is zero-shot: 3-30 s of clean
+speech per speaker, no training. The host needs only the amdgpu driver,
+`/dev/kfd`, `/dev/dri`, and Docker — no host Python, CUDA, or Nix TTS
+package.
 
 ```bash
-mkdir -p .cache/tts models pack
+mkdir -p data/{models,cache,refs,out}
+cp /path/to/generic-male-01.wav data/refs/
 export OMV_MISSES="$HOME/.xlcore/pluginConfigs/OhMyVoice/misses.jsonl"
-export OMV_REFS="$HOME/oh-my-voice-refs"
 export OMV_SANITIZER_PIN="v1:..."   # from the plugin's manifest / settings
 
-docker compose build tts-indextts
-docker compose run --rm tts-indextts  # -> pack/voicelines/*.ogg + pack/manifest.json
-
-# Alternatives:
-# docker compose build tts && docker compose run --rm tts            # XTTS-v2
-# docker compose build tts-qwen && docker compose run --rm tts-qwen  # Qwen3-TTS 1.7B
+docker compose build tts-qwen
+docker compose run --rm tts-qwen    # -> data/out/voicelines/*.ogg + manifest.json
 ```
 
-- IndexTTS first run downloads `IndexTeam/IndexTTS-2.5` (weights plus the
-  w2v-BERT/BigVGAN auxiliary models; ~11 GB) into
-  `models/checkpoints`. The auxiliary Hugging Face cache goes to
-  `.cache/tts`. Keep both between runs.
-- XTTS first run downloads XTTS v2 (~1.9 GB) into `.cache/tts`. The XTTS
-  image is ~40 GB uncompressed; the IndexTTS image is ~42 GB. Keep ~50 GB
-  free during the first build; `docker builder prune` reclaims build cache
-  if needed.
-- Qwen3-TTS first run downloads `Qwen/Qwen3-TTS-12Hz-1.7B-Base` (~4.5 GB)
-  into `models/qwen3-tts`; `--qwen3-model` / `OMV_QWEN_MODEL_DIR` can point at
-  another Base checkpoint. The 0.6B Base was tested and rejected (worse and
-  not faster). The image shares the IndexTTS ROCm base. Qwen clone mode uses a sibling `<voiceId>.txt` transcript;
-  without one it falls back to x-vector-only cloning (lower quality).
-  See [docs/QWEN3-TTS.md](docs/QWEN3-TTS.md).
+- First run downloads `Qwen/Qwen3-TTS-12Hz-1.7B-Base` (~4.3 GB) into
+  `data/models/qwen3-tts/`. HF/Torch caches go to `data/cache/`.
+  `--qwen3-model` / `OMV_QWEN_MODEL_DIR` can point at another Base checkpoint.
+  The 0.6B Base was tested and rejected (worse and not faster).
+- Qwen clone mode uses a sibling `<voiceId>.txt` transcript next to
+  `<voiceId>.wav`; without one it falls back to x-vector-only cloning
+  (lower quality). See [docs/QWEN3-TTS.md](docs/QWEN3-TTS.md).
+- The image is ~40 GB uncompressed. Keep free space for Docker layers and
+  the model. `docker builder prune` reclaims build cache.
 - Do not run batch generation while the game is running (VRAM contention).
-- `OMV_OUT` (default `./pack`), `OMV_LANG` (default `en`), `OMV_VOICE_MAP`
-  (default `tools/voice-map.json`), `OMV_UID`/`OMV_GID`, and
-  `OMV_MODELS` (default `./models`) are overridable.
-- `models/` is gitignored and mounted at `/models`; keep weights out of git.
-  `models/checkpoints` holds the IndexTTS main and auxiliary weights;
-  `models/qwen3-tts` holds Qwen3-TTS.
-- The base images are pinned by tag and digest in `tools/tts/Dockerfile`,
-  `tools/tts-indextts/Dockerfile`, and `tools/tts-qwen/Dockerfile`;
-  `docker compose build --build-arg BASE_IMAGE=...` overrides them.
+- `OMV_OUT` (default `./data/out`), `OMV_LANG` (default `en`),
+  `OMV_VOICE_MAP` (default `tools/voice-map.json`), `OMV_UID`/`OMV_GID`,
+  `OMV_MODELS` (default `./data/models`), `OMV_CACHE` (default
+  `./data/cache`), and `OMV_REFS` (default `./data/refs`) are overridable.
+- The base image is pinned by tag and digest in `tools/qwen/Dockerfile`;
+  `docker compose build --build-arg BASE_IMAGE=...` overrides it.
 - Torch/torchaudio come from the ROCm base image. Never add a CUDA torch
-  wheel. `tools/tts/requirements.txt` deliberately pins `transformers` to
-  the 4.57 line for coqui-tts; IndexTTS uses its upstream `pyproject.toml`
-  with torch/torchaudio filtered out.
-- Optional IndexTTS controls exist on `tools/generate.py`:
-  `--indextts-emo-vector` (8 floats), `--indextts-duration-factor`,
-  `--no-indextts-bf16` (GPT stage only), and the experimental speed flags
-  `--indextts-fp16` (s2mel/BigVGAN fp16 autocast), `--indextts-steps`,
-  `--indextts-cfg-rate`, and `--indextts-torch-compile`. Defaults are fp32
-  s2mel/BigVGAN, 25 steps, CFG 0.7, no compile, bf16 GPT. The speed flags
-  are not quality-gated yet; see the report. The image bakes `generate.py`
-  at build time: rebuild (`docker compose build tts-indextts tts-qwen`) after
-  changing the generator, or a mounted script is required.
+  wheel. `qwen-tts` is installed with `--no-deps` before its runtime deps so
+  pip cannot replace the ROCm pair.
 - Qwen3-TTS controls: `--qwen3-model`, `--qwen3-attn` (`sdpa`/`eager`/
-  `flash_attention_2`), `--qwen3-x-vector-only`, and
-  `--qwen3-non-streaming`. The clone transcript is `<voiceId>.txt` next to
-  the reference WAV; `docs/QWEN3-TTS.md` covers the measured numbers.
-- Measured on the RX 9060 XT dev host with the real `generic-male-01`
-  reference and `MIOPEN_FIND_MODE=FAST` (compose default): warm RTF ~3.8
-  (7-8 s line ~30 s; first line ~58 s). `--indextts-fp16` alone measured
-  **19.1 s warm (RTF 2.58, 1.56x)**; FP16 + 12 steps + CFG 0 measured 44.7 s
-  for a cold line. Quality of those paths is unaudited. Without FAST,
-  MIOpen's per-shape find made the same class of line ~64-71 s (RTF ~13).
-  Batch only; do not put it in the live dialogue path. Full benchmark
-  matrix, rejected candidates, and untested options:
-  [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
-- Qwen3-TTS 1.7B measured warm RTF **3.24-3.42** on the same host (load
-  ~8 s, first reference prompt ~29 s, later prompts ~0.5 s). Listening
-  samples and caveats: [docs/QWEN3-TTS.md](docs/QWEN3-TTS.md).
+  `flash_attention_2`), `--qwen3-x-vector-only`, `--qwen3-non-streaming`, and
+  `--qwen3-seed`. The image bakes `generate.py` at build time: rebuild after
+  changing the generator.
+- **Do not set `TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1` for Qwen3-TTS.**
+  It measured ~13-14% faster, but produced a different decode with an
+  audibly shifted pitch/timbre versus the source clips; the baseline `sdpa`
+  reruns were byte-identical. Keep the variable unset. Details:
+  [docs/QWEN3-TTS.md](docs/QWEN3-TTS.md#aotriton-do-not-enable).
+- Qwen3-TTS 1.7B measured warm RTF **3.24-3.42** on the RX 9060 XT (load
+  ~8 s, first reference prompt ~29 s, later prompts ~0.5 s). Batch only; do
+  not put it in the live dialogue path. Listening samples and caveats:
+  [docs/QWEN3-TTS.md](docs/QWEN3-TTS.md).
 
 ### Live dev loop
 
@@ -155,20 +129,28 @@ installed manifest, so no env exports are needed. Then use `/omv` →
 **Reload pack**.
 
 ```bash
-./tools/voice.sh                      # IndexTTS-2.5 (default)
-OMV_BACKEND=xtts ./tools/voice.sh     # XTTS-v2 fallback
-OMV_BACKEND=qwen3tts ./tools/voice.sh # Qwen3-TTS 1.7B Base
+./tools/voice.sh
 ```
 
 The old manifest is kept as `manifest.json.bak`. Existing `.ogg` files are
-preserved and skipped; only new ids are synthesized. The first IndexTTS run
-builds the image and downloads the checkpoint.
+preserved and skipped; only new ids are synthesized. The first run builds
+the image, downloads the model, and creates the `data/` tree.
 
-All backends occasionally append an invented sentence to otherwise correct
+The model occasionally appends an invented sentence to otherwise correct
 speech. The generator measures every new WAV and retries audio longer than
 `max(4.5s, words / 2.2 + 1s)` with lower-temperature sampling; after three
 attempts it rejects the line, leaves it in the worklist, and installs no bad
 audio.
+
+### Removed backends
+
+XTTS-v2 and IndexTTS-2.5 are archived under
+[`archive/tts-backends/`](archive/tts-backends/README.md) for reference.
+Their Docker images, model weights, and caches were removed. They are not
+services, not CI targets, and not part of the active generator.
+
+The IndexTTS performance report is preserved at
+[`docs/archive/indextts-performance.md`](docs/archive/indextts-performance.md).
 
 ## Playtest (Wine)
 
@@ -180,8 +162,8 @@ audio.
 
 ## Reference-audio policy (Q6)
 
-Real-actor reference wavs stay local-personal: `~/oh-my-voice-refs/` or a
-gitignored `references/` directory. NEVER committed, NEVER in the worklist.
+Real-actor reference wavs stay local-personal: `data/refs/` (gitignored) or
+another path supplied via `OMV_REFS`. NEVER committed, NEVER in the worklist.
 CI rejects `references/` paths, audio blobs, and files over 2 MiB.
 Distributed packs use generic-archetype or consented voices only.
 `voiceId` in the ID makes clean packs a distinct namespace by construction.

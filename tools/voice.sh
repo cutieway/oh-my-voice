@@ -1,44 +1,24 @@
 #!/usr/bin/env bash
 # One-command live dev loop: stage the installed pack, generate every missed
-# line into a temp pack, validate it, then install it into the plugin config.
+# line with Qwen3-TTS, validate it, then install it into the plugin config.
 # The running game is untouched until you press /omv -> Reload pack.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PLUGIN_CFG="${OMV_PLUGIN_CONFIG:-$HOME/.xlcore/pluginConfigs/OhMyVoice}"
 MISSES="${OMV_MISSES:-$PLUGIN_CFG/misses.jsonl}"
-REFS="${OMV_REFS:-$HOME/oh-my-voice-refs}"
+REFS="${OMV_REFS:-$ROOT/data/refs}"
+MODELS="${OMV_MODELS:-$ROOT/data/models}"
+CACHE="${OMV_CACHE:-$ROOT/data/cache}"
 PIN="${OMV_SANITIZER_PIN:-}"
-BACKEND="${OMV_BACKEND:-indextts2}"
-
-case "$BACKEND" in
-  xtts)
-    SERVICE=tts
-    IMAGE=oh-my-voice/tts:0.1.0
-    ;;
-  indextts2)
-    SERVICE=tts-indextts
-    IMAGE=oh-my-voice/tts-indextts:0.1.0
-    export OMV_MODELS="${OMV_MODELS:-$ROOT/models}"
-    mkdir -p "$OMV_MODELS"
-    ;;
-  qwen3tts)
-    SERVICE=tts-qwen
-    IMAGE=oh-my-voice/tts-qwen:0.1.0
-    export OMV_MODELS="${OMV_MODELS:-$ROOT/models}"
-    mkdir -p "$OMV_MODELS/qwen3-tts"
-    ;;
-  *)
-    echo "OMV_BACKEND must be xtts, indextts2, or qwen3tts (got: $BACKEND)" >&2
-    exit 2
-    ;;
-esac
 
 command -v docker >/dev/null 2>&1 || { echo "docker not found" >&2; exit 1; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 not found" >&2; exit 1; }
 docker compose version >/dev/null 2>&1 || { echo "docker compose v2 not available" >&2; exit 1; }
 [[ -f "$MISSES" ]] || { echo "missing worklist: $MISSES" >&2; exit 1; }
 [[ -d "$REFS" ]] || { echo "missing reference dir: $REFS" >&2; exit 1; }
+
+mkdir -p "$MODELS" "$CACHE"
 
 # The pack manifest carries the sanitizer pin; fall back to an explicit env.
 if [[ -z "$PIN" && -f "$PLUGIN_CFG/manifest.json" ]]; then
@@ -72,16 +52,17 @@ fi
 
 cd "$ROOT"
 export OMV_MISSES="$MISSES" OMV_REFS="$REFS" OMV_SANITIZER_PIN="$PIN"
+export OMV_MODELS="$MODELS" OMV_CACHE="$CACHE"
 export OMV_OUT="$TMP" OMV_UID="$(id -u)" OMV_GID="$(id -g)"
 
 echo "worklist: $ROWS rows"
-echo "backend:  $BACKEND"
+echo "backend:  Qwen3-TTS Base"
 echo "staging:  $TMP"
 echo "Do not click new dialogue until generation finishes."
-# Rebuild so the image always contains the current tools/generate.py; the
+# Rebuild so the image always contains the current tools/qwen/generate.py; the
 # layer cache makes an unchanged run a no-op.
-docker compose build "$SERVICE"
-docker compose run --rm "$SERVICE"
+docker compose build tts-qwen
+docker compose run --rm tts-qwen
 
 [[ -s "$TMP/manifest.json" ]] || { echo "generator produced no manifest" >&2; exit 1; }
 

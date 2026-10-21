@@ -1,5 +1,9 @@
 # IndexTTS-2.5 on ROCm: performance report
 
+> Archived. IndexTTS-2.5 is no longer an active backend. The code is kept in
+> `archive/tts-backends/indextts/` for reference; weights, images, and caches
+> were removed. Qwen3-TTS is the only active generator.
+
 Date: 2026-10-20. Scope: the oh-my-voice batch generator, IndexTTS-2.5
 backend. The plugin/playback path is out of scope.
 
@@ -50,7 +54,7 @@ workload as the single-line benchmarks.
 
 Qwen3-TTS is a separate backend, not an IndexTTS optimization. Its
 integration and measured warm performance (RTF ~3.3 on the same host) are
-in [QWEN3-TTS.md](QWEN3-TTS.md); it does not use the IndexTTS steps/CFG/fp16
+in [QWEN3-TTS.md](../QWEN3-TTS.md); it does not use the IndexTTS steps/CFG/fp16
 knobs.
 
 ## Baseline
@@ -171,6 +175,7 @@ work: 57.66 s cold, 27.86 s warm.
 | bf16/fp16 for the whole model | Not attempted | GPT bf16 is the only stage that benefits from bf16; s2mel/BigVGAN use fp16 autocast opt-in (T9) |
 | Reducing CFM steps / CFG | 12 steps 46.61 s cold; CFG 0 46.61 s cold; combined with FP16 44.70 s | Quality tradeoff untested; opt-in flags only |
 | ONNX Runtime / TensorRT | Not tried | TensorRT is NVIDIA-only; ORT ROCm path not established here |
+| Qwen3-TTS + `TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1` | 5-line Sphene average: 71.74/72.69 s baseline vs 62.22/62.60 s AOTriton (~13-14% faster); reruns byte-identical within each backend; ECAPA baseline-vs-AOTriton 0.61-0.82 | Audibly shifted pitch/timbre versus the source Sphene clips; a different decode, not an exact speedup. Do not enable. |
 
 The earlier 4.1x figure is explicitly withdrawn. The defensible summary is
 ~2.3x per line / ~3.2x RTF for the measured line, and ~2.8x for a three-line
@@ -276,6 +281,9 @@ The first call vs second call is the find/search signal. Run once with
 - Do not ship the custom HIP BigVGAN kernel.
 - Do not ship `BucketedVocoder` without a real-reference/varied-length win.
 - Do not optimize against synthetic references.
+- Do not enable `TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1` for Qwen3-TTS
+  pack generation: ~13-14% faster, but a different decode with audibly
+  shifted pitch/timbre.
 - Keep `MIOPEN_LOG_LEVEL=3` only for diagnostics; it is not a speed setting.
 - Next performance work is a quality gate + real multi-line measurements,
   plus per-stage FP16 gating.
@@ -287,5 +295,5 @@ The first call vs second call is the find/search signal. Run once with
 - `compose.yaml`: `MIOPEN_FIND_MODE: "FAST"` on `tts` and `tts-indextts`.
 - `README.md`: real-reference numbers and the ~9 GPU-hours / 1,000 8 s line
   estimate.
-- `docs/PERFORMANCE.md`: this report.
+- `docs/archive/indextts-performance.md`: this report.
 - Commits: `6e436c3` (speedup/config), `00e4f70` (corrected benchmark/docs).

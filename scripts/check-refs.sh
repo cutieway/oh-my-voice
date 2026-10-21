@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Q6 enforcement: real-actor reference audio must NEVER be committed.
-# Refs live in ~/oh-my-voice-refs/ or a gitignored references/ directory.
+# Refs live in data/refs/ (gitignored) or another OMV_REFS directory.
 set -euo pipefail
 
 fail=0

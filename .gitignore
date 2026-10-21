@@ -4,7 +4,7 @@ bin/
 *.user
 WATCHDOG.yml
 docs/advisor.md
-vendors
+vendors/
 
 # oh-my-voice: reference-voice guard (Q6).
 # Real-actor reference audio must NEVER be committed. It lives in
@@ -17,10 +17,8 @@ references/
 *.mp3
 !Data/**/*.ogg
 
-# TTS batch (Docker): weights/caches and generated packs stay local.
-models/
-.cache/
-pack/
-voicelines/
+# TTS batch runtime: weights, caches, references, and generated packs stay
+# under one gitignored root.
+data/
 __pycache__/
 *.pyc

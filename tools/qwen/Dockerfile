@@ -1,6 +1,6 @@
-# Qwen3-TTS (Base, voice clone) on ROCm. Same torch/ROCm base as the
-# IndexTTS image so the host only needs the amdgpu driver. Do not let pip
-# replace the base image's torch/torchaudio with PyPI CUDA/CPU wheels.
+# Qwen3-TTS (Base, voice clone) on ROCm. The host only needs the amdgpu
+# driver; do not let pip replace the base image's torch/torchaudio with
+# PyPI CUDA/CPU wheels.
 ARG BASE_IMAGE=rocm/pytorch:rocm7.2.4_ubuntu22.04_py3.10_pytorch_release_2.8.0@sha256:880e126d83370e3502b069a39f85cbd7b1f6f7dbfbceb00b6fefbac03c5da091
 FROM ${BASE_IMAGE}
 
@@ -28,7 +28,7 @@ RUN python -m pip install --no-cache-dir \
 RUN python -c "import torch, torchaudio; assert torch.version.hip, torch.__version__; from qwen_tts import Qwen3TTSModel; print('torch', torch.__version__, 'hip', torch.version.hip, 'torchaudio', torchaudio.__version__)"
 
 COPY generate.py /opt/omv/generate.py
-COPY tts-qwen/entrypoint.sh /usr/local/bin/omv-generate
+COPY entrypoint.sh /usr/local/bin/omv-generate
 RUN chmod 755 /usr/local/bin/omv-generate
 WORKDIR /models
 ENTRYPOINT ["/usr/local/bin/omv-generate"]
