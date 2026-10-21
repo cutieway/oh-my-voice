@@ -49,6 +49,7 @@ OhMyVoice.Common/     # net10.0 shared: Sanitizer v1, VoiceId, PackTypes
 scripts/check-refs.sh # Q6 guard: no voice audio/embeddings in repo
 compose.yaml          # batch generator: tts-qwen
 compose.xvector.yaml  # average x-vectors: xvector
+sample.sh             # one-off prompt sample into data/samples/
 tools/
   qwen/               # Qwen3-TTS Dockerfile, entrypoint, generator
   voice.sh            # one-command live dev loop
@@ -133,6 +134,13 @@ docker compose run --rm tts-qwen    # -> data/out/voicelines/*.ogg + manifest.js
   `flash_attention_2`), `--qwen3-non-streaming`, and `--qwen3-seed`. The
   image bakes `generate.py` at build time: rebuild after changing the
   generator.
+- Both compose services set `MIOPEN_FIND_MODE=FAST`. Keep it: without it,
+  MIOpen's exhaustive per-shape find drops decode from RTF ~3 to ~12; a
+  6.65 s sample went from 41.9 s to 106.6 s wall. Details and regression
+  history: [docs/QWEN3-TTS.md](docs/QWEN3-TTS.md#miopen-fast-find-is-required).
+- One-off sample: `./sample.sh <speaker_token> "<sentence>"` writes
+  `data/samples/<speaker_token>/` with the x-vector metadata and line audio.
+  It never uses `tools/voice.sh` or installs into the plugin pack.
 - Existing `.ogg` files are reused only when their recorded
   `GenerationFingerprint` matches the current model revision, generation
   settings, encoder settings, and that voice's x-vector hash. Manifests from
@@ -151,8 +159,8 @@ docker compose run --rm tts-qwen    # -> data/out/voicelines/*.ogg + manifest.js
   audibly shifted pitch/timbre versus the source clips; the baseline `sdpa`
   reruns were byte-identical. Keep the variable unset. Details:
   [docs/QWEN3-TTS.md](docs/QWEN3-TTS.md#aotriton-do-not-enable).
-- Qwen3-TTS 1.7B measured warm RTF **3.24-3.42** on the RX 9060 XT (load
-  ~8 s). Batch only; do not put it in the live dialogue path. Listening
+- Qwen3-TTS 1.7B measured warm RTF **3.24-3.42** with FAST on the RX 9060 XT
+  (load ~8 s). Batch only; do not put it in the live dialogue path. Listening
   samples and caveats: [docs/QWEN3-TTS.md](docs/QWEN3-TTS.md).
 
 ### Average speaker x-vectors (game audio)

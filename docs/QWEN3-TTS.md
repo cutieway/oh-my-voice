@@ -157,6 +157,31 @@ For historical comparison, IndexTTS fp32 was RTF ~3.35 warm; IndexTTS FP16
 [the report](archive/indextts-performance.md). Qwen3-TTS has no diffusion
 steps/CFG knobs; its cost is autoregressive token generation.
 
+### MIOpen FAST find is required
+
+Both `compose.yaml` and `compose.xvector.yaml` set
+`MIOPEN_FIND_MODE=FAST`. Keep it. Without it, MIOpen's default exhaustive
+per-shape find dominates decode on gfx1200. Repeated runs with the same
+1.7B model, x-vector, and sentence measured:
+
+| Config | Decode | Audio | RTF |
+|---|---:|---:|---:|
+| Default MIOpen | 70.4 s | 5.92 s | 11.9× |
+| Default MIOpen | 69.3 s | 6.16 s | 11.3× |
+| `FAST` | 20.3 s | 4.96 s | 4.1× |
+| `FAST` | 15.4 s | 5.12 s | 3.0× |
+
+End-to-end `./sample.sh` for a 6.65 s line: **106.6 s without FAST**,
+**41.9 s with FAST**. The latter includes ~3.5 s imports, ~5.5 s model load,
+~3.2 s hashing the 4.23 GiB local checkpoint, and container startup. A 25 s
+dialogue at the old ~12× decode is about 5 minutes; at ~3× it is about
+75 seconds plus that fixed overhead.
+
+This regression has already happened once: `6e436c3` added FAST, then the
+Qwen consolidation `a6fc133` dropped it from `compose.yaml` while leaving the
+documentation in place. Verify with `docker compose config` after any compose
+or service refactor.
+
 ## Quality
 
 `non_streaming_mode` is **not** a different model. It changes how text is

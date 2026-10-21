@@ -32,6 +32,10 @@ services:
       TORCH_HOME: /cache/torch
       PYTHONUNBUFFERED: "1"
       HIP_VISIBLE_DEVICES: "0"
+      # gfx1200's default exhaustive per-shape MIOpen find dominates decode.
+      # FAST selects a solver immediately; output is unchanged.
+      MIOPEN_FIND_MODE: "FAST"
+      MIOPEN_LOG_LEVEL: "3"
       OMV_QWEN_MODEL_DIR: /models/qwen3-tts/Qwen3-TTS-12Hz-1.7B-Base
       PIP_NO_CACHE_DIR: "1"
     command:
