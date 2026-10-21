@@ -7,9 +7,9 @@ integration code only.
 ## Upstream
 
 - Repository: <https://github.com/QwenLM/Qwen3-TTS>
-- Models: `Qwen/Qwen3-TTS-12Hz-1.7B-Base` (4.5 GB) and
-  `Qwen/Qwen3-TTS-12Hz-0.6B-Base` (2.5 GB). Both are 12 Hz tokenizer +
-  discrete multi-codebook LM, not a diffusion model.
+- Model: `Qwen/Qwen3-TTS-12Hz-1.7B-Base` (4.5 GB), 12 Hz tokenizer +
+  discrete multi-codebook LM, not a diffusion model. The 0.6B Base was
+  tested and rejected: worse output and not faster per generated second.
 - Clone mode needs reference audio plus its transcript. With no transcript
   Qwen can use `x_vector_only_mode`, but upstream warns quality is reduced.
 - The package is `qwen-tts==0.1.1`; it pins `transformers==4.57.3`,
@@ -50,13 +50,10 @@ is experimental).
 | Model | Load | First ref prompt | Later ref prompts | Warm line 1 | Warm line 2 | Warm line 3 | Warm RTF |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | 1.7B Base | 7.9 s | 29.3 s | 0.45 s | 15.1 s / 4.4 s | 20.6 s / 6.2 s | 40.7 s / 12.6 s | 3.24-3.42 |
-| 0.6B Base | 5.8 s | 30.4 s | 0.50 s | 13.7 s / 4.1 s | 21.0 s / 6.2 s | 44.2 s / 13.0 s | 3.35-3.41 |
 | 1.7B, non-streaming | 6.7 s | 29.0 s | 0.47-0.49 s | 17.9 s / 4.0 s | 19.8 s / 6.3 s | 43.8 s / 13.7 s | 3.12-3.20 |
 
-- End-to-end generator runs (3 lines, model load included): **143 s** for
-  1.7B, **129 s** for 0.6B.
-- 0.6B is not faster per generated second in this test; 1.7B is the
-  quality-first default.
+- End-to-end generator run (3 lines, model load included): **143 s** for
+  1.7B. The 0.6B model was rejected.
 - The first `create_voice_clone_prompt` costs ~30 s (tokenizer/first-call
   work); subsequent voices ~0.5 s. Reuse is per process, per voice.
 - For comparison, IndexTTS fp32 was RTF ~3.35 warm; IndexTTS FP16 ~2.2.
@@ -69,7 +66,7 @@ is experimental).
 cloning. It changes how text is fed to the same Base model: full text at
 once vs simulated streaming chunks. Measured with the model's speaker
 encoder, cosine similarity to the reference clip was 0.986-0.992 for all
-three modes (1.7B, 0.6B, 1.7B non-streaming), so speaker identity is
+two modes (1.7B streamed and non-streaming), so speaker identity is
 preserved. The first 15/17 comparison was unseeded and confounded by sampling
 variance; groups 18/19 in the listening set are the controlled A/B (same
 process, same prompt, seed 1234): default 4.16/6.16/12.32 s vs non-streaming
@@ -79,7 +76,7 @@ Qwen's non-cloning models are `CustomVoice` and `VoiceDesign`; the generator
 refuses anything that is not a `*-Base` model.
 
 Local listening set: `/home/lexi/omv-quality-test/clips/15-qwen3-1.7b`,
-`16-qwen3-0.6b`, `17-qwen3-1.7b-nonstream`, `18-qwen3-1.7b-seeded`, and
+`17-qwen3-1.7b-nonstream`, `18-qwen3-1.7b-seeded`, and
 `19-qwen3-1.7b-nonstream-seeded`, with the same three synthetic reference
 voices and lines as the IndexTTS matrix. `ratings.csv` includes all
 three groups. No subjective quality verdict is recorded here; listen before

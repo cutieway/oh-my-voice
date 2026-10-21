@@ -101,9 +101,9 @@ docker compose run --rm tts-indextts  # -> pack/voicelines/*.ogg + pack/manifest
   free during the first build; `docker builder prune` reclaims build cache
   if needed.
 - Qwen3-TTS first run downloads `Qwen/Qwen3-TTS-12Hz-1.7B-Base` (~4.5 GB)
-  into `models/qwen3-tts`; the 0.6B model is ~2.5 GB and can be selected with
-  `--qwen3-model` / `OMV_QWEN_MODEL_DIR`. The image shares the IndexTTS
-  ROCm base. Qwen clone mode uses a sibling `<voiceId>.txt` transcript;
+  into `models/qwen3-tts`; `--qwen3-model` / `OMV_QWEN_MODEL_DIR` can point at
+  another Base checkpoint. The 0.6B Base was tested and rejected (worse and
+  not faster). The image shares the IndexTTS ROCm base. Qwen clone mode uses a sibling `<voiceId>.txt` transcript;
   without one it falls back to x-vector-only cloning (lower quality).
   See [docs/QWEN3-TTS.md](docs/QWEN3-TTS.md).
 - Do not run batch generation while the game is running (VRAM contention).
@@ -143,9 +143,8 @@ docker compose run --rm tts-indextts  # -> pack/voicelines/*.ogg + pack/manifest
   matrix, rejected candidates, and untested options:
   [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 - Qwen3-TTS 1.7B measured warm RTF **3.24-3.42** on the same host (load
-  ~8 s, first reference prompt ~29 s, later prompts ~0.5 s). The 0.6B model
-  was **not faster** (RTF 3.35-3.41). Listening samples and caveats:
-  [docs/QWEN3-TTS.md](docs/QWEN3-TTS.md).
+  ~8 s, first reference prompt ~29 s, later prompts ~0.5 s). Listening
+  samples and caveats: [docs/QWEN3-TTS.md](docs/QWEN3-TTS.md).
 
 ### Live dev loop
 
