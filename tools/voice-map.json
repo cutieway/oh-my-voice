@@ -1,4 +1,3 @@
 {
-  "_comment": "NpcId (or RawSpeaker fallback) -> voiceId. voiceId must exist as <refs>/<voiceId>.wav. Unmapped speakers use --default-male/--default-female.",
-  "Storm Mage": "generic-male-01"
+  "_comment": "NpcId (or RawSpeaker fallback) -> x-vector name. Explicit entries win; otherwise a normalized NPC name matching exactly one <xvectors>/<token>.npy is used. Ambiguous or unmapped rows are skipped (unvoiced NPCs stay silent); synthetic/generic voices are a later phase."
 }

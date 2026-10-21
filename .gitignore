@@ -6,10 +6,10 @@ WATCHDOG.yml
 docs/advisor.md
 vendors/
 
-# oh-my-voice: reference-voice guard (Q6).
-# Real-actor reference audio must NEVER be committed. It lives in
-# ~/oh-my-voice-refs/ or a gitignored references/ directory.
-# CI (scripts/check-refs.sh) rejects audio blobs and any references/ path.
+# oh-my-voice: voice-audio guard (Q6).
+# Raw game audio and derived embeddings must NEVER be committed. They live
+# under data/ (gitignored) or ~/oh-my-voice-refs/ for isolated tests.
+# CI (scripts/check-refs.sh) rejects audio/embedding blobs and references/ paths.
 references/
 *.wav
 *.ogg

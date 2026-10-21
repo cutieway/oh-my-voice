@@ -1,0 +1,668 @@
+speaker_token,resolved,npc_id,npc_name,race_id,race,sex,lines,scenes,expansions,scd_bytes
+alphinaud,yes,1003053,Alphinaud,2,Elezen,male,1631,61,ARR HW StB ShB EW DT,253454568
+yshtola,yes,1003782,Y'shtola,4,Miqo'te,female,1244,44,ARR HW StB ShB EW DT,203062320
+alisaie,yes,1003054,Alisaie,2,Elezen,female,1159,47,ARR HW StB ShB EW DT,163802902
+wuklamat,yes,1045157,Wuk Lamat,0,unknown,unknown,1071,11,EW DT,143342388
+krile,yes,1012813,Krile,3,Lalafell,female,776,37,HW StB ShB EW DT,137549374
+thancred,yes,1003781,Thancred,1,Hyur,male,642,40,ARR HW StB ShB EW DT,100276328
+urianger,yes,1003784,Urianger,2,Elezen,male,641,38,ARR HW StB ShB EW DT,142503132
+estinien,yes,1007115,Estinien,2,Elezen,male,548,32,HW StB ShB EW DT,82434260
+emetselch,yes,1028112,Emet-Selch,2,Elezen,male,534,15,ShB EW DT,105917008
+grahatia,yes,1005517,G'raha Tia,4,Miqo'te,male,525,21,ShB EW DT,86272938
+mysteriousperson,yes,1030939,mysterious person,1,Hyur,male,462,6,EW DT,65473064
+erenville,yes,1036997,Erenville,8,Viera,male,375,17,EW DT,61013252
+lyse,yes,1018327,Lyse,1,Hyur,female,348,15,StB ShB EW,52431542
+raubahn,yes,1003786,Raubahn,1,Hyur,male,333,18,ARR HW StB ShB,63241042
+hien,yes,1019544,Hien,1,Hyur,male,327,9,StB,64664582
+aymeric,yes,1008194,Aymeric,2,Elezen,male,321,19,ARR HW StB ShB,64963240
+warriorofdarkness,yes,1013810,Warrior of Darkness,1,Hyur,male,288,9,HW ShB,52925126
+minfilia,yes,1003783,Minfilia,1,Hyur,female,260,9,ARR HW ShB,48700584
+sphene,yes,1047396,Sphene,1,Hyur,female,255,4,DT,48741232
+hythlodaeus,yes,1029257,Hythlodaeus,2,Elezen,male,247,6,ShB EW,51865972
+zenos,yes,1018053,Zenos yae Galvus,0,unknown,unknown,245,17,StB ShB EW,60246290
+ryne,yes,1027137,Ryne,1,Hyur,female,239,13,ShB EW DT,32669594
+hermes,yes,1038060,Hermes,2,Elezen,male,216,2,EW,37102620
+bakooljaja,yes,1047305,Bakool Ja Ja,0,unknown,unknown,209,6,DT,31727136
+meteion,yes,1038058,Meteion,0,unknown,unknown,202,2,EW,43995396
+yugiri,yes,1007097,Yugiri,4,Miqo'te,female,198,14,ARR HW StB,34848638
+elidibus,yes,1017303,Elidibus,1,Hyur,male,195,7,HW ShB EW,43653398
+lucia,yes,1008193,Lucia,2,Elezen,female,193,10,ARR HW EW,33007538
+koana,yes,1046617,Koana,4,Miqo'te,male,190,8,DT,31949824
+gosetsu,yes,1018057,Gosetsu,5,Roegadyn,male,179,9,HW StB,37927644
+jullus,yes,1038047,Jullus,1,Hyur,male,179,6,EW DT,25245814
+nanamoulnamo,yes,1002440,Nanamo Ul Namo,3,Lalafell,female,176,11,ARR HW StB ShB EW,38871162
+tataru,yes,1003785,Tataru,3,Lalafell,female,175,23,ARR HW StB ShB EW DT,27206576
+calyx,yes,1052412,Calyx,2,Elezen,male,171,5,DT,33127520
+fourchenault,yes,1034125,Fourchenault,2,Elezen,male,171,6,ShB EW,36519740
+gulooljaja,yes,1049591,Gulool Ja Ja,0,unknown,unknown,163,4,DT,32251280
+varshahn,yes,1038053,Varshahn,6,Au Ra,male,150,6,EW,29558164
+amon,yes,1040679,Amon,0,unknown,unknown,144,4,EW,38006304
+livingway,yes,1036857,Livingway,0,unknown,unknown,142,5,EW DT,28917178
+merlwyb,yes,1002441,Merlwyb,5,Roegadyn,female,139,9,ARR HW StB ShB,32732698
+zoraalja,yes,1046906,Zoraal Ja,0,unknown,unknown,139,7,DT,21172992
+hydaelyn,yes,1003070,Hydaelyn,1,Hyur,male,137,10,HW ShB EW,57924046
+yotsuyu,yes,1019099,Yotsuyu,1,Hyur,female,127,4,StB,31361762
+asahi,yes,1024637,Asahi,1,Hyur,male,123,3,StB EW,28185026
+cahciua,yes,1047310,Cahciua,0,unknown,unknown,123,4,DT,21563936
+nidhana,yes,1036523,Nidhana,0,unknown,unknown,123,8,EW,22912924
+shale,yes,1048161,Shale,2,Elezen,female,118,7,DT,23255728
+fordola,yes,1019098,Fordola,1,Hyur,female,112,7,StB ShB,18599714
+lyna,yes,1028109,Lyna,8,Viera,female,103,8,ShB EW,15187350
+kanesenna,yes,1003027,Kan-E-Senna,1,Hyur,female,102,9,ARR HW StB ShB,26111488
+beqlugg,yes,1029471,Beq Lugg,0,unknown,unknown,97,4,ShB EW,19116316
+cid,yes,1003855,Cid,1,Hyur,male,92,11,HW ShB EW,15945448
+chainuzz,yes,1028120,Chai-Nuzz,4,Miqo'te,male,91,5,ShB,18998272
+visna,yes,1058085,Visna,4,Miqo'te,female,87,1,DT,12642384
+fandaniel,yes,1033586,Fandaniel,1,Hyur,male,86,6,ShB EW,22727642
+hraesvelgr,yes,1012108,Hraesvelgr,0,unknown,unknown,84,2,HW,25320964
+varis,yes,1009803,Varis zos Galvus,0,unknown,unknown,83,6,HW StB ShB EW,18619560
+moenbryda,yes,1009780,Moenbryda,5,Roegadyn,female,81,2,ARR,16416490
+vauthry,yes,1028122,Vauthry,0,unknown,unknown,81,5,ShB,20449992
+guloolja,yes,1047311,Gulool Ja,0,unknown,unknown,80,5,DT,8795712
+matoya,yes,1011902,Matoya,0,unknown,unknown,77,5,HW StB ShB,19671740
+feoul,yes,1028110,Feo Ul,0,unknown,unknown,74,4,ShB,13871708
+haurchefant,yes,1006384,Haurchefant,2,Elezen,male,72,5,ARR HW,15074788
+halmarut,yes,1054229,Halmarut,6,Au Ra,female,68,3,DT,11847872
+ilberd,yes,1008190,Ilberd,1,Hyur,male,67,4,ARR HW,17713548
+yda,yes,1002275,Yda,1,Hyur,female,66,4,ARR HW,10466962
+arenvald,yes,1005020,Arenvald,1,Hyur,male,65,5,StB ShB,10648808
+midgardsormr,yes,1010826,Midgardsormr,0,unknown,unknown,63,5,ARR HW,18123340
+miayli,yes,1054226,Miayli,3,Lalafell,female,62,1,DT,14001440
+papalymo,yes,1002276,Papalymo,3,Lalafell,male,62,4,ARR HW,10145034
+lumull,yes,1054227,Lumull,3,Lalafell,male,61,1,DT,8589536
+ranjit,yes,1028129,Ran'jit,0,unknown,unknown,59,4,ShB,10689274
+hancock,yes,1019084,Hancock,1,Hyur,male,58,3,StB EW,15009540
+louisoix,yes,1006797,Louisoix,2,Elezen,male,57,1,ARR,19743780
+lolorito,yes,1007153,Lolorito,3,Lalafell,male,56,4,ARR HW StB,18499982
+otis,yes,1047466,Otis,0,unknown,unknown,56,2,DT,9886416
+montichaigne,yes,1038067,Montichaigne,2,Elezen,male,55,3,EW,12994300
+soroban,yes,1019085,Soroban,0,unknown,unknown,55,6,StB EW,11957330
+maxima,yes,1024628,Maxima,2,Elezen,male,52,4,StB ShB EW,12775580
+duliachai,yes,1028119,Dulia-Chai,0,unknown,unknown,51,5,ShB,8917654
+runar,yes,1028142,Runar,7,Hrothgar,male,50,2,ShB,7717372
+conrad,yes,1019082,Conrad,1,Hyur,male,48,2,StB,10705972
+emmanellain,yes,1011894,Emmanellain,2,Elezen,male,48,5,HW EW,8313648
+cirina,yes,1018978,Cirina,6,Au Ra,female,45,4,StB EW,7248258
+teledjiadeledji,yes,1008617,Teledji Adeledji,3,Lalafell,male,43,3,ARR,8764266
+quintus,yes,1038048,Quintus,1,Hyur,male,42,1,EW,8051152
+soluszosgalvus,yes,1026218,Solus zos Galvus,2,Elezen,male,42,2,StB,10526724
+tiamat,yes,1036296,Tiamat,0,unknown,unknown,42,2,HW ShB,13387362
+wukevu,yes,1046741,Wuk Evu,7,Hrothgar,male,42,2,DT,9225664
+sadu,yes,1018980,Sadu,6,Au Ra,female,41,4,StB EW,7246166
+ketenramm,yes,1039720,Ketenramm,5,Roegadyn,male,40,3,DT,5965264
+vorporlor,yes,1046860,Vorporlor,0,unknown,unknown,40,1,DT,12893440
+barnier,yes,1039162,Barnier,2,Elezen,male,39,3,EW,8520680
+gossan,yes,1051787,Gossan,2,Elezen,male,39,3,DT,9248496
+sicard,yes,1035073,Sicard,1,Hyur,male,39,4,ShB EW,7355266
+magnai,yes,1018979,Magnai,6,Au Ra,male,38,4,StB EW,7931646
+nabriales,yes,1004763,Nabriales,1,Hyur,male,37,2,ARR,9036766
+tansui,yes,1018976,Tansui,1,Hyur,male,37,2,StB,8806404
+matsya,yes,1038608,Matsya,0,unknown,unknown,36,1,EW,4730810
+sareelja,yes,1046908,Sareel Ja,0,unknown,unknown,36,3,DT,6028912
+seto,yes,1027690,Seto,0,unknown,unknown,36,2,ShB,8372448
+zereelja,yes,1047693,Zereel Ja,0,unknown,unknown,36,1,DT,8248608
+eyaney,yes,1054228,Eyaney,3,Lalafell,female,35,1,DT,7140864
+hunmurruk,yes,1047566,Hunmu Rruk,7,Hrothgar,male,35,1,DT,6689632
+ameliance,yes,1039126,Ameliance,2,Elezen,female,34,2,EW,7234178
+kokkoldankkol,yes,1039194,Kokkol Dankkol,3,Lalafell,male,33,2,EW,6865782
+pipin,yes,1010170,Pipin,3,Lalafell,male,33,4,StB,5013954
+robor,yes,1047935,Robor,3,Lalafell,male,33,2,DT,6898624
+teeshalja,yes,1051780,Teeshal Ja,0,unknown,unknown,33,1,DT,6791024
+nero,yes,1003834,Nero tol Scaeva,2,Elezen,male,32,2,HW ShB,9497922
+nahbdeen,yes,1037646,Nahbdeen,6,Au Ra,male,31,3,EW,4864826
+mappingway,yes,1038907,Mappingway,0,unknown,unknown,29,5,EW DT,4260736
+alayla,yes,1047936,Alayla,3,Lalafell,female,28,2,DT,4427376
+isse,yes,1018977,Isse,1,Hyur,male,28,4,StB,4256134
+m017,yes,1039140,M-017,0,unknown,unknown,28,1,EW,6615326
+nostalgia,yes,1047453,Nostalgia,1,Hyur,female,28,3,DT,3822560
+zekowa,yes,1046971,Zekowa,1,Hyur,male,28,2,DT,3068432
+gurfurlur,yes,1046643,Gurfurlur,0,unknown,unknown,27,1,DT,7779120
+themis,yes,1038064,Themis,1,Hyur,male,27,1,EW,6953988
+wawlika,yes,1046986,Wawlika,7,Hrothgar,male,27,2,DT,4703856
+wihuwte,yes,1046974,Wihuwte,1,Hyur,male,27,1,DT,4028208
+grynewaht,yes,1018376,Grynewaht,5,Roegadyn,male,26,4,HW StB,4974334
+mnaago,yes,1018318,M'naago,4,Miqo'te,female,26,4,HW StB,4849154
+zanuhali,yes,1047345,Zanuhali,0,unknown,unknown,26,1,DT,5273712
+geode,yes,1047452,Geode,1,Hyur,male,24,4,DT,2186592
+lahabrea,yes,1003792,Lahabrea,1,Hyur,male,24,3,HW ShB,3593734
+tesleen,yes,1028126,Tesleen,1,Hyur,female,24,1,ShB,3728990
+vidofnir,yes,1011935,Vidofnir,0,unknown,unknown,24,3,HW,5952156
+zodiark,yes,1038057,Zodiark,0,unknown,unknown,24,1,EW,15967596
+durante,yes,1045149,Durante,1,Hyur,male,23,2,EW,4025918
+nidhogg,yes,1012105,Nidhogg,0,unknown,unknown,23,3,HW,6424512
+kaishirr,yes,1028121,Kai-Shirr,4,Miqo'te,male,22,2,ShB,2932842
+namikka,yes,1046963,Namikka,1,Hyur,female,22,3,DT,4616688
+pepoane,yes,1049683,Pepoane,1,Hyur,male,22,1,DT,3321744
+ramuh,yes,1005162,Ramuh,0,unknown,unknown,22,1,ARR,6784822
+shenza,yes,1046983,Shenza,1,Hyur,male,22,1,DT,2778560
+aruhnsenna,yes,1004629,A-Ruhn-Senna,1,Hyur,male,21,2,EW,3860950
+kemakka,yes,1047075,Kemakka,4,Miqo'te,male,21,2,DT,2223920
+azdaja,yes,1043638,Azdaja,0,unknown,unknown,20,2,EW,3949868
+linuhanu,yes,1046725,Linuhanu,0,unknown,unknown,20,1,DT,3089520
+rasho,yes,1018975,Rasho,5,Roegadyn,male,20,2,StB,4675868
+tobli,yes,1046571,Tobli,1,Hyur,male,20,1,DT,3658272
+artoirel,yes,1011893,Artoirel,2,Elezen,male,19,2,HW,4151756
+dewlala,yes,1012841,Dewlala,3,Lalafell,female,19,2,HW,6945470
+hoaryboulder,yes,1007734,Hoary Boulder,5,Roegadyn,male,19,5,EW DT,2897042
+metem,yes,1049788,Metem,3,Lalafell,male,18,3,DT,9905120
+regula,yes,1011863,Regula van Hydrus,2,Elezen,male,18,2,HW,3011732
+biggs,yes,1003836,Biggs,5,Roegadyn,male,17,4,HW ShB,2034684
+bloewyda,yes,1039195,Bloewyda,5,Roegadyn,female,17,2,EW,3804474
+gaia,yes,1029523,Gaia,0,unknown,unknown,17,3,ShB EW,1365224
+magnus,yes,1028147,Magnus,7,Hrothgar,male,17,1,ShB,2657922
+malachite,yes,1053602,Malachite,2,Elezen,male,17,2,DT,2288096
+almet,yes,1028139,Almet,8,Viera,female,16,2,ShB,2656442
+hilda,yes,1011895,Hilda,1,Hyur,female,16,1,HW,3092834
+wedge,yes,1003837,Wedge,3,Lalafell,male,16,5,HW ShB,1646378
+galene,yes,1039480,Galene,2,Elezen,female,15,1,EW,2553212
+oulsigun,yes,1027656,Oul Sigun,0,unknown,unknown,15,1,ShB,2164014
+ravana,yes,1012902,Ravana,0,unknown,unknown,15,1,HW,4013418
+thaffe,yes,1028146,Thaffe,1,Hyur,male,15,1,ShB,1677832
+zephirin,yes,1011892,Zephirin,2,Elezen,male,15,4,HW,2061732
+bunchin,yes,1019178,Bunchin,0,unknown,unknown,14,1,StB,4398324
+cassard,yes,1027854,Cassard,5,Roegadyn,male,14,3,ShB,2420252
+hyllfyr,yes,1001039,Hyllfyr,5,Roegadyn,male,14,1,ShB,4480604
+mablu,yes,1046558,Mablu,1,Hyur,female,14,2,DT,1768352
+suluin,yes,1027654,Sul Uin,0,unknown,unknown,14,1,ShB,2407842
+ysiala,yes,1027655,Ys Iala,0,unknown,unknown,14,1,ShB,1496580
+eynzahrslafyrsyn,yes,1004717,Eynzahr Slafyrsyn,5,Roegadyn,male,13,2,ARR HW,4038552
+gabu,yes,1016815,Ga Bu,0,unknown,unknown,13,1,ShB,2621686
+honoroit,yes,1012327,Honoroit,2,Elezen,male,13,2,HW,2625096
+zasshal,yes,1042163,Zasshal,1,Hyur,male,13,1,EW,2122594
+jifuya,yes,1024651,Jifuya,1,Hyur,male,12,1,StB,2799836
+milos,yes,1048070,Milos,1,Hyur,male,12,2,DT,1411248
+wilfsunn,yes,1039196,Wilfsunn,5,Roegadyn,male,12,2,EW,2246272
+wrenden,yes,1029472,Wrenden,5,Roegadyn,male,12,1,ShB,2074628
+zurmurwur,yes,1047737,Zurmurwur,0,unknown,unknown,12,1,DT,2330752
+uimet,yes,1028140,Uimet,8,Viera,female,11,2,ShB,794002
+wayakkwe,yes,1047443,Wayakkwe,1,Hyur,female,11,2,DT,909552
+bismarck,yes,1028360,Bismarck,0,unknown,unknown,10,1,ShB,2427958
+bremondt,yes,1003004,Bremondt,1,Hyur,male,10,1,ARR,1737356
+sylvetrel,yes,1013211,Sylvetrel de Dzemael,2,Elezen,male,10,1,HW,1901146
+temulun,yes,1019083,Temulun,6,Au Ra,female,10,1,StB,2544052
+bolnoq,yes,1046579,Bol Noq',7,Hrothgar,male,9,1,DT,1760112
+charibert,yes,1011899,Charibert,2,Elezen,male,9,1,HW,1354330
+galuf,yes,1026520,Galuf Baldesion,1,Hyur,male,9,1,DT,1165888
+guthjon,yes,1028148,Guthjon,7,Hrothgar,male,9,1,ShB,1546676
+ketill,yes,1058625,Ketill,4,Miqo'te,male,9,1,DT,796992
+mahuwsa,yes,1047405,Mahuwsa,1,Hyur,female,9,1,DT,1185872
+mehryde,yes,1037381,Mehryde,1,Hyur,female,9,1,EW,1674562
+miilalja,yes,1047607,Miilal Ja,0,unknown,unknown,9,1,DT,1458208
+nitowikwe,yes,1046985,Nitowikwe,7,Hrothgar,female,9,2,DT,965936
+carvallain,yes,1000915,Carvallain,2,Elezen,male,8,1,StB,1172890
+curtis,yes,1019693,Curtis,1,Hyur,male,8,1,StB,2686160
+cymet,yes,1028141,Cymet,8,Viera,female,8,2,ShB,542040
+ghengen,yes,1027872,Ghen Gen,0,unknown,unknown,8,1,ShB,1312502
+growingway,yes,1038926,Growingway,0,unknown,unknown,8,2,EW,1215174
+haldrath,yes,1011864,Haldrath,2,Elezen,male,8,1,HW,2586874
+irvithe,yes,1027288,Irvithe,1,Hyur,male,8,1,ShB,933082
+lakshmi,yes,1019563,Lakshmi,0,unknown,unknown,8,1,StB,2734186
+moren,yes,1027226,Moren,1,Hyur,male,8,3,ShB,1095098
+naahe,yes,1050389,Naahe,8,Viera,male,8,1,DT,821456
+isadora,yes,1048069,Isadora,1,Hyur,female,7,1,DT,1331248
+kytte,yes,1037288,Kytte,1,Hyur,female,7,1,EW,743840
+mehrahd,yes,1039580,Mehrahd,1,Hyur,male,7,1,EW,1681502
+zeromus,yes,1045151,Zeromus,0,unknown,unknown,7,1,EW,2872636
+drusus,yes,1018231,Drusus mal Soranus,1,Hyur,male,6,1,StB,2851104
+grithil,yes,1027441,Grithil,1,Hyur,male,6,1,ShB,477612
+mettius,yes,1045172,Mettius,1,Hyur,male,6,1,EW,763304
+nanamo,yes,1002440,Nanamo Ul Namo,3,Lalafell,female,6,2,HW,1050690
+raganfrid,yes,1020841,Raganfrid,1,Hyur,male,6,1,StB,573400
+resistance,yes,1020573,Resistance guard,1,Hyur,female,6,1,StB,547022
+sahaginpriest,yes,1007095,Sahagin priest,0,unknown,unknown,6,1,ShB,1185286
+sleepingway,yes,1039125,Sleepingway,0,unknown,unknown,6,2,EW,516684
+enuo,yes,1058622,Enuo,0,unknown,unknown,5,1,DT,2064304
+genolt,yes,1048084,Genolt,1,Hyur,male,5,1,DT,569312
+gyodo,yes,1019548,Gyodo,0,unknown,unknown,5,1,StB,512520
+housefortempssteward,yes,1012377,House Fortemps steward,2,Elezen,male,5,1,HW,886278
+katliss,yes,1027232,Katliss,2,Elezen,female,5,2,ShB,751660
+meffrid,yes,1000332,Meffrid,1,Hyur,male,5,1,StB,896002
+puddingway,yes,1038958,Puddingway,0,unknown,unknown,5,2,EW,784484
+singingway,yes,1038957,Singingway,0,unknown,unknown,5,3,EW,803140
+zawpya,yes,1046984,Zawpya,1,Hyur,male,5,1,DT,772960
+azami,yes,1019546,Azami,1,Hyur,female,4,2,StB,302216
+bragi,yes,1027224,Bragi,7,Hrothgar,male,4,2,ShB,980168
+flavien,yes,1013212,Flavien de Fortemps,2,Elezen,male,4,1,HW,576688
+garuda,yes,1003856,Garuda,0,unknown,unknown,4,1,EW,888824
+glynard,yes,1027322,Glynard,5,Roegadyn,male,4,2,ShB,602318
+hhwato,yes,1046988,Hhwato,4,Miqo'te,male,4,1,DT,499184
+imperialcenturion,yes,1005165,imperial centurion,2,Elezen,male,4,1,StB,300764
+ixalichieftain,yes,1004700,Ixali chieftain,0,unknown,unknown,4,1,ShB,842338
+kanilokka,yes,1051781,Kanilokka,1,Hyur,male,4,1,DT,1374976
+maelstromofficer,yes,1010220,Maelstrom officer,1,Hyur,male,4,2,StB ShB,441608
+menphina,yes,1044304,Menphina,0,unknown,unknown,4,1,EW,347184
+naldthal,yes,1042240,Nald'thal,0,unknown,unknown,4,1,EW,1171756
+roegadyngladiator,yes,1024003,Roegadyn gladiator,5,Roegadyn,male,4,1,StB,130000
+tsukuyomi,yes,1025203,Tsukuyomi,0,unknown,unknown,4,1,StB,1745262
+all,yes,1043978,All Saints' Wake crier,1,Hyur,male,3,3,ARR EW DT,5870296
+alxaal,yes,1051851,Alxaal,2,Elezen,male,3,1,DT,462784
+amaljaawarrior,yes,1004610,Amalj'aa warrior,0,unknown,unknown,3,1,ShB,542230
+ascianprime,yes,1012893,Ascian prime,0,unknown,unknown,3,1,HW,558070
+crystariumman,yes,1028162,Crystarium man,2,Elezen,male,3,3,ShB,172152
+ecaate,yes,1050390,Ecaate,8,Viera,female,3,1,DT,203888
+giantcolibri,yes,1045160,giant colibri,0,unknown,unknown,3,1,EW,362314
+gnathpriest,yes,1012649,Gnath priest,0,unknown,unknown,3,1,HW,653220
+ishgardianpriest,yes,1012386,Ishgardian priest,2,Elezen,male,3,1,HW,727206
+laurentius,yes,1006199,Laurentius,1,Hyur,male,3,1,HW,238300
+maelie,yes,1012168,Maelie,2,Elezen,female,3,1,HW,212758
+mehvan,yes,1039051,Mehvan,1,Hyur,female,3,1,EW,120116
+mitron,yes,1035053,Mitron,1,Hyur,male,3,1,DT,567824
+stormofficer,yes,1003846,storm officer,5,Roegadyn,male,3,1,ShB,493786
+theva,yes,1027313,Theva,2,Elezen,female,3,1,ShB,520318
+xande,yes,1009370,Xande,0,unknown,unknown,3,1,EW,575978
+brawnyknight,yes,1013210,brawny knight,2,Elezen,male,2,1,HW,574036
+byakko,yes,1024667,Byakko,0,unknown,unknown,2,2,StB DT,484368
+crystariumwoman,yes,1028163,Crystarium woman,1,Hyur,female,2,2,ShB,118972
+damielliot,yes,1017811,Damielliot,2,Elezen,male,2,1,ShB,247996
+delia,yes,1049242,Delia,1,Hyur,female,2,1,DT,295392
+gilgamesh,yes,1005543,Gilgamesh,0,unknown,unknown,2,1,ARR,121320
+halric,yes,1028127,Halric,6,Au Ra,male,2,1,ShB,232068
+igeyorhm,yes,1004762,Igeyorhm,1,Hyur,female,2,1,ShB,732150
+ikaruga,yes,1019154,Ikaruga,1,Hyur,male,2,1,StB,357930
+mihleel,yes,1037318,Mihleel,6,Au Ra,female,2,1,EW,105722
+oschon,yes,1045943,Oschon,0,unknown,unknown,2,1,EW,416604
+peshiwa,yes,1046931,Peshiwa,1,Hyur,female,2,1,DT,115648
+prishe,yes,1051492,Prishe,2,Elezen,female,2,1,DT,278608
+resistancehealer,yes,1026216,Resistance healer,1,Hyur,male,2,1,StB,365168
+rhetkympf,yes,1003540,Rhetkympf,5,Roegadyn,male,2,1,EW,92126
+seiryu,yes,1026330,Seiryu,0,unknown,unknown,2,2,StB DT,724470
+suzaku,yes,1026204,Suzaku,0,unknown,unknown,2,2,StB DT,531406
+taapu,yes,1048099,Taapu,8,Viera,female,2,1,DT,302160
+valigarmanda,yes,1049670,Valigarmanda,0,unknown,unknown,2,1,DT,557904
+ascian,yes,1007019,Ascian of the Twelfth Staff,1,Hyur,male,1,1,HW,206168
+athena,yes,1043513,Athena,2,Elezen,female,1,1,EW,245988
+brukevu,yes,1046521,Br'uk Evu,7,Hrothgar,male,1,1,DT,195088
+eulmoransoldier,yes,1028355,Eulmoran soldier,1,Hyur,male,1,1,ShB,42884
+fearfulcitizen,yes,1032564,fearful citizen,1,Hyur,male,1,1,ShB,50034
+fyrgeiss,yes,1007204,Fyrgeiss,5,Roegadyn,male,1,1,EW,174048
+grinnaux,yes,1011898,Grinnaux,2,Elezen,male,1,1,HW,280506
+highlandergladiator,yes,1024002,Highlander gladiator,1,Hyur,male,1,1,StB,72518
+imperialsoldier,yes,1005068,imperial soldier,1,Hyur,male,1,1,ShB,161992
+ketonye,yes,1049687,Ketonye,1,Hyur,female,1,1,DT,41104
+nophica,yes,1044324,Nophica,0,unknown,unknown,1,1,EW,87456
+pakwene,yes,1049684,Pakwene,1,Hyur,male,1,1,DT,108288
+resistancefighter,yes,1021654,Resistance fighter,1,Hyur,male,1,1,StB,14834
+shantotto,yes,1005539,Shantotto,1,Hyur,male,1,1,DT,68336
+shiva,yes,1010064,Shiva,0,unknown,unknown,1,1,ARR,50892
+wickedthunder,yes,1049763,Wicked Thunder,0,unknown,unknown,1,1,DT,122048
+woundedimperial,yes,1022026,wounded imperial,1,Hyur,male,1,1,StB,310448
+ysayle,yes,1011637,Ysayle,2,Elezen,female,1,1,ARR,41564
+yuyuhase,yes,1009147,Yuyuhase,3,Lalafell,male,1,1,ARR,151894
+mysteryvoice,no,,,,unknown,unknown,602,12,StB ShB,114063228
+venas,no,,,,unknown,unknown,241,3,ShB EW,44137604
+originalsphene,no,,,,unknown,unknown,219,3,DT,36716544
+blackknight,no,,,,unknown,unknown,160,5,EW DT,33510580
+vritra,no,,,,unknown,unknown,159,7,EW,44546048
+varshahnbig,no,,,,unknown,unknown,148,4,EW,21612536
+edmont,no,,,,unknown,unknown,120,10,HW,29141744
+iceheart,no,,,,unknown,unknown,119,6,ARR HW,26874242
+shadowhunter,no,,,,unknown,unknown,86,5,StB ShB,18923244
+thordan,no,,,,unknown,unknown,73,5,HW,21285658
+watcherofmoon,no,,,,unknown,unknown,73,3,EW,21115158
+awaheen,no,,,,unknown,unknown,55,2,EW,10887030
+newsphene,no,,,,unknown,unknown,44,2,DT,8845648
+firemonolith,no,,,,unknown,unknown,43,3,EW,9589090
+robeman,no,,,,unknown,unknown,29,4,StB,6664766
+lysenarration,no,,,,unknown,unknown,28,5,StB,7637688
+earthmonolith,no,,,,unknown,unknown,26,1,EW,5215840
+ironmask,no,,,,unknown,unknown,26,1,HW,9173122
+windmonolith,no,,,,unknown,unknown,26,1,EW,3990274
+solutionnfighter,no,,,,unknown,unknown,24,3,DT,3666160
+dummyardbert,no,,,,unknown,unknown,21,2,ShB,4738948
+endsinger,no,,,,unknown,unknown,21,3,EW,11461496
+waitress02236,no,,,,unknown,unknown,20,1,HW,4696482
+eulmoreadjutant,no,,,,unknown,unknown,19,2,ShB,1624132
+immigrationcontrolstaff,no,,,,unknown,unknown,19,3,EW,3900846
+announcer,no,,,,unknown,unknown,17,2,DT,4813568
+eaa,no,,,,unknown,unknown,17,1,EW,5154746
+garleanleaderdoma,no,,,,unknown,unknown,17,1,StB,3595320
+zada,no,,,,unknown,unknown,17,2,ShB,3970090
+igeyohrm,no,,,,unknown,unknown,16,3,HW,2741164
+hhetsarroman,no,,,,unknown,unknown,15,1,DT,3267776
+masterstigmaone,no,,,,unknown,unknown,15,1,EW,5108372
+puppeteervoidcent,no,,,,unknown,unknown,15,1,DT,2763328
+soldier03608,no,,,,unknown,unknown,15,1,ShB,2341550
+virasoldier,no,,,,unknown,unknown,15,1,StB,3603646
+tireddragon,no,,,,unknown,unknown,14,1,EW,3946774
+watermonolith,no,,,,unknown,unknown,14,2,EW,2936028
+bravesoldier,no,,,,unknown,unknown,13,1,ShB,1479160
+eab,no,,,,unknown,unknown,13,1,EW,3402642
+wuur,no,,,,unknown,unknown,13,1,ARR,3904044
+pippin,no,,,,unknown,unknown,12,3,ARR HW,2214768
+susano,no,,,,unknown,unknown,12,2,StB EW,3988628
+botanistman,no,,,,unknown,unknown,11,1,EW,3009534
+peddlerofnorvrandt,no,,,,unknown,unknown,11,1,ShB,2017554
+asahifather,no,,,,unknown,unknown,10,1,StB,1520656
+irritation05306,no,,,,unknown,unknown,10,2,DT,1193552
+alamhigancitizena,no,,,,unknown,unknown,9,2,StB EW,1410958
+koujintaicho,no,,,,unknown,unknown,9,1,StB,1781394
+ladyinwaiting2,no,,,,unknown,unknown,9,3,ARR HW,659856
+palakaswomanb,no,,,,unknown,unknown,9,2,EW,913560
+preservationwoman73,no,,,,unknown,unknown,9,1,DT,2670992
+qalyanapatriarch,no,,,,unknown,unknown,9,2,StB,2576166
+readerofondo,no,,,,unknown,unknown,9,1,ShB,2092496
+yesterlandtroupe,no,,,,unknown,unknown,9,1,DT,1932928
+alexandriaboy71,no,,,,unknown,unknown,8,1,DT,1169984
+hannisholdwomana,no,,,,unknown,unknown,8,1,EW,1218210
+hoobigobakooljajaminionsa,no,,,,unknown,unknown,8,2,DT,771440
+oldwoman02236,no,,,,unknown,unknown,8,1,HW,1454006
+thetwelve,no,,,,unknown,unknown,8,1,EW,404408
+amaljaachieftain,no,,,,unknown,unknown,7,2,ShB,2068834
+garleanleadera,no,,,,unknown,unknown,7,3,StB,1538018
+garleanofficer,no,,,,unknown,unknown,7,1,StB,795650
+oldeulmoremayor,no,,,,unknown,unknown,7,1,ShB,995806
+sekishintaisoldier,no,,,,unknown,unknown,7,1,StB,799610
+tonawaatauqmaleauda,no,,,,unknown,unknown,7,3,DT,979216
+trialofficiant,no,,,,unknown,unknown,7,1,HW,1409516
+alamhigancitizen1,no,,,,unknown,unknown,6,1,StB,863008
+alchemistofthegreatworka,no,,,,unknown,unknown,6,1,EW,686832
+alexandriaman71a,no,,,,unknown,unknown,6,1,DT,1059440
+ancientsa,no,,,,unknown,unknown,6,1,ShB,1527430
+bewilderment05306,no,,,,unknown,unknown,6,2,DT,714048
+bossoffuath,no,,,,unknown,unknown,6,1,ShB,1071062
+calmness05306,no,,,,unknown,unknown,6,2,DT,458448
+cefca,no,,,,unknown,unknown,6,1,DT,714528
+clownofred,no,,,,unknown,unknown,6,1,ShB,1068312
+fordolamother,no,,,,unknown,unknown,6,1,StB,732020
+g3f1imperialcenturion,no,,,,unknown,unknown,6,1,StB,601054
+hoobigomalesoldier,no,,,,unknown,unknown,6,2,DT,777792
+hyperboreiastaff,no,,,,unknown,unknown,6,1,EW,895348
+mesoterminal,no,,,,unknown,unknown,6,1,DT,3098512
+mysteriousvoice,no,,,,unknown,unknown,6,2,DT,3640576
+palakasman,no,,,,unknown,unknown,6,2,EW,561410
+palakaswomana,no,,,,unknown,unknown,6,2,EW,946300
+requestedlegislator,no,,,,unknown,unknown,6,1,EW,1351584
+sailorsunburned,no,,,,unknown,unknown,6,1,DT,1104144
+skullsoldiera,no,,,,unknown,unknown,6,1,StB,1362188
+alchemistofthegreatworkc,no,,,,unknown,unknown,5,1,EW,573306
+alexandriamother71,no,,,,unknown,unknown,5,1,DT,780432
+ancientshadowa,no,,,,unknown,unknown,5,1,EW,1581990
+asahimother,no,,,,unknown,unknown,5,1,StB,977886
+clownofblue,no,,,,unknown,unknown,5,1,ShB,990404
+crystariumgardyoung,no,,,,unknown,unknown,5,1,ShB,606108
+eulmoresoldiera,no,,,,unknown,unknown,5,1,ShB,237160
+fordolafather,no,,,,unknown,unknown,5,1,StB,522860
+garleanleaderb,no,,,,unknown,unknown,5,1,StB,662406
+gatetownmiddleage,no,,,,unknown,unknown,5,1,ShB,558866
+hannishboya,no,,,,unknown,unknown,5,1,EW,353064
+hoobigobakooljajaminionsb,no,,,,unknown,unknown,5,1,DT,821872
+kairos,no,,,,unknown,unknown,5,1,EW,2218932
+memoriamastera04661,no,,,,unknown,unknown,5,1,EW,796892
+palakasoldman,no,,,,unknown,unknown,5,1,EW,925878
+panicfisherman10720,no,,,,unknown,unknown,5,1,EW,631958
+peopleofnighta,no,,,,unknown,unknown,5,1,ShB,290540
+revolutionary1,no,,,,unknown,unknown,5,1,HW,662780
+woundedoldman,no,,,,unknown,unknown,5,2,StB,1081968
+xbalaalmalevillager,no,,,,unknown,unknown,5,1,DT,1063360
+alamhigancitizenb,no,,,,unknown,unknown,4,2,StB EW,705630
+alamhigandelegation,no,,,,unknown,unknown,4,1,EW,343576
+alchemistofthegreatworkb,no,,,,unknown,unknown,4,1,EW,325140
+ancientmemoryb,no,,,,unknown,unknown,4,1,EW,1342134
+ancientsb,no,,,,unknown,unknown,4,1,ShB,1050920
+ancientshadowc,no,,,,unknown,unknown,4,1,EW,1373570
+bardofdarkness,no,,,,unknown,unknown,4,1,HW,792156
+blackregulator73,no,,,,unknown,unknown,4,1,DT,825504
+bloodyexecutionera,no,,,,unknown,unknown,4,1,ShB,159744
+brassblade02400,no,,,,unknown,unknown,4,1,ARR,797854
+citizena02240,no,,,,unknown,unknown,4,1,HW,803112
+citizenb02240,no,,,,unknown,unknown,4,1,HW,1030790
+colleaguesoldier,no,,,,unknown,unknown,4,1,EW,777592
+doprobakooljajaminions,no,,,,unknown,unknown,4,1,DT,652256
+e3f1villager,no,,,,unknown,unknown,4,1,StB,602890
+e3f2garleansoldier,no,,,,unknown,unknown,4,1,StB,391514
+e3f2villagerb,no,,,,unknown,unknown,4,2,StB,318364
+e3f2villagerc,no,,,,unknown,unknown,4,2,StB,275662
+e3f2villagerd,no,,,,unknown,unknown,4,2,StB,375696
+eulmoresoldierb,no,,,,unknown,unknown,4,1,ShB,294244
+everlastingdarkness,no,,,,unknown,unknown,4,1,ShB,1217680
+g3f2villager,no,,,,unknown,unknown,4,1,StB,332268
+hannishmana,no,,,,unknown,unknown,4,1,EW,295814
+hannishmanb,no,,,,unknown,unknown,4,1,EW,355170
+hanuhanumaleauda,no,,,,unknown,unknown,4,3,DT,826432
+hoobigomalevillager,no,,,,unknown,unknown,4,1,DT,713664
+katanasoldier,no,,,,unknown,unknown,4,1,StB,855890
+lastwoman71,no,,,,unknown,unknown,4,1,DT,350992
+messenger02341,no,,,,unknown,unknown,4,1,HW,606740
+mysteriouscooperator,no,,,,unknown,unknown,4,1,ShB,890210
+oldtitania,no,,,,unknown,unknown,4,2,ShB,967760
+oronirman,no,,,,unknown,unknown,4,1,StB,839280
+pelupelumaleauda,no,,,,unknown,unknown,4,2,DT,772288
+referee,no,,,,unknown,unknown,4,3,DT,184768
+residenttrea,no,,,,unknown,unknown,4,1,DT,377312
+soldiera02354,no,,,,unknown,unknown,4,1,HW,1026038
+soldierc02354,no,,,,unknown,unknown,4,1,HW,366324
+solutionresident73,no,,,,unknown,unknown,4,1,DT,475424
+templerknight10810,no,,,,unknown,unknown,4,1,HW,1042494
+ultima,no,,,,unknown,unknown,4,1,StB,1716772
+xbalaalmaleauda,no,,,,unknown,unknown,4,3,DT,452528
+yesterlandgirl,no,,,,unknown,unknown,4,1,DT,227232
+alamhigancitizen2,no,,,,unknown,unknown,3,1,StB,430668
+alexandriaman71b,no,,,,unknown,unknown,3,1,DT,531152
+alexandriasoldier,no,,,,unknown,unknown,3,1,DT,283808
+alexandriawoman71b,no,,,,unknown,unknown,3,1,DT,560016
+algus,no,,,,unknown,unknown,3,1,StB,839956
+allagman,no,,,,unknown,unknown,3,1,EW,803942
+ancientmemorya,no,,,,unknown,unknown,3,1,EW,529514
+ancientshadowb,no,,,,unknown,unknown,3,1,EW,1009626
+ancientshadowd,no,,,,unknown,unknown,3,1,EW,1010088
+baggamonan,no,,,,unknown,unknown,3,1,StB,638084
+bloodyexecutionerb,no,,,,unknown,unknown,3,1,ShB,121062
+bloodyexecutionerc,no,,,,unknown,unknown,3,1,ShB,185544
+bodyguard01623,no,,,,unknown,unknown,3,1,HW,830738
+citizenc02240,no,,,,unknown,unknown,3,1,HW,1101954
+confusion05306,no,,,,unknown,unknown,3,1,DT,737040
+dirtyman,no,,,,unknown,unknown,3,1,ShB,145702
+dotharlman,no,,,,unknown,unknown,3,1,StB,477440
+e3f2garleanmessenger,no,,,,unknown,unknown,3,1,StB,457222
+e3f2villagera,no,,,,unknown,unknown,3,1,StB,271718
+eden3boss4,no,,,,unknown,unknown,3,1,ShB,920232
+employeewoman,no,,,,unknown,unknown,3,1,EW,208072
+eulmorepeopled,no,,,,unknown,unknown,3,1,ShB,441734
+eulmoresoldierc,no,,,,unknown,unknown,3,1,ShB,130940
+facilitatormale,no,,,,unknown,unknown,3,1,DT,419152
+fakegodbeast,no,,,,unknown,unknown,3,1,EW,1362784
+flamessoldier,no,,,,unknown,unknown,3,1,StB,102692
+formerminionvoidsent,no,,,,unknown,unknown,3,1,EW,350148
+garleanleaderc,no,,,,unknown,unknown,3,2,StB,793360
+hannishboyb,no,,,,unknown,unknown,3,1,EW,423562
+hannishman04735b,no,,,,unknown,unknown,3,1,EW,242260
+hannisholdwomanb,no,,,,unknown,unknown,3,1,EW,549534
+hhusatahwimalea,no,,,,unknown,unknown,3,1,DT,198704
+honu,no,,,,unknown,unknown,3,1,HW,620968
+hoobigofemaleaud,no,,,,unknown,unknown,3,2,DT,244864
+imperialengineer,no,,,,unknown,unknown,3,2,StB,486042
+ironworksengineer04500,no,,,,unknown,unknown,3,1,StB,711586
+memoriamastera10430,no,,,,unknown,unknown,3,1,EW,159782
+memoriamasterb10430,no,,,,unknown,unknown,3,1,EW,303222
+mysteriouslady,no,,,,unknown,unknown,3,1,ShB,1499844
+nextheroboy,no,,,,unknown,unknown,3,1,ShB,375118
+paladinofdarkness,no,,,,unknown,unknown,3,1,HW,581236
+panickedfighter,no,,,,unknown,unknown,3,1,StB,399384
+passer02356,no,,,,unknown,unknown,3,1,HW,532814
+preservationman73,no,,,,unknown,unknown,3,1,DT,351872
+propylaionstaff,no,,,,unknown,unknown,3,1,EW,500342
+refugeeman,no,,,,unknown,unknown,3,1,EW,435332
+residentboy05300,no,,,,unknown,unknown,3,2,DT,195536
+revolutionary2,no,,,,unknown,unknown,3,1,HW,328874
+salvagecrewa,no,,,,unknown,unknown,3,1,DT,286704
+shetonafemaleaud,no,,,,unknown,unknown,3,2,DT,563808
+soldierb,no,,,,unknown,unknown,3,1,DT,338240
+someoneoffuatha,no,,,,unknown,unknown,3,1,ShB,267552
+someoneoffuathb,no,,,,unknown,unknown,3,1,ShB,374112
+someoneoffuathc,no,,,,unknown,unknown,3,1,ShB,335920
+trainsystem,no,,,,unknown,unknown,3,1,DT,397600
+traitorb02236,no,,,,unknown,unknown,3,1,HW,690224
+tuliyollalsoldierc,no,,,,unknown,unknown,3,1,DT,80688
+voiceguide,no,,,,unknown,unknown,3,1,EW,572282
+voidsent04735,no,,,,unknown,unknown,3,1,EW,401914
+voidsent10410,no,,,,unknown,unknown,3,1,EW,390892
+whitemageofdarkness,no,,,,unknown,unknown,3,1,HW,561854
+xbalaalmaleaudb,no,,,,unknown,unknown,3,1,DT,565520
+xbalaalmalesoldier,no,,,,unknown,unknown,3,1,DT,245152
+yesterlandboy,no,,,,unknown,unknown,3,1,DT,180752
+zelenia,no,,,,unknown,unknown,3,1,DT,617104
+abel,no,,,,unknown,unknown,2,1,HW,280380
+alamhigancitizen3,no,,,,unknown,unknown,2,1,StB,208814
+alamhigogarleanofficer,no,,,,unknown,unknown,2,1,StB,312060
+alexandriawoman71a,no,,,,unknown,unknown,2,1,DT,513904
+amaurotadministrator,no,,,,unknown,unknown,2,1,ShB,291556
+ancientshadowe,no,,,,unknown,unknown,2,1,EW,394992
+bazaarmoba,no,,,,unknown,unknown,2,1,EW,105436
+blackmageofdarkness,no,,,,unknown,unknown,2,1,HW,307418
+boonewafemaleaud,no,,,,unknown,unknown,2,2,DT,368912
+boy05426,no,,,,unknown,unknown,2,1,DT,254752
+canaltowngirl,no,,,,unknown,unknown,2,1,DT,89232
+cavalry02236,no,,,,unknown,unknown,2,1,HW,124928
+cavalry02400,no,,,,unknown,unknown,2,1,ARR,174802
+crystalbrave02400,no,,,,unknown,unknown,2,1,ARR,243662
+crystariumcitizenc,no,,,,unknown,unknown,2,1,ShB,122668
+crystariumcitizend,no,,,,unknown,unknown,2,1,ShB,103132
+crystariumgardold,no,,,,unknown,unknown,2,1,ShB,363100
+crystariumgatekeeper,no,,,,unknown,unknown,2,1,ShB,238008
+crystariumoldman,no,,,,unknown,unknown,2,2,ShB,106432
+domanmaid,no,,,,unknown,unknown,2,1,StB,222806
+e3f2villagere,no,,,,unknown,unknown,2,1,StB,392206
+e3f2villagerf,no,,,,unknown,unknown,2,1,StB,205668
+employeeman,no,,,,unknown,unknown,2,1,EW,83898
+eulmoremana,no,,,,unknown,unknown,2,1,ShB,83194
+eulmoremanb,no,,,,unknown,unknown,2,1,ShB,204788
+eulmorepeopleb,no,,,,unknown,unknown,2,1,ShB,270920
+eulmorepeoplec,no,,,,unknown,unknown,2,1,ShB,321212
+femaleheretic,no,,,,unknown,unknown,2,1,HW,65154
+followerofteledji,no,,,,unknown,unknown,2,1,ARR,302028
+garleangeneral,no,,,,unknown,unknown,2,1,ShB,253408
+garleanharpooner,no,,,,unknown,unknown,2,1,StB,198848
+garleansoldier10410,no,,,,unknown,unknown,2,1,EW,141560
+gatetownman,no,,,,unknown,unknown,2,1,ShB,103704
+gatetownwoman,no,,,,unknown,unknown,2,1,ShB,117960
+haambortman,no,,,,unknown,unknown,2,1,EW,268390
+hannishman04735a,no,,,,unknown,unknown,2,1,EW,214688
+hannishwomana,no,,,,unknown,unknown,2,1,EW,107130
+hhusatahwiauda,no,,,,unknown,unknown,2,1,DT,220560
+hhusatahwiaudsb,no,,,,unknown,unknown,2,1,DT,146336
+hhusatahwimaleb,no,,,,unknown,unknown,2,1,DT,90736
+imperialsoldier04505,no,,,,unknown,unknown,2,1,StB,74020
+journeysheadnurse,no,,,,unknown,unknown,2,1,ShB,151482
+krakensdeckhand,no,,,,unknown,unknown,2,1,StB,533930
+legislatora,no,,,,unknown,unknown,2,2,EW,426614
+linercrew,no,,,,unknown,unknown,2,1,EW,433624
+maleheretic,no,,,,unknown,unknown,2,1,HW,57520
+mordmerchanta,no,,,,unknown,unknown,2,1,ShB,108780
+mordmerchantb,no,,,,unknown,unknown,2,1,ShB,105062
+mordmerchantc,no,,,,unknown,unknown,2,1,ShB,144244
+nanamosteward,no,,,,unknown,unknown,2,1,StB,180214
+nokken,no,,,,unknown,unknown,2,1,EW,337184
+officeclerk,no,,,,unknown,unknown,2,1,EW,320464
+pandaemonium,no,,,,unknown,unknown,2,1,EW,1084112
+queenactor,no,,,,unknown,unknown,2,1,DT,248672
+residentman05300,no,,,,unknown,unknown,2,1,DT,268048
+resistancewarrior,no,,,,unknown,unknown,2,1,ShB,644560
+sailorpanicvoicea,no,,,,unknown,unknown,2,1,DT,233968
+sailorpanicvoicec,no,,,,unknown,unknown,2,1,DT,193584
+salvagecrewb,no,,,,unknown,unknown,2,1,DT,148032
+sharlayancitizena,no,,,,unknown,unknown,2,1,EW,181006
+skullsoldierc,no,,,,unknown,unknown,2,1,StB,475432
+soldiera,no,,,,unknown,unknown,2,1,DT,229968
+soldierb02354,no,,,,unknown,unknown,2,1,HW,180918
+someoneoffuathd,no,,,,unknown,unknown,2,1,ShB,196156
+timid05306,no,,,,unknown,unknown,2,1,DT,268672
+traitorc02236,no,,,,unknown,unknown,2,1,HW,614098
+trepidation05306,no,,,,unknown,unknown,2,1,DT,181760
+tuliyollalsoldierd,no,,,,unknown,unknown,2,1,DT,69904
+turmoil05306,no,,,,unknown,unknown,2,1,DT,328544
+uldahndelegation,no,,,,unknown,unknown,2,1,EW,287112
+unsettledresearcher,no,,,,unknown,unknown,2,1,ShB,214996
+vigilantemalea,no,,,,unknown,unknown,2,2,DT,160096
+villagevoidsenta,no,,,,unknown,unknown,2,1,EW,158126
+villagevoidsentb,no,,,,unknown,unknown,2,1,EW,221288
+villagevoidsentc,no,,,,unknown,unknown,2,1,EW,185340
+villagevoidsentd,no,,,,unknown,unknown,2,1,EW,216338
+voidperson04735,no,,,,unknown,unknown,2,1,EW,330276
+warrioroflightavatars,no,,,,unknown,unknown,2,1,ShB,483792
+alamhigancitizenc,no,,,,unknown,unknown,1,1,StB,33644
+alamhiganliberatora,no,,,,unknown,unknown,1,1,StB,47262
+alamhiganliberatorb,no,,,,unknown,unknown,1,1,StB,25504
+alphinaudandalisaie,no,,,,unknown,unknown,1,1,ARR,77006
+anantasoldier,no,,,,unknown,unknown,1,1,StB,30234
+anxiety05306,no,,,,unknown,unknown,1,1,DT,96464
+bazaarmobb,no,,,,unknown,unknown,1,1,EW,35690
+bazaarmobc,no,,,,unknown,unknown,1,1,EW,43170
+biggswedge,no,,,,unknown,unknown,1,1,HW,32434
+canaltownmale,no,,,,unknown,unknown,1,1,DT,56176
+crystariumcitizena,no,,,,unknown,unknown,1,1,ShB,29398
+crystariumcitizenb,no,,,,unknown,unknown,1,1,ShB,57448
+crystariumgardpicket,no,,,,unknown,unknown,1,1,ShB,56898
+crystariumgirl,no,,,,unknown,unknown,1,1,ShB,89164
+darknokken,no,,,,unknown,unknown,1,1,EW,141994
+dopromalecustomer,no,,,,unknown,unknown,1,1,DT,311424
+dotharlwoman,no,,,,unknown,unknown,1,1,StB,192132
+e3f1garleansoldier,no,,,,unknown,unknown,1,1,StB,106310
+ealdnarche,no,,,,unknown,unknown,1,1,DT,291968
+eden3boss3,no,,,,unknown,unknown,1,1,ShB,201790
+eden3boss5,no,,,,unknown,unknown,1,1,ShB,460700
+eulmorepeoplea,no,,,,unknown,unknown,1,1,ShB,107916
+fearfulcitizena,no,,,,unknown,unknown,1,1,ShB,58416
+fearfulcitizenb,no,,,,unknown,unknown,1,1,ShB,38330
+garleanleaderd,no,,,,unknown,unknown,1,1,StB,47812
+garleansoldier10320,no,,,,unknown,unknown,1,1,EW,42114
+girl05426,no,,,,unknown,unknown,1,1,DT,130608
+gridaniandelegation,no,,,,unknown,unknown,1,1,EW,112030
+guard02500,no,,,,unknown,unknown,1,1,ARR,42664
+hanuhanubearera,no,,,,unknown,unknown,1,1,DT,78016
+hanuhanubearerb,no,,,,unknown,unknown,1,1,DT,89456
+hanuhanubearerc,no,,,,unknown,unknown,1,1,DT,88864
+hanuhanubearerd,no,,,,unknown,unknown,1,1,DT,96048
+hephaestus,no,,,,unknown,unknown,1,1,EW,282574
+hhusatahwifemalea,no,,,,unknown,unknown,1,1,DT,57104
+hhusatahwifemaleb,no,,,,unknown,unknown,1,1,DT,64256
+hungarygarlean10320,no,,,,unknown,unknown,1,1,EW,68162
+imperialdoctor,no,,,,unknown,unknown,1,1,StB,38748
+journeysheadpatient,no,,,,unknown,unknown,1,1,ShB,33072
+kidnappedpirate,no,,,,unknown,unknown,1,1,StB,81296
+kojinsoldier,no,,,,unknown,unknown,1,1,StB,133766
+legislatorb,no,,,,unknown,unknown,1,1,EW,112514
+memory,no,,,,unknown,unknown,1,1,ShB,2212560
+nabaatharengpeoplea,no,,,,unknown,unknown,1,1,ShB,134668
+nabaatharengpeopleb,no,,,,unknown,unknown,1,1,ShB,47900
+nabaatharengpeoplec,no,,,,unknown,unknown,1,1,ShB,45458
+nabaatharengpeopled,no,,,,unknown,unknown,1,1,ShB,104946
+oblivionwoman73,no,,,,unknown,unknown,1,1,DT,116464
+outskirtscaregivera,no,,,,unknown,unknown,1,1,DT,63664
+outskirtscaregiverb,no,,,,unknown,unknown,1,1,DT,37264
+outskirtsfarmera,no,,,,unknown,unknown,1,1,DT,171216
+outskirtsfarmerb,no,,,,unknown,unknown,1,1,DT,74000
+peopleofnightb,no,,,,unknown,unknown,1,1,ShB,89986
+puppetman,no,,,,unknown,unknown,1,1,ShB,177458
+raubahnmerlwybkanesenna,no,,,,unknown,unknown,1,1,HW,77336
+residenttreb,no,,,,unknown,unknown,1,1,DT,63136
+residenttrec,no,,,,unknown,unknown,1,1,DT,48672
+resolutesoldier,no,,,,unknown,unknown,1,1,ShB,165314
+restlessgarlean10320,no,,,,unknown,unknown,1,1,EW,188986
+sailorpanicvoiceb,no,,,,unknown,unknown,1,1,DT,174560
+serpentssoldier,no,,,,unknown,unknown,1,1,StB,31532
+shaaloanipassenger,no,,,,unknown,unknown,1,1,DT,156448
+shadowlord,no,,,,unknown,unknown,1,1,DT,313248
+sharlayancitizenb,no,,,,unknown,unknown,1,1,EW,108620
+shetonamaleaud,no,,,,unknown,unknown,1,1,DT,30960
+skullsoldierb,no,,,,unknown,unknown,1,1,StB,202670
+someoneofnumoua,no,,,,unknown,unknown,1,1,ShB,49484
+someoneofnumoub,no,,,,unknown,unknown,1,1,ShB,45898
+souleater,no,,,,unknown,unknown,1,1,EW,311394
+spyvoidsent,no,,,,unknown,unknown,1,1,EW,372752
+templeknight02400,no,,,,unknown,unknown,1,1,ARR,70362
+templeknight2,no,,,,unknown,unknown,1,1,HW,71924
+teshitapirate,no,,,,unknown,unknown,1,1,StB,25746
+tonawaatauqmaleaudb,no,,,,unknown,unknown,1,1,DT,78528
+tuliyollalchild,no,,,,unknown,unknown,1,1,DT,52640
+tuliyollalfemale,no,,,,unknown,unknown,1,1,DT,91360
+tuliyollalmale,no,,,,unknown,unknown,1,1,DT,94736
+tuliyollalsoldiera,no,,,,unknown,unknown,1,1,DT,27248
+tuliyollalsoldierb,no,,,,unknown,unknown,1,1,DT,41216
+voidsenta,no,,,,unknown,unknown,1,1,EW,214696
+voidsentb,no,,,,unknown,unknown,1,1,EW,489300
+voidsentc,no,,,,unknown,unknown,1,1,EW,269476
+voidsentd,no,,,,unknown,unknown,1,1,EW,318624
+waiterofthelaststand,no,,,,unknown,unknown,1,1,EW,61298
+xbalaalmalecustomer,no,,,,unknown,unknown,1,1,DT,493664
+yokhuyenemya,no,,,,unknown,unknown,1,1,DT,615920
+youngtempleknight,no,,,,unknown,unknown,1,1,HW,27484

@@ -62,13 +62,41 @@ public sealed class PackManifestJson
 }
 
 /// <summary>
-/// One silent-miss worklist row (Q3/Q7). Residue entries record source addon
-/// and game context so the miner can replay them without reverse lookup.
+/// NPC metadata resolved from the running game, not from the pack. Kept
+/// separate from NpcId (the manifest lookup key) because one speaker_token
+/// keeps the same voice/race/sex across expansions while expansion and zone
+/// vary per line.
 /// </summary>
-public sealed class MissEntry
+public sealed class NpcMetadata
 {
+    public string Name { get; set; } = "";
+    public uint? NpcId { get; set; }
+    /// <summary>id = numeric row key, name = normalized name, none = unresolved.</summary>
+    public string Match { get; set; } = "none";
+    public int Candidates { get; set; }
+    public bool Ambiguous { get; set; }
+    public uint RaceId { get; set; }
+    public string Race { get; set; } = "unknown";
+    public byte? Gender { get; set; }
+    public string Sex { get; set; } = "unknown";
+    public uint? ExpansionId { get; set; }
+    public string Expansion { get; set; } = "unknown";
+}
+
+/// <summary>
+/// One voice-event row: cache hit or miss. Misses are the generation
+/// worklist; hits are evidence that a line is already covered. Metadata is
+/// developer-facing and never triggers generation.
+/// </summary>
+public sealed class VoiceEvent
+{
+    /// <summary>"hit" or "miss".</summary>
+    public string Result { get; set; } = "miss";
+    public string Id { get; set; } = "";
     public string Lang { get; set; } = "en";
+    /// <summary>Pack voice id, i.e. the speaker_token (Unknown on an unmapped miss).</summary>
     public string VoiceId { get; set; } = "Unknown";
+    /// <summary>Manifest lookup key; not necessarily a numeric NPC row id.</summary>
     public string NpcId { get; set; } = "Unknown";
     /// <summary>Cleaned speaker at capture time. NpcId becomes the mapped id
     /// once a manifest is loaded, so the cleaned name is kept separately.</summary>
@@ -79,8 +107,9 @@ public sealed class MissEntry
     public string Source { get; set; } = "";
     public string Zone { get; set; } = "";
     public string GameVersion { get; set; } = "unknown";
+    public NpcMetadata Npc { get; set; } = new();
     public DateTimeOffset Utc { get; set; }
 
     [JsonIgnore]
-    public string Id => Common.VoiceId.ComputeId(Lang, VoiceId, NpcId, Sentence);
+    public string ComputedId => Common.VoiceId.ComputeId(Lang, VoiceId, NpcId, Sentence);
 }

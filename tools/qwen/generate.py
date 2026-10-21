@@ -1,18 +1,26 @@
 #!/usr/bin/env python3
-"""oh-my-voice Qwen3-TTS pack generator: misses.jsonl + refs -> ogg + manifest.
+"""oh-my-voice Qwen3-TTS pack generator: events.jsonl + x-vectors -> ogg + manifest.
 
 Usage:
-  generate.py --misses <misses.jsonl> --refs <refs> --map voice-map.json \
+  generate.py --events <events.jsonl> --xvectors <xvectors> --map voice-map.json \
       --out <packdir> --sanitizer-pin <v1:sha> [--lang en] \
       [--qwen3-model <id-or-dir>]
 
-Qwen3-TTS Base performs zero-shot voice cloning from a reference WAV and an
-optional sibling <voiceId>.txt transcript. Without a transcript the clone
-falls back to x-vector-only mode, which upstream warns is lower quality.
+The event log contains both cache hits and misses. Only rows with
+Result="miss" (or no Result, as in the legacy misses.jsonl) are generated.
+Hits are diagnostics, not work.
 
-voice-map.json: { "<NpcId or RawSpeaker>": "<voiceId>" }
-  Unmapped speakers fall back to generic voices by --default-male/--default-female
-  (voiceIds must exist as <refs>/<voiceId>.wav).
+Qwen3-TTS Base generates from one precomputed average speaker embedding
+(x-vector) per voice. This is the supported method. Single-reference
+zero-shot cloning and ICL transcripts are not used: they are lower quality and
+their code path has been removed.
+
+voice-map.json: { "<NpcId or RawSpeaker>": "<xvector name>" }
+  An explicit map entry wins. Without one, a normalized NpcId that matches
+  exactly one existing <xvectors>/<token>.npy is used (Alphinaud ->
+  alphinaud). If a name or key maps to more than one vector, the row is
+  skipped rather than guessing. Rows with no matching vector are skipped and
+  stay in the worklist; there is no single-reference or generic default.
 
 The generator uses the plugin-sanitized Sentence/Speaker from each miss row
 VERBATIM and only recomputes md5(lang:voice:npc:sentence). It must NEVER
@@ -34,6 +42,7 @@ rather than being installed.
 import argparse
 import hashlib
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -60,36 +69,28 @@ _QWEN_LANGS = {
 }
 
 
-def qwen3_ref_text(ref, force_x_vector):
-    if force_x_vector:
-        return None
-    sidecar = ref.with_suffix(".txt")
-    if sidecar.is_file():
-        text = sidecar.read_text(encoding="utf-8").strip()
-        if text:
-            return text
-    return None
-
-
-def synthesize_qwen3(tts, args, p, ref, wav_tmp, retry_kwargs):
+def synthesize_qwen3(tts, args, p, xvector, wav_tmp, retry_kwargs):
+    import numpy as np
     import soundfile as sf
+    import torch
+    from qwen_tts.inference.qwen3_tts_model import VoiceClonePromptItem
 
-    key = (str(ref), args.qwen3_x_vector_only)
-    prompt = _QWEN_PROMPTS.get(key)
+    prompt = _QWEN_PROMPTS.get(str(xvector))
     if prompt is None:
-        ref_text = qwen3_ref_text(ref, args.qwen3_x_vector_only)
-        x_vector_only = ref_text is None
-        if x_vector_only and not args.qwen3_x_vector_only:
-            print(f"  qwen3: no transcript for {ref.name}; "
-                  "x-vector-only clone (lower quality)", file=sys.stderr)
-        prompt = tts.create_voice_clone_prompt(
-            ref_audio=str(ref), ref_text=ref_text,
-            x_vector_only_mode=x_vector_only)
-        _QWEN_PROMPTS[key] = prompt
+        embedding = np.load(xvector, allow_pickle=False)
+        if embedding.ndim != 1 or embedding.size != 2048:
+            raise ValueError(f"bad x-vector shape {embedding.shape} in {xvector}")
+        item = VoiceClonePromptItem(
+            ref_code=None,
+            ref_spk_embedding=torch.from_numpy(embedding).float(),
+            x_vector_only_mode=True,
+            icl_mode=False,
+            ref_text=None,
+        )
+        prompt = [item]
+        _QWEN_PROMPTS[str(xvector)] = prompt
     if args.qwen3_seed is not None:
         import random
-        import numpy as np
-        import torch
         random.seed(args.qwen3_seed)
         np.random.seed(args.qwen3_seed)
         torch.manual_seed(args.qwen3_seed)
@@ -107,23 +108,20 @@ def synthesize_qwen3(tts, args, p, ref, wav_tmp, retry_kwargs):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--misses", required=True)
-    ap.add_argument("--refs", required=True)
+    ap.add_argument("--events", required=True,
+                    help="plugin events.jsonl; hit rows are ignored, misses are generated")
+    ap.add_argument("--xvectors", required=True,
+                    help="directory of <voice>.npy average speaker embeddings")
     ap.add_argument("--map", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--lang", default="en")
     ap.add_argument("--sanitizer-pin", required=True,
                     help="Runtime Sanitizer.Pin from the plugin build; generation refuses to run without it.")
-    ap.add_argument("--default-male", default="generic-male-01")
-    ap.add_argument("--default-female", default="generic-female-01")
     ap.add_argument("--qwen3-model", default="Qwen/Qwen3-TTS-12Hz-1.7B-Base",
                     help="Qwen3-TTS Base model id or local dir (default: 1.7B Base).")
     ap.add_argument("--qwen3-attn", choices=["sdpa", "eager", "flash_attention_2"],
                     default="sdpa",
                     help="Qwen3 attention backend; sdpa works on ROCm.")
-    ap.add_argument("--qwen3-x-vector-only", action=argparse.BooleanOptionalAction,
-                    default=False,
-                    help="Ignore <ref>.txt and clone from the speaker embedding only.")
     ap.add_argument("--qwen3-non-streaming", action=argparse.BooleanOptionalAction,
                     default=False,
                     help="Qwen non-streaming mode (default: upstream streaming simulation).")
@@ -144,22 +142,41 @@ def main():
     if args.max_attempts < 1:
         ap.error("--max-attempts must be >= 1")
 
-    refs = Path(args.refs).expanduser()
+    xvectors = Path(args.xvectors).expanduser()
+    if not xvectors.is_dir():
+        ap.error(f"--xvectors directory not found: {xvectors}")
+    normalized_vectors = {}
+    for vector_path in sorted(xvectors.glob("*.npy")):
+        token = re.sub(r"[^a-z0-9]", "", vector_path.stem.lower())
+        if token:
+            normalized_vectors.setdefault(token, []).append(vector_path.stem)
     out = Path(args.out)
     voice_map = json.loads(Path(args.map).read_text())
 
-    rows = []
-    for line in Path(args.misses).read_text().splitlines():
+    events = Path(args.events).expanduser()
+    if not events.is_file():
+        legacy = events.with_name("misses.jsonl")
+        if events.name == "events.jsonl" and legacy.is_file():
+            print(f"event log not found; reading legacy {legacy}", file=sys.stderr)
+            events = legacy
+        else:
+            ap.error(f"--events file not found: {events}")
+
+    all_rows = []
+    for line in events.read_text().splitlines():
         line = line.strip()
         if not line:
             continue
         try:
-            rows.append(json.loads(line))
+            all_rows.append(json.loads(line))
         except json.JSONDecodeError:
             print(f"skip torn line: {line[:80]}", file=sys.stderr)
 
-    import re as _re
-    if not _re.fullmatch(r"v1:[0-9a-f]{64}", args.sanitizer_pin or ""):
+    rows = [r for r in all_rows
+            if str(r.get("Result", "miss")).lower() == "miss"]
+    print(f"{len(all_rows)} event rows, {len(rows)} misses")
+
+    if not re.fullmatch(r"v1:[0-9a-f]{64}", args.sanitizer_pin or ""):
         print("REFUSING TO RUN: --sanitizer-pin must look like v1:<sha256> from /omv Settings.", file=sys.stderr)
         sys.exit(2)
     print(f"sanitizer pin: {args.sanitizer_pin}")
@@ -175,7 +192,35 @@ def main():
         npc_key = r.get("NpcId", "") or cleaned_speaker or raw_speaker
         voice = voice_map.get(npc_key, voice_map.get(raw_speaker, voice_map.get(cleaned_speaker)))
         if voice is None:
-            voice = args.default_male  # gender split needs manifest data; P2 default
+            # Game tokens are lowercase ASCII (alphinaud, yshtola, wuklamat).
+            # Use normalized names only when exactly one vector exists; an
+            # ambiguous match must stay a worklist miss, never a wrong speaker.
+            candidates = set()
+            ambiguous = set()
+            for key in (npc_key, cleaned_speaker, raw_speaker):
+                token = re.sub(r"[^a-z0-9]", "", key.lower())
+                matches = normalized_vectors.get(token, []) if token else []
+                if len(matches) == 1:
+                    candidates.add(matches[0])
+                elif len(matches) > 1:
+                    ambiguous.update(matches)
+            if ambiguous:
+                print(f"  ambiguous x-vector for {npc_key!r}: "
+                      f"{', '.join(sorted(ambiguous))}; skipping", file=sys.stderr)
+                continue
+            if len(candidates) > 1:
+                print(f"  ambiguous x-vector for {npc_key!r}: "
+                      f"{', '.join(sorted(candidates))}; skipping", file=sys.stderr)
+                continue
+            if candidates:
+                voice = next(iter(candidates))
+        if voice is None:
+            row_voice = r.get("VoiceId")
+            if row_voice and row_voice != "Unknown":
+                voice = row_voice
+        if voice is None:
+            print(f"  no x-vector mapping for {npc_key!r}; skipping", file=sys.stderr)
+            continue
         sentence = r.get("Sentence", "")
         if not sentence:
             print(f"  skip row with empty sanitized sentence (raw: {raw_speaker})", file=sys.stderr)
@@ -185,6 +230,11 @@ def main():
                      "speaker": cleaned_speaker, "sentence": sentence})
 
     print(f"{len(plan)} planned, {len({p['id'] for p in plan})} unique ids")
+    missing = sorted({p["voice"] for p in plan
+                      if not (xvectors / f"{p['voice']}.npy").is_file()})
+    if missing:
+        print(f"{len(missing)} voice(s) lack x-vectors: {', '.join(missing)}",
+              file=sys.stderr)
     for p in plan[:10]:
         print(f"  {p['id']} [{p['voice']}/{p['npc']}] {p['sentence'][:70]}")
 
@@ -220,16 +270,16 @@ def main():
         if target.exists():
             print(f"  skip exists {p['id']}")
         else:
-            ref = refs / (p["voice"] + ".wav")
-            if not ref.exists():
-                print(f"  MISSING REF {ref}; skipping {p['id']}", file=sys.stderr)
+            xvector = xvectors / (p["voice"] + ".npy")
+            if not xvector.exists():
+                print(f"  MISSING XVECTOR {xvector}; skipping {p['id']}", file=sys.stderr)
                 continue
             wav_tmp = vdir / (p["id"] + ".tmp.wav")
             limit = max(4.5, len(p["sentence"].split()) / args.min_wps + 1.0)
             for attempt in range(1, args.max_attempts + 1):
                 retry_kwargs = {} if attempt == 1 else {
                     "temperature": args.retry_temperature, "top_p": 0.80}
-                synthesize(tts, args, p, ref, wav_tmp, retry_kwargs)
+                synthesize(tts, args, p, xvector, wav_tmp, retry_kwargs)
                 dur = media_duration(wav_tmp)
                 if dur <= limit:
                     break

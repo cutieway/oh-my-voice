@@ -33,7 +33,8 @@ internal static class Program
         string? SheetFilter,
         string? SpeakerFilter,
         string? Vgmstream,
-        bool ExtractAudio);
+        bool ExtractAudio,
+        bool ByToken);
 
     private sealed record NpcInfo(uint Id, string Name, uint RaceId, byte Gender);
 
@@ -182,6 +183,7 @@ internal static class Program
         string? speakerFilter = null;
         string? vgmstream = "vgmstream-cli";
         var extract = false;
+        var byToken = false;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -191,7 +193,7 @@ internal static class Program
             {
                 case "-h" or "--help":
                     sqpack = "help";
-                    return new Options(sqpack, outDir, language, langCode, limit, sheetFilter, null, vgmstream, extract);
+                    return new Options(sqpack, outDir, language, langCode, limit, sheetFilter, null, vgmstream, extract, byToken);
                 case "--sqpack":
                     sqpack = Path.GetFullPath(Next());
                     break;
@@ -224,6 +226,9 @@ internal static class Program
                 case "--extract":
                     extract = true;
                     break;
+                case "--by-token":
+                    byToken = true;
+                    break;
                 case "--vgmstream":
                     vgmstream = Next();
                     break;
@@ -234,7 +239,7 @@ internal static class Program
 
         if (!Directory.Exists(sqpack))
             throw new ArgumentException($"sqpack directory not found: {sqpack}");
-        return new Options(sqpack, outDir, language, langCode, limit, sheetFilter, speakerFilter, vgmstream, extract);
+        return new Options(sqpack, outDir, language, langCode, limit, sheetFilter, speakerFilter, vgmstream, extract, byToken);
     }
 
     private static void PrintHelp()
@@ -245,18 +250,23 @@ internal static class Program
             Usage:
               xivdata [--sqpack DIR] [--out DIR] [--limit N] [--sheet FILTER]
                       [--speaker TOKEN] [--lang en|de|fr|ja] [--extract]
-                      [--vgmstream PATH]
+                      [--by-token] [--vgmstream PATH]
 
             Defaults:
               --sqpack ~/Public/xlcore/ffxiv/game/sqpack
               --out    ./xivdata-out
               --lang   en
 
+            Options:
+              --extract    write SCDs and decoded WAVs
+              --by-token   group scd/ and wav/ by speaker_token (for x-vectors)
+
             Output:
               dialogue.csv  sheet,row,text_key,audio_base,speaker_token,npc_id,
                             npc_name,race_id,gender,scd_path,scd_bytes,text
               scd/          raw SCDs (with --extract)
               wav/          decoded WAVs (with --extract; needs vgmstream-cli)
+                            grouped by speaker_token with --by-token
             """);
     }
 
@@ -376,7 +386,9 @@ internal static class Program
 
     private static void Extract(ExtractedLine line, GameData data, Options options)
     {
-        var owner = string.IsNullOrEmpty(line.NpcName) ? "unresolved" : SafeName(line.NpcName);
+        var owner = options.ByToken
+            ? line.SpeakerToken
+            : string.IsNullOrEmpty(line.NpcName) ? "unresolved" : SafeName(line.NpcName);
         var stem = SafeName(line.AudioBase);
         var scdDir = Path.Combine(options.OutDir, "scd", owner);
         var wavDir = Path.Combine(options.OutDir, "wav", owner);

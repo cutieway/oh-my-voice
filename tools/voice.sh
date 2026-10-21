@@ -6,8 +6,9 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PLUGIN_CFG="${OMV_PLUGIN_CONFIG:-$HOME/.xlcore/pluginConfigs/OhMyVoice}"
-MISSES="${OMV_MISSES:-$PLUGIN_CFG/misses.jsonl}"
-REFS="${OMV_REFS:-$ROOT/data/refs}"
+EVENTS="${OMV_EVENTS:-$PLUGIN_CFG/events.jsonl}"
+[[ -f "$EVENTS" || ! -f "$PLUGIN_CFG/misses.jsonl" ]] || EVENTS="$PLUGIN_CFG/misses.jsonl"
+XVECTORS="${OMV_XVECTORS:-$ROOT/data/xvectors}"
 MODELS="${OMV_MODELS:-$ROOT/data/models}"
 CACHE="${OMV_CACHE:-$ROOT/data/cache}"
 PIN="${OMV_SANITIZER_PIN:-}"
@@ -15,8 +16,12 @@ PIN="${OMV_SANITIZER_PIN:-}"
 command -v docker >/dev/null 2>&1 || { echo "docker not found" >&2; exit 1; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 not found" >&2; exit 1; }
 docker compose version >/dev/null 2>&1 || { echo "docker compose v2 not available" >&2; exit 1; }
-[[ -f "$MISSES" ]] || { echo "missing worklist: $MISSES" >&2; exit 1; }
-[[ -d "$REFS" ]] || { echo "missing reference dir: $REFS" >&2; exit 1; }
+[[ -f "$EVENTS" ]] || { echo "missing event log: $EVENTS" >&2; exit 1; }
+[[ -d "$XVECTORS" ]] || {
+  echo "missing xvector dir: $XVECTORS" >&2
+  echo "build it: docker compose -f compose.xvector.yaml run --rm xvector" >&2
+  exit 1
+}
 
 mkdir -p "$MODELS" "$CACHE"
 
@@ -33,12 +38,23 @@ fi
   exit 1
 }
 
-ROWS="$(python3 - "$MISSES" <<'PY'
-import sys
-print(sum(1 for line in open(sys.argv[1], encoding="utf-8") if line.strip()))
+ROWS="$(python3 - "$EVENTS" <<'PY'
+import json, sys
+n = 0
+for line in open(sys.argv[1], encoding="utf-8"):
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        row = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    if str(row.get("Result", "miss")).lower() == "miss":
+        n += 1
+print(n)
 PY
 )"
-[[ "$ROWS" -gt 0 ]] || { echo "worklist is empty: $MISSES" >&2; exit 1; }
+[[ "$ROWS" -gt 0 ]] || { echo "no misses in event log: $EVENTS" >&2; exit 1; }
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/omv-pack.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
@@ -51,12 +67,12 @@ if [[ -d "$PLUGIN_CFG/voicelines" ]]; then
 fi
 
 cd "$ROOT"
-export OMV_MISSES="$MISSES" OMV_REFS="$REFS" OMV_SANITIZER_PIN="$PIN"
+export OMV_EVENTS="$EVENTS" OMV_XVECTORS="$XVECTORS" OMV_SANITIZER_PIN="$PIN"
 export OMV_MODELS="$MODELS" OMV_CACHE="$CACHE"
 export OMV_OUT="$TMP" OMV_UID="$(id -u)" OMV_GID="$(id -g)"
 
-echo "worklist: $ROWS rows"
-echo "backend:  Qwen3-TTS Base"
+echo "events:   $ROWS misses"
+echo "backend:  Qwen3-TTS Base (average x-vectors)"
 echo "staging:  $TMP"
 echo "Do not click new dialogue until generation finishes."
 # Rebuild so the image always contains the current tools/qwen/generate.py; the

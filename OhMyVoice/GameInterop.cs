@@ -68,6 +68,8 @@ public sealed class GameInterop
 
     public Task RunOnFramework(Action action) => framework.Run(action);
 
+    public uint TerritoryTypeId => clientState.TerritoryType;
+
     public string GetZone()
     {
         try

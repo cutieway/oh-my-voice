@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
-# Q6 enforcement: real-actor reference audio must NEVER be committed.
-# Refs live in data/refs/ (gitignored) or another OMV_REFS directory.
+# Q6 enforcement: raw game audio and derived x-vectors must NEVER be committed.
+# Runtime audio lives under data/game-voices/ and data/xvectors/ (gitignored).
 set -euo pipefail
 
 fail=0
 
 # 1. No references/ directory may be tracked.
 if git ls-files | grep -E '(^|/)references/' ; then
-  echo "ERROR: references/ paths are tracked. Real-actor refs must stay out of the repo (Q6)." >&2
+  echo "ERROR: references/ paths are tracked. Voice audio must stay out of the repo (Q6)." >&2
   fail=1
 fi
 
-# 2. No audio blobs tracked, except pack fixtures under Data/ (ogg only, small).
+# 2. No audio/embedding blobs tracked, except pack fixtures under Data/ (ogg only, small).
 while IFS= read -r f; do
   case "$f" in
-    *.wav|*.flac|*.mp3)
-      echo "ERROR: tracked audio blob: $f" >&2
+    *.wav|*.flac|*.mp3|*.npy|*.npz|*.pt|*.pth)
+      echo "ERROR: tracked audio/embedding blob: $f" >&2
       fail=1
       ;;
     *.ogg)

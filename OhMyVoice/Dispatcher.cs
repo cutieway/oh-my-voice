@@ -15,7 +15,8 @@ public sealed class Dispatcher
     private readonly GameInterop game;
     private readonly PackStore pack;
     private readonly Playback playback;
-    private readonly MissLog misses;
+    private readonly VoiceLog events;
+    private readonly NpcMetadataService npcMetadata;
     private readonly VoSuppression suppression;
 
     private readonly object gate = new();
@@ -24,14 +25,16 @@ public sealed class Dispatcher
 
     public Dispatcher(
         IPluginLog log, Configuration config, GameInterop game,
-        PackStore pack, Playback playback, MissLog misses, VoSuppression suppression)
+        PackStore pack, Playback playback, VoiceLog events,
+        NpcMetadataService npcMetadata, VoSuppression suppression)
     {
         this.log = log;
         this.config = config;
         this.game = game;
         this.pack = pack;
         this.playback = playback;
-        this.misses = misses;
+        this.events = events;
+        this.npcMetadata = npcMetadata;
         this.suppression = suppression;
     }
 
@@ -58,6 +61,7 @@ public sealed class Dispatcher
         string voiceId = npc.VoiceId ?? "Unknown";
         string npcId = npc.NpcId ?? speaker;
         string id = VoiceId.ComputeId(Lang, voiceId, npcId, sentence);
+        var metadata = npcMetadata.Resolve(npcId, speaker, game.TerritoryTypeId);
 
         // (Q13) Subtitle dedupe by final ID + window, not raw bytes.
         lock (gate)
@@ -98,8 +102,10 @@ public sealed class Dispatcher
         {
             // (Q3) Silent miss + worklist. Sentence/Speaker are the
             // plugin-sanitized forms — the generator uses them verbatim.
-            misses.Record(new MissEntry
+            events.Record(new VoiceEvent
             {
+                Result = "miss",
+                Id = id,
                 Lang = Lang,
                 VoiceId = voiceId,
                 NpcId = npcId,
@@ -110,11 +116,32 @@ public sealed class Dispatcher
                 Source = source,
                 Zone = game.GetZone(),
                 GameVersion = Plugin.GameVersion,
+                Npc = metadata,
                 Utc = DateTimeOffset.UtcNow,
             });
             if (config.DebugLogging) log.Debug($"Miss {source} {id} ({speaker})");
             return;
         }
+
+        // A hit is evidence for the developer that this line is covered.
+        // It is only a log row; generation remains an offline action.
+        events.Record(new VoiceEvent
+        {
+            Result = "hit",
+            Id = id,
+            Lang = Lang,
+            VoiceId = voiceId,
+            NpcId = npcId,
+            Speaker = speaker,
+            Sentence = sentence,
+            RawSpeaker = rawSpeaker,
+            RawSentence = rawSentence,
+            Source = source,
+            Zone = game.GetZone(),
+            GameVersion = Plugin.GameVersion,
+            Npc = metadata,
+            Utc = DateTimeOffset.UtcNow,
+        });
 
         lock (gate) { lastPlayed = (id, DateTime.UtcNow); }
         playback.Play(id, path);

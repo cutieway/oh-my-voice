@@ -49,6 +49,10 @@ dotnet run --project tools/xivdata -- --out data/xivdata/scan
 dotnet run --project tools/xivdata -- --out data/xivdata/sphene \
   --speaker sphene --extract --vgmstream "$(command -v vgmstream-cli)"
 
+# all characters, grouped by speaker_token for the x-vector builder
+dotnet run --project tools/xivdata -- --out data/game-voices \
+  --extract --by-token
+
 # pilot
 dotnet run --project tools/xivdata -- --out data/xivdata/pilot --limit 20 --extract
 ```
@@ -61,9 +65,15 @@ filename and the sheet text.
 
 ```
 dialogue.csv
-scd/<NPC name>/<audio base>.scd
-wav/<NPC name>/<audio base>.wav
+scd/<NPC name>/<audio base>.scd          # with --extract
+wav/<NPC name>/<audio base>.wav          # with --extract
+scd/<speaker_token>/<audio base>.scd     # with --extract --by-token
+wav/<speaker_token>/<audio base>.wav     # with --extract --by-token
 ```
+
+`--by-token` groups by the game's `speaker_token` instead of the resolved NPC
+name. Unresolved tokens keep their own directory instead of landing in
+`unresolved/`. Use it to feed `tools/xvector/build_xvectors.py`.
 
 `dialogue.csv` columns:
 
@@ -82,6 +92,8 @@ race_id,gender,scd_path,scd_bytes,text
     rows, and the `manfst` branch matches Echokraut's
     `VoiceScdPaths.Build` verbatim, so it is not hiding a systematic miss
 - 4.5 GiB of SCD payload
+- full `--extract --by-token` run: 18 GB of SCD+WAV, 731 s on this machine;
+  one `vgmstream` decode failed (`visna/vo_voiceman_07505_000800.scd`)
 
 Example per-character totals: Alphinaud 1,631; Y'shtola 1,244; Alisaie 1,159;
 Wuk Lamat 1,071; Sphene 255 (25.3 min after decoding).
@@ -95,5 +107,5 @@ FFmpeg's `scd` demuxer rejects FFXIV's SCD version 50331648. Use
 vgmstream-cli -o out.wav in.scd
 ```
 
-It reports 44,099 Hz mono Microsoft 4-bit ADPCM for the sampled file; resample
-to 24 kHz for Qwen3-TTS training.
+It reports 44,099 Hz mono Microsoft 4-bit ADPCM for the sampled file; the
+x-vector builder resamples to 24 kHz.

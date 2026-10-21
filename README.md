@@ -12,15 +12,22 @@ AGPL-3.0. See `LICENSE.md`.
   (`OhMyVoice.Common`).
 - Pack: `voicelines/{id}.ogg` (Opus 48 kHz mono, 32 kbps),
   `voicelines_override/` wins.
-- Silent miss + deduped `misses.jsonl` worklist. No live TTS fallback.
+- Cache hit/miss event log (`events.jsonl`): deduped per result + ID, with
+  game-derived NPC metadata (name, race, sex, expansion, zone). Misses are
+  the generation worklist; hits prove coverage. No live TTS fallback.
+- One `speaker_token` keeps the same voice/race/sex across expansions;
+  expansion/zone are per event.
 - Real-VO suppression: ~100 ms wait before start, stop-if-started,
   data-driven blocklist.
 - Playback: NAudio `WaveOut` + Concentus decode. Zero native dependencies.
-- Batch generator: Qwen3-TTS Base zero-shot voice clone on ROCm, in Docker.
-  It consumes `misses.jsonl`, emits the Opus pack, and installs it into the
-  plugin config. Host needs no Python/ROCm toolchain.
-- No fine-tuning and no LoRA. The pack generator uses reference audio at
-  inference only.
+- Batch generator: Qwen3-TTS Base on ROCm, in Docker, driven only by
+  precomputed average speaker x-vectors.
+- No fine-tuning and no LoRA. Generation consumes one averaged embedding per
+  voice. Single-reference 3-30 s cloning and ICL transcripts are retired;
+  use them only for isolated tests, not for packs.
+- X-vector builder: averages every extracted game clip for a
+  `speaker_token` into one 2,048-float Qwen speaker embedding. No training,
+  no speech generation.
 
 ## Layout
 
@@ -32,27 +39,33 @@ OhMyVoice/            # Dalamud plugin (net10.0-windows)
   GameInterop.cs      # cutscene/duty state, SeString readers
   TalkCapture.cs      # AddonTalk poll + TalkSubtitle PostDraw
   VoSuppression.cs    # SoundManager hooks, real-VO detection
-  Dispatcher.cs       # ID, VO-wait, dedupe, miss logging, play
+  Dispatcher.cs       # ID, VO-wait, dedupe, hit/miss logging, play
   Playback.cs         # Concentus decode + NAudio WaveOut
   PackStore.cs        # manifest + override resolution + sanitizer gate
-  MissLog.cs          # deduped JSONL worklist (compacted on load)
+  NpcMetadataService.cs # live ENpcResident/ENpcBase metadata for logs
+  VoiceLog.cs         # hit/miss JSONL events, compacted on load
   Windows/            # /omv status + settings UI
 OhMyVoice.Common/     # net10.0 shared: Sanitizer v1, VoiceId, PackTypes
-scripts/check-refs.sh # Q6 guard: no reference audio in repo
-compose.yaml          # one batch service: tts-qwen
+scripts/check-refs.sh # Q6 guard: no voice audio/embeddings in repo
+compose.yaml          # batch generator: tts-qwen
+compose.xvector.yaml  # average x-vectors: xvector
 tools/
   qwen/               # Qwen3-TTS Dockerfile, entrypoint, generator
   voice.sh            # one-command live dev loop
-  voice-map.json      # NPC -> voiceId
+  voice-map.json      # NPC -> xvector name
   xivdata/            # optional cutscene SCD extractor (Lumina)
+  xvector/            # average speaker x-vector builder (no generation)
 data/                 # gitignored runtime root
   models/             # Qwen3-TTS Base weights
   cache/              # HF/Torch/MIOpen caches
-  refs/               # reference WAVs + optional .txt transcripts
+  game-voices/        # xivdata output: scd/ + wav/ per speaker_token
+  xvectors/           # one .npy + .json per speaker_token, manifest.json
   out/                # generated pack
 archive/tts-backends/ # XTTS/IndexTTS code, reference only, not built
 docs/
   QWEN3-TTS.md        # Qwen integration, quality, measurements
+  VOICES.md           # voice roster: counts, metadata, caveats
+  voices.csv          # one row per speaker label, metadata only
   archive/            # superseded IndexTTS performance report
 ```
 
@@ -72,15 +85,15 @@ Dalamud dev DLLs resolve from `~/.xlcore/dalamud/Hooks/dev`
 
 ## Batch generation (Docker, ROCm)
 
-One pinned ROCm/PyTorch image. Qwen3-TTS Base is zero-shot: 3-30 s of clean
-speech per speaker, no training. The host needs only the amdgpu driver,
+One pinned ROCm/PyTorch image. Qwen3-TTS Base is driven by one precomputed
+average x-vector per voice. The host needs only the amdgpu driver,
 `/dev/kfd`, `/dev/dri`, and Docker — no host Python, CUDA, or Nix TTS
 package.
 
 ```bash
-mkdir -p data/{models,cache,refs,out}
-cp /path/to/generic-male-01.wav data/refs/
-export OMV_MISSES="$HOME/.xlcore/pluginConfigs/OhMyVoice/misses.jsonl"
+mkdir -p data/{models,cache,xvectors,out}
+# build data/xvectors first (see below), then point voice-map.json at them
+export OMV_EVENTS="$HOME/.xlcore/pluginConfigs/OhMyVoice/events.jsonl"
 export OMV_SANITIZER_PIN="v1:..."   # from the plugin's manifest / settings
 
 docker compose build tts-qwen
@@ -91,34 +104,90 @@ docker compose run --rm tts-qwen    # -> data/out/voicelines/*.ogg + manifest.js
   `data/models/qwen3-tts/`. HF/Torch caches go to `data/cache/`.
   `--qwen3-model` / `OMV_QWEN_MODEL_DIR` can point at another Base checkpoint.
   The 0.6B Base was tested and rejected (worse and not faster).
-- Qwen clone mode uses a sibling `<voiceId>.txt` transcript next to
-  `<voiceId>.wav`; without one it falls back to x-vector-only cloning
-  (lower quality). See [docs/QWEN3-TTS.md](docs/QWEN3-TTS.md).
+- The generator reads `events.jsonl` and selects only `Result="miss"` rows;
+  hits are diagnostics. Each event carries NPC metadata resolved at playback
+  time (`Npc.Name`, `Npc.NpcId`, `Npc.Race`, `Npc.Sex`, `Npc.Expansion`,
+  `Npc.Zone`). Race/sex are stable per `speaker_token`; expansion varies.
+- The generator reads `<voice>.npy` from `--xvectors` (mounted at
+  `/xvectors`). `tools/voice-map.json` maps NPC keys to x-vector names; an
+  explicit entry wins, otherwise a normalized NPC name matching exactly one
+  existing vector is used (Alphinaud -> `alphinaud`). Ambiguous normalized
+  matches are skipped. Missing vectors are skipped and stay in the worklist.
+  Build the vectors with `compose.xvector.yaml` (below).
+  See [docs/QWEN3-TTS.md](docs/QWEN3-TTS.md).
 - The image is ~40 GB uncompressed. Keep free space for Docker layers and
   the model. `docker builder prune` reclaims build cache.
 - Do not run batch generation while the game is running (VRAM contention).
-- `OMV_OUT` (default `./data/out`), `OMV_LANG` (default `en`),
-  `OMV_VOICE_MAP` (default `tools/voice-map.json`), `OMV_UID`/`OMV_GID`,
-  `OMV_MODELS` (default `./data/models`), `OMV_CACHE` (default
-  `./data/cache`), and `OMV_REFS` (default `./data/refs`) are overridable.
+- `OMV_EVENTS` (required; plugin `events.jsonl`), `OMV_OUT` (default
+  `./data/out`), `OMV_LANG` (default `en`),
+  `OMV_VOICE_MAP` (default `tools/voice-map.json`), `OMV_XVECTORS`
+  (default `./data/xvectors`), `OMV_UID`/`OMV_GID`, `OMV_MODELS` (default
+  `./data/models`), and `OMV_CACHE` (default `./data/cache`) are
+  overridable.
 - The base image is pinned by tag and digest in `tools/qwen/Dockerfile`;
   `docker compose build --build-arg BASE_IMAGE=...` overrides it.
 - Torch/torchaudio come from the ROCm base image. Never add a CUDA torch
   wheel. `qwen-tts` is installed with `--no-deps` before its runtime deps so
   pip cannot replace the ROCm pair.
 - Qwen3-TTS controls: `--qwen3-model`, `--qwen3-attn` (`sdpa`/`eager`/
-  `flash_attention_2`), `--qwen3-x-vector-only`, `--qwen3-non-streaming`, and
-  `--qwen3-seed`. The image bakes `generate.py` at build time: rebuild after
-  changing the generator.
+  `flash_attention_2`), `--qwen3-non-streaming`, and `--qwen3-seed`. The
+  image bakes `generate.py` at build time: rebuild after changing the
+  generator.
 - **Do not set `TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1` for Qwen3-TTS.**
   It measured ~13-14% faster, but produced a different decode with an
   audibly shifted pitch/timbre versus the source clips; the baseline `sdpa`
   reruns were byte-identical. Keep the variable unset. Details:
   [docs/QWEN3-TTS.md](docs/QWEN3-TTS.md#aotriton-do-not-enable).
 - Qwen3-TTS 1.7B measured warm RTF **3.24-3.42** on the RX 9060 XT (load
-  ~8 s, first reference prompt ~29 s, later prompts ~0.5 s). Batch only; do
-  not put it in the live dialogue path. Listening samples and caveats:
-  [docs/QWEN3-TTS.md](docs/QWEN3-TTS.md).
+  ~8 s). Batch only; do not put it in the live dialogue path. Listening
+  samples and caveats: [docs/QWEN3-TTS.md](docs/QWEN3-TTS.md).
+
+### Average speaker x-vectors (game audio)
+
+**Supported method.** Do not use 3-30 s single-reference zero-shot or ICL
+transcripts for packs; use x-vectors unless explicitly testing another
+method. This path does not generate speech. It builds one average Qwen
+speaker embedding per `speaker_token` from **every** extracted cutscene clip,
+which drives the pack generator. It is not training and not LoRA.
+
+```bash
+# 1. extract all cutscene SCDs + WAVs, grouped by speaker_token
+DOTNET=/nix/store/j8zkmcl067q2aqlg8r3lhm7kbv8iwx6v-dotnet-sdk-wrapped-10.0.401/bin/dotnet
+$DOTNET run --project tools/xivdata -- \
+  --out data/game-voices --extract --by-token
+
+# 2. average all clips into data/xvectors/<speaker_token>.npy
+docker compose -f compose.xvector.yaml build
+docker compose -f compose.xvector.yaml run --rm xvector
+# one speaker while iterating:
+docker compose -f compose.xvector.yaml run --rm xvector --speaker sphene --force
+```
+
+- Step 1 needs the installed game's `sqpack` and `vgmstream-cli`; it writes
+  `data/game-voices/scd/<token>/` and `data/game-voices/wav/<token>/`.
+  Use `--speaker TOKEN` / `--limit N` to pilot.
+- Step 2 reads `data/game-voices/wav/<token>/*.wav`, resamples to 24 kHz
+  mono, extracts one 2,048-d embedding per clip, and means them. Output is
+  `data/xvectors/<token>.npy` (~8 KB), a sibling `.json`, and
+  `manifest.json`.
+- No clip sampling and no curated-subset filter: all extracted lines count.
+  Corpus size scales only the one-time embedding pass: 255 clips /
+  1,519.84 s of audio measured 37.18 s of extraction (≈41× realtime, 62.28 s
+  including model load). Alphinaud is 6.4× that clip count, so ≈4 minutes
+  one-time [estimate]; per-line generation cost is unchanged because the
+  prompt stays one fixed vector.
+- Existing `.npy` + `.json` pairs are skipped; pass `--force` to rebuild.
+  Broken clips are logged, counted in the sidecar, and do not abort the
+  speaker. A speaker with zero usable clips produces no vector.
+- WAV, not Ogg: lossy encoding would perturb the embeddings. The extraction
+  WAVs are 44.1 kHz; the builder resamples.
+- Phase 1 covers only characters with in-game voice audio and therefore a
+  `speaker_token`. Unvoiced NPCs (Storm Mage, OIC officers, generic citizens)
+  stay in the worklist and play nothing; synthetic/generic voices are a later
+  phase, not a hidden fallback.
+- Full measured run: 667 speakers, 25,597 clips, 152,667 s of audio,
+  832.0 s total, 0 clip errors, 11 MB of vectors. Extraction produced 18 GB
+  of SCD+WAV and took 731 s; one `vgmstream` clip failed.
 
 ### Live dev loop
 
@@ -160,10 +229,11 @@ The IndexTTS performance report is preserved at
 3. P1 proof: audible unvoiced Talk NPC + voiced ARR suppression +
    subtitle dedupe + stop behaviors, with debug flag on for the run.
 
-## Reference-audio policy (Q6)
+## Voice-audio policy (Q6)
 
-Real-actor reference wavs stay local-personal: `data/refs/` (gitignored) or
-another path supplied via `OMV_REFS`. NEVER committed, NEVER in the worklist.
-CI rejects `references/` paths, audio blobs, and files over 2 MiB.
-Distributed packs use generic-archetype or consented voices only.
-`voiceId` in the ID makes clean packs a distinct namespace by construction.
+Raw game audio (`data/game-voices/`) and derived x-vectors
+(`data/xvectors/`) stay local and gitignored. No single-reference/ICL
+transcript path is used for packs. NEVER commit raw audio or embeddings; CI
+rejects `references/` paths, audio blobs, and files over 2 MiB. Distributed
+packs use game-derived or consented voices only. `voiceId` in the ID makes
+clean packs a distinct namespace by construction.

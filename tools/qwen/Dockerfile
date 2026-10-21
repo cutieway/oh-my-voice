@@ -1,4 +1,4 @@
-# Qwen3-TTS (Base, voice clone) on ROCm. The host only needs the amdgpu
+# Qwen3-TTS (Base, x-vector voice generation) on ROCm. The host only needs the
 # driver; do not let pip replace the base image's torch/torchaudio with
 # PyPI CUDA/CPU wheels.
 ARG BASE_IMAGE=rocm/pytorch:rocm7.2.4_ubuntu22.04_py3.10_pytorch_release_2.8.0@sha256:880e126d83370e3502b069a39f85cbd7b1f6f7dbfbceb00b6fefbac03c5da091

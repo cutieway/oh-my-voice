@@ -35,7 +35,8 @@ public sealed class Plugin : IDalamudPlugin
     private readonly GameInterop game;
     private readonly PackStore pack;
     private readonly Playback playback;
-    private readonly MissLog misses;
+    private readonly VoiceLog events;
+    private readonly NpcMetadataService npcMetadata;
     private readonly Dispatcher dispatcher;
     private readonly VoSuppression suppression;
     private readonly TalkCapture capture;
@@ -53,9 +54,10 @@ public sealed class Plugin : IDalamudPlugin
 
         pack = new PackStore(PluginInterface, Log, Configuration);
         playback = new Playback(Log, Configuration);
-        misses = new MissLog(PluginInterface, Log);
+        events = new VoiceLog(PluginInterface, Log);
+        npcMetadata = new NpcMetadataService(DataManager, Log);
         suppression = new VoSuppression(GameInteropProvider, Log, Configuration, OnRealVo);
-        dispatcher = new Dispatcher(Log, Configuration, game, pack, playback, misses, suppression);
+        dispatcher = new Dispatcher(Log, Configuration, game, pack, playback, events, npcMetadata, suppression);
         capture = new TalkCapture(Framework, GameGui, AddonLifecycle, Log, Configuration, game, dispatcher);
 
         pack.Load();
@@ -77,7 +79,7 @@ public sealed class Plugin : IDalamudPlugin
         PluginInterface.UiBuilder.OpenConfigUi += ToggleConfigUi;
         PluginInterface.UiBuilder.OpenMainUi += ToggleMainUi;
 
-        Log.Information($"OhMyVoice loaded. Pack={(pack.PackEnabled ? "on" : "off")} Sanitizer={Sanitizer.Pin}");
+        Log.Information($"OhMyVoice loaded. Pack={(pack.PackEnabled ? "on" : "off")} Sanitizer={Sanitizer.Pin} Events={events.Path}");
     }
 
     private static unsafe void RefreshGameVersion()

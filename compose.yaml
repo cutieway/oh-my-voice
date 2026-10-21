@@ -4,8 +4,8 @@ name: oh-my-voice
 # amdgpu driver, /dev/kfd, /dev/dri, and Docker; Python/ROCm/torch live in the
 # image. Runtime data is consolidated under ./data (gitignored).
 #
-#   mkdir -p data/{models,cache,refs,out}
-#   export OMV_MISSES="$HOME/.xlcore/pluginConfigs/OhMyVoice/misses.jsonl"
+#   mkdir -p data/{models,cache,xvectors,out}
+#   export OMV_EVENTS="$HOME/.xlcore/pluginConfigs/OhMyVoice/events.jsonl"
 #   export OMV_SANITIZER_PIN="v1:..."
 #   docker compose build tts-qwen
 #   docker compose run --rm tts-qwen
@@ -20,9 +20,9 @@ services:
       - /dev/kfd
       - /dev/dri
     volumes:
-      - ${OMV_MISSES:?set OMV_MISSES to the plugin misses.jsonl}:/work/misses.jsonl:ro
+      - ${OMV_EVENTS:?set OMV_EVENTS to the plugin events.jsonl}:/work/events.jsonl:ro
       - ${OMV_VOICE_MAP:-./tools/voice-map.json}:/work/voice-map.json:ro
-      - ${OMV_REFS:-./data/refs}:/refs:ro
+      - ${OMV_XVECTORS:-./data/xvectors}:/xvectors:ro
       - ${OMV_OUT:-./data/out}:/out
       - ${OMV_CACHE:-./data/cache}:/cache
       - ${OMV_MODELS:-./data/models}:/models
@@ -35,10 +35,10 @@ services:
       OMV_QWEN_MODEL_DIR: /models/qwen3-tts/Qwen3-TTS-12Hz-1.7B-Base
       PIP_NO_CACHE_DIR: "1"
     command:
-      - --misses
-      - /work/misses.jsonl
-      - --refs
-      - /refs
+      - --events
+      - /work/events.jsonl
+      - --xvectors
+      - /xvectors
       - --map
       - /work/voice-map.json
       - --out
