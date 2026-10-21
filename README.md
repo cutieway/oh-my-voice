@@ -133,6 +133,17 @@ docker compose run --rm tts-qwen    # -> data/out/voicelines/*.ogg + manifest.js
   `flash_attention_2`), `--qwen3-non-streaming`, and `--qwen3-seed`. The
   image bakes `generate.py` at build time: rebuild after changing the
   generator.
+- Existing `.ogg` files are reused only when their recorded
+  `GenerationFingerprint` matches the current model revision, generation
+  settings, encoder settings, and that voice's x-vector hash. Manifests from
+  before fingerprints cause a one-time rebuild. Use
+  `./tools/voice.sh --force` (or `--force` directly) to regenerate every
+  planned line. `tools/voice.sh` stages the installed manifest so profiles
+  survive the dev loop.
+- Prefer a local `--qwen3-model` directory for the cache key: its weight
+  files are hashed, so the recorded revision is exact. A repo id resolves to
+  the Hugging Face cache commit after download; if it remains unresolved the
+  manifest warns and fingerprints use the repo id.
 - **Do not set `TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1` for Qwen3-TTS.**
   It measured ~13-14% faster, but produced a different decode with an
   audibly shifted pitch/timbre versus the source clips; the baseline `sdpa`
@@ -176,9 +187,11 @@ docker compose -f compose.xvector.yaml run --rm xvector --speaker sphene --force
   including model load). Alphinaud is 6.4× that clip count, so ≈4 minutes
   one-time [estimate]; per-line generation cost is unchanged because the
   prompt stays one fixed vector.
-- Existing `.npy` + `.json` pairs are skipped; pass `--force` to rebuild.
-  Broken clips are logged, counted in the sidecar, and do not abort the
-  speaker. A speaker with zero usable clips produces no vector.
+- Existing `.npy` + `.json` pairs are reused only when the WAV corpus, model
+  weights, and audio-pipeline version still match the recorded fingerprints;
+  otherwise that speaker rebuilds automatically. Pass `--force` to rebuild
+  regardless. Broken clips are logged, counted in the sidecar, and do not
+  abort the speaker. A speaker with zero usable clips produces no vector.
 - WAV, not Ogg: lossy encoding would perturb the embeddings. The extraction
   WAVs are 44.1 kHz; the builder resamples.
 - Phase 1 covers only characters with in-game voice audio and therefore a
@@ -198,12 +211,14 @@ installed manifest, so no env exports are needed. Then use `/omv` →
 **Reload pack**.
 
 ```bash
-./tools/voice.sh
+./tools/voice.sh            # reuse lines whose generation profile matches
+./tools/voice.sh --force    # regenerate every planned line
 ```
 
 The old manifest is kept as `manifest.json.bak`. Existing `.ogg` files are
-preserved and skipped; only new ids are synthesized. The first run builds
-the image, downloads the model, and creates the `data/` tree.
+reused only when their generation profile matches; new ids are synthesized.
+The first run builds the image, downloads the model, and creates the `data/`
+tree.
 
 The model occasionally appends an invented sentence to otherwise correct
 speech. The generator measures every new WAV and retries audio longer than

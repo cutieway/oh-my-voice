@@ -35,14 +35,25 @@ is ~8 KB; the input corpus can be hundreds of MB.
 
 ```
 data/xvectors/<speaker_token>.npy    # float32, shape (2048,)
-data/xvectors/<speaker_token>.json   # clips, errors, seconds, dim, norm, model
-data/xvectors/manifest.json          # all built speakers
+data/xvectors/<speaker_token>.json   # clips, errors, seconds, model + fingerprints
+data/xvectors/manifest.json          # all built speakers and provenance
 ```
 
-Existing `.npy` + `.json` pairs are skipped; `--force` rebuilds. A clip that
-fails to decode is counted in `Errors` and does not abort the speaker. A
-speaker with zero usable clips writes no vector and is absent from the
-manifest.
+A `.npy` + `.json` pair is reused only when the recorded WAV-corpus hash,
+model-weight hash, and audio-pipeline version all match the current inputs.
+Adding, removing, or changing a clip, changing the model directory contents,
+or bumping `PIPELINE_VERSION` automatically rebuilds that speaker. Vectors
+written before these fingerprints existed rebuild once. `--force` always
+rebuilds.
+
+The manifest does not claim a single model unless every indexed speaker has
+the same model name and fingerprint; otherwise it reports `"Model": "mixed"`
+and a `Models` breakdown. Each speaker JSON always records the exact
+provenance used for that vector.
+
+A clip that fails to decode is counted in `Errors` and does not abort the
+speaker. A speaker with zero usable clips writes no vector and is absent from
+the manifest.
 
 ## Options
 
@@ -66,8 +77,10 @@ Measured on the RX 9060 XT for 255 Sphene clips, 1,519.84 s of audio:
 - prompt build total: 62.28 s including load
 
 Corpus size scales only this one-time per-speaker step; the resulting prompt
-is one fixed vector, so later per-line zero-shot speed is unchanged. WAV, not
-Ogg, because lossy encoding would perturb the embedding.
+is one fixed vector, so later per-line zero-shot speed is unchanged. Cache
+validation reads the model files and WAV bytes each run, so an unchanged run
+still pays that I/O cost but skips model load and embedding extraction. WAV,
+not Ogg, because lossy encoding would perturb the embedding.
 
 Full measured run: 667 speakers, 25,597 clips, 152,667 s of audio, 832.0 s
 total, 0 clip errors, 11 MB of vectors. The 44.1 kHz extraction tree was

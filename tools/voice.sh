@@ -2,7 +2,17 @@
 # One-command live dev loop: stage the installed pack, generate every missed
 # line with Qwen3-TTS, validate it, then install it into the plugin config.
 # The running game is untouched until you press /omv -> Reload pack.
+#
+#   ./tools/voice.sh           # reuse lines whose generation profile matches
+#   ./tools/voice.sh --force   # regenerate every planned line
 set -euo pipefail
+
+FORCE=0
+if [[ "${1:-}" == "--force" ]]; then
+  FORCE=1
+  shift
+fi
+[[ $# -eq 0 ]] || { echo "usage: $0 [--force]" >&2; exit 2; }
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PLUGIN_CFG="${OMV_PLUGIN_CONFIG:-$HOME/.xlcore/pluginConfigs/OhMyVoice}"
@@ -59,11 +69,15 @@ PY
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/omv-pack.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
-# Preserve already-generated lines: the generator skips existing ids and
-# records their on-disk size/duration in the new manifest.
+# Preserve already-generated lines and the manifest that records their
+# generation profiles. The generator reuses a line only when its profile
+# still matches; old manifests without profiles cause a one-time rebuild.
 mkdir -p "$TMP/voicelines"
 if [[ -d "$PLUGIN_CFG/voicelines" ]]; then
   cp -a "$PLUGIN_CFG/voicelines/." "$TMP/voicelines/"
+fi
+if [[ -f "$PLUGIN_CFG/manifest.json" ]]; then
+  cp -f "$PLUGIN_CFG/manifest.json" "$TMP/manifest.json"
 fi
 
 cd "$ROOT"
@@ -78,7 +92,11 @@ echo "Do not click new dialogue until generation finishes."
 # Rebuild so the image always contains the current tools/qwen/generate.py; the
 # layer cache makes an unchanged run a no-op.
 docker compose build tts-qwen
-docker compose run --rm tts-qwen
+if (( FORCE )); then
+  docker compose run --rm -e OMV_FORCE=1 tts-qwen
+else
+  docker compose run --rm tts-qwen
+fi
 
 [[ -s "$TMP/manifest.json" ]] || { echo "generator produced no manifest" >&2; exit 1; }
 

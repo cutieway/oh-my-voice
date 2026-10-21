@@ -35,8 +35,10 @@ repo's AGPL-3.0 covers the integration code only.
   generated; hits are diagnostics.
 - `tools/xvector/build_xvectors.py`: builds one averaged speaker embedding
   per game `speaker_token` from every extracted cutscene clip. It writes
-  `data/xvectors/<token>.npy` and does not generate speech. See “Average
-  speaker x-vectors” below.
+  `data/xvectors/<token>.npy` and does not generate speech. Existing vectors
+  are reused only when the WAV-corpus, model-weight, and audio-pipeline
+  fingerprints match; otherwise that speaker rebuilds. See “Average speaker
+  x-vectors” below.
 - `tools/voice-map.json`: NPC key -> x-vector name. An explicit entry wins;
   otherwise a normalized NPC name is used only when exactly one vector
   matches. Ambiguous matches are skipped, as are missing vectors, and remain
@@ -48,7 +50,8 @@ repo's AGPL-3.0 covers the integration code only.
 ```bash
 export OMV_EVENTS=... OMV_SANITIZER_PIN=v1:...
 docker compose -f compose.xvector.yaml run --rm xvector  # build/refresh vectors
-./tools/voice.sh
+./tools/voice.sh            # reuse matching generation profiles
+./tools/voice.sh --force    # regenerate every planned line
 # or:
 docker compose build tts-qwen
 docker compose run --rm tts-qwen
@@ -56,6 +59,25 @@ docker compose run --rm tts-qwen
 
 First run downloads the model into `data/models/qwen3-tts/<model>`; the HF
 cache lives in `data/cache/hf`, not beside the model.
+
+## Generation cache
+
+Each manifest line records a `GenerationFingerprint` over the schema version,
+exact model revision, attention/seed/non-streaming/device, retry settings,
+language, encoder settings, and the voice's x-vector hash. The top-level
+manifest also records `Model` (`Id`, `Revision`), `Generation`, and
+`VoiceEmbeddings`. A line is reused only when its fingerprint and byte size
+still match; a changed x-vector, model weight file, or setting rebuilds that
+line. Manifests written before fingerprints cause one full rebuild.
+
+`--force` skips the fingerprint check. A line whose x-vector is missing is
+kept if its audio already exists (it cannot be validated or rebuilt), and is
+skipped if it has no audio.
+
+Prefer a local `--qwen3-model` directory: `model_revision` hashes every weight
+file (ignoring `README.md`/`.gitattributes`), so the revision is exact. A repo
+id resolves through the HF cache after `from_pretrained`; if it stays
+unresolved the run warns and fingerprints use `unresolved:<repo-id>`.
 
 ## Average speaker x-vectors
 

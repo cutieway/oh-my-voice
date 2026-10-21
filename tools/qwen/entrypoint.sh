@@ -28,4 +28,8 @@ if [ "$has_model" -eq 0 ]; then
   set -- --qwen3-model "$MODEL_DIR" "$@"
 fi
 
+if [ "${OMV_FORCE:-0}" = "1" ]; then
+  set -- --force "$@"
+fi
+
 exec python /opt/omv/generate.py "$@"

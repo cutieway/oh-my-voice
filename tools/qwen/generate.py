@@ -4,7 +4,7 @@
 Usage:
   generate.py --events <events.jsonl> --xvectors <xvectors> --map voice-map.json \
       --out <packdir> --sanitizer-pin <v1:sha> [--lang en] \
-      [--qwen3-model <id-or-dir>]
+      [--qwen3-model <id-or-dir>] [--force]
 
 The event log contains both cache hits and misses. Only rows with
 Result="miss" (or no Result, as in the legacy misses.jsonl) are generated.
@@ -34,6 +34,12 @@ a mismatch means the rows and this pack would disagree on IDs. Refusing to run.
 Encoder pin (pack v1): libopus, 32 kbps, constrained VBR, 48 kHz mono.
 Duration is read back from the encoded Ogg (granule), not the source WAV.
 
+Existing .ogg files are reused only when the manifest's per-line
+GenerationFingerprint still matches the exact model revision, generation
+settings, encoder settings, and that voice's x-vector hash. --force rebuilds
+every planned line. A line with a missing x-vector keeps its existing audio
+(it cannot be validated or rebuilt) and is skipped when it has none.
+
 The model occasionally appends an invented sentence to otherwise correct
 speech. Each synthesized WAV is measured; implausibly long audio is retried
 with lower-temperature sampling and, after --max-attempts, left as a miss
@@ -50,6 +56,124 @@ from pathlib import Path
 
 def voice_id(lang, voice, npc, sentence):
     return hashlib.md5(f"{lang}:{voice}:{npc}:{sentence}".encode("utf-8")).hexdigest()
+
+
+GENERATION_SCHEMA = 1
+HASH_CHUNK = 1024 * 1024
+RETRY_TOP_P = 0.80
+MODEL_IGNORED_FILES = {"README.md", ".gitattributes"}
+ENCODER_SETTINGS = {
+    "Codec": "opus", "Container": "ogg", "Encoder": "libopus",
+    "BitrateKbps": 32, "SampleRateHz": 48000, "Channels": 1,
+    "Vbr": "constrained", "Application": "voip",
+}
+
+
+def file_sha256(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(HASH_CHUNK), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def model_revision(model):
+    """Return an exact local model digest, or the cached HF snapshot revision."""
+    path = Path(model).expanduser()
+    if path.is_dir():
+        digest = hashlib.sha256()
+        for file_path in sorted(p for p in path.rglob("*") if p.is_file()):
+            relative = file_path.relative_to(path)
+            if (relative.name in MODEL_IGNORED_FILES
+                    or any(part.startswith(".") for part in relative.parts)):
+                continue
+            digest.update(relative.as_posix().encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(file_sha256(file_path).encode("ascii"))
+            digest.update(b"\n")
+        return digest.hexdigest()
+
+    # A repo id has no local weights to hash. If it is already cached, the
+    # snapshot directory name is the exact HF commit revision.
+    try:
+        from huggingface_hub import try_to_load_from_cache
+        cached = try_to_load_from_cache(model, "config.json")
+        if isinstance(cached, str):
+            parts = Path(cached).parts
+            if "snapshots" in parts:
+                return parts[parts.index("snapshots") + 1]
+    except Exception:
+        pass
+    return "unresolved"
+
+
+def generation_settings(args):
+    return {
+        "Attention": args.qwen3_attn,
+        "Seed": args.qwen3_seed,
+        "NonStreaming": args.qwen3_non_streaming,
+        "Device": args.device,
+        "DType": "bfloat16",
+        "Language": args.lang,
+        "MinWps": args.min_wps,
+        "MaxAttempts": args.max_attempts,
+        "RetryTemperature": args.retry_temperature,
+        "RetryTopP": RETRY_TOP_P,
+    }
+
+
+def line_generation_profile(args, model_key, voice_sha):
+    return {
+        "Schema": GENERATION_SCHEMA,
+        "Model": {"Key": model_key},
+        "Generation": generation_settings(args),
+        "Encoder": ENCODER_SETTINGS,
+        "VoiceEmbedding": voice_sha,
+    }
+
+
+def profile_fingerprint(profile):
+    canonical = json.dumps(profile, sort_keys=True, separators=(",", ":"),
+                           ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def load_previous_lines(out):
+    path = out / "manifest.json"
+    if not path.is_file():
+        return {}
+    try:
+        manifest = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        print(f"warning: ignoring unreadable {path}", file=sys.stderr)
+        return {}
+    lines = manifest.get("Voicelines") if isinstance(manifest, dict) else None
+    return lines if isinstance(lines, dict) else {}
+
+
+def cached_line_status(previous, target, profile_fp):
+    if profile_fp is None:
+        return False, "x-vector missing"
+    if not previous:
+        return False, "generation profile missing"
+    if previous.get("GenerationFingerprint") != profile_fp:
+        return False, "generation profile changed"
+    try:
+        size = target.stat().st_size
+    except OSError:
+        return False, "cached file missing"
+    if previous.get("Bytes") is not None and previous["Bytes"] != size:
+        return False, "cached file size changed"
+    return True, "generation profile matches"
+
+
+def line_entry(p, target, generation_fp):
+    return {
+        "Lang": p["lang"], "VoiceId": p["voice"], "NpcId": p["npc"],
+        "Sentence": p["sentence"], "Bytes": target.stat().st_size,
+        "DurationSeconds": media_duration(target), "Codec": "opus",
+        "GenerationFingerprint": generation_fp,
+    }
 
 
 def media_duration(path):
@@ -129,6 +253,8 @@ def main():
                     help="Seed Qwen sampling before each line (default: unseeded).")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--force", action="store_true",
+                    help="regenerate every planned line even when its cached generation profile matches")
     ap.add_argument("--min-wps", type=float, default=2.2,
                     help="Retry audio slower than this words/sec (default 2.2).")
     ap.add_argument("--max-attempts", type=int, default=3,
@@ -227,7 +353,8 @@ def main():
             continue
         vid = voice_id(args.lang, voice, npc_key, sentence)
         plan.append({"id": vid, "voice": voice, "npc": npc_key,
-                     "speaker": cleaned_speaker, "sentence": sentence})
+                     "speaker": cleaned_speaker, "sentence": sentence,
+                     "lang": args.lang})
 
     print(f"{len(plan)} planned, {len({p['id'] for p in plan})} unique ids")
     missing = sorted({p["voice"] for p in plan
@@ -241,6 +368,20 @@ def main():
     if args.dry_run:
         return
 
+    previous_lines = load_previous_lines(out)
+    model_id = args.qwen3_model
+    if plan:
+        revision = model_revision(model_id)
+        voice_hashes = {}
+        for voice in sorted({p["voice"] for p in plan}):
+            xvector = xvectors / f"{voice}.npy"
+            if xvector.is_file():
+                voice_hashes[voice] = file_sha256(xvector)
+    else:
+        revision = "unresolved"
+        voice_hashes = {}
+    model_key = revision if revision != "unresolved" else f"unresolved:{model_id}"
+
     from qwen_tts import Qwen3TTSModel
     import torch
     tts = Qwen3TTSModel.from_pretrained(
@@ -249,15 +390,26 @@ def main():
     if getattr(tts.model, "tts_model_type", None) != "base":
         sys.exit("REFUSING TO RUN: Qwen3-TTS voice cloning needs a "
                  "*-Base model (CustomVoice/VoiceDesign do not clone).")
+    if revision == "unresolved":
+        # A repo-id model may only become resolvable after from_pretrained()
+        # populates the HF cache. Re-check before writing fingerprints.
+        resolved = model_revision(model_id)
+        if resolved != "unresolved":
+            revision = resolved
+            model_key = resolved
+        else:
+            print("warning: model revision unresolved; generation profile uses the model id only",
+                  file=sys.stderr)
     synthesize = synthesize_qwen3
 
     vdir = out / "voicelines"
     vdir.mkdir(parents=True, exist_ok=True)
     manifest = {"Schema": 1, "Language": args.lang, "Sanitizer": args.sanitizer_pin,
                 "Backend": "qwen3tts",
-                "Encoder": {"Codec": "opus", "Container": "ogg", "Encoder": "libopus",
-                            "BitrateKbps": 32, "SampleRateHz": 48000, "Channels": 1,
-                            "Vbr": "constrained", "Application": "voip"},
+                "Model": {"Id": model_id, "Revision": revision},
+                "Generation": generation_settings(args),
+                "VoiceEmbeddings": voice_hashes,
+                "Encoder": dict(ENCODER_SETTINGS),
                 "Voices": {}, "Npcs": {}, "IgnoredSpeakers": [], "Voicelines": {}}
     for voice in {p["voice"] for p in plan}:
         manifest["Voices"][voice] = {"IsGeneric": voice.startswith("generic-")}
@@ -267,40 +419,66 @@ def main():
     rejected = 0
     for p in plan:
         target = vdir / (p["id"] + ".ogg")
-        if target.exists():
-            print(f"  skip exists {p['id']}")
+        previous = previous_lines.get(p["id"])
+        if not isinstance(previous, dict):
+            previous = {}
+        voice_sha = voice_hashes.get(p["voice"])
+        generation_fp = (
+            profile_fingerprint(line_generation_profile(
+                args, model_key, voice_sha))
+            if voice_sha else None
+        )
+
+        if target.exists() and generation_fp is None:
+            # The audio exists but the x-vector needed to validate or rebuild
+            # it is gone. Preserve the working line rather than dropping it.
+            kept_fp = previous.get("GenerationFingerprint") if previous else "unverified"
+            print(f"  keep {p['id']}: x-vector missing; not revalidated",
+                  file=sys.stderr)
+            manifest["Voicelines"][p["id"]] = line_entry(
+                p, target, kept_fp or "unverified")
+            continue
+
+        if target.exists() and not args.force:
+            reusable, reason = cached_line_status(previous, target, generation_fp)
+            if reusable:
+                print(f"  skip {p['id']}: {reason}")
+                manifest["Voicelines"][p["id"]] = line_entry(
+                    p, target, generation_fp)
+                continue
+            print(f"  rebuild {p['id']}: {reason}", file=sys.stderr)
+        elif target.exists():
+            print(f"  rebuild {p['id']}: --force")
+
+        xvector = xvectors / (p["voice"] + ".npy")
+        if not xvector.exists():
+            print(f"  MISSING XVECTOR {xvector}; skipping {p['id']}", file=sys.stderr)
+            continue
+        wav_tmp = vdir / (p["id"] + ".tmp.wav")
+        limit = max(4.5, len(p["sentence"].split()) / args.min_wps + 1.0)
+        for attempt in range(1, args.max_attempts + 1):
+            retry_kwargs = {} if attempt == 1 else {
+                "temperature": args.retry_temperature, "top_p": RETRY_TOP_P}
+            synthesize(tts, args, p, xvector, wav_tmp, retry_kwargs)
+            dur = media_duration(wav_tmp)
+            if dur <= limit:
+                break
+            print(f"  retry {p['id']}: {dur:.2f}s > {limit:.2f}s "
+                  f"(attempt {attempt})", file=sys.stderr)
         else:
-            xvector = xvectors / (p["voice"] + ".npy")
-            if not xvector.exists():
-                print(f"  MISSING XVECTOR {xvector}; skipping {p['id']}", file=sys.stderr)
-                continue
-            wav_tmp = vdir / (p["id"] + ".tmp.wav")
-            limit = max(4.5, len(p["sentence"].split()) / args.min_wps + 1.0)
-            for attempt in range(1, args.max_attempts + 1):
-                retry_kwargs = {} if attempt == 1 else {
-                    "temperature": args.retry_temperature, "top_p": 0.80}
-                synthesize(tts, args, p, xvector, wav_tmp, retry_kwargs)
-                dur = media_duration(wav_tmp)
-                if dur <= limit:
-                    break
-                print(f"  retry {p['id']}: {dur:.2f}s > {limit:.2f}s "
-                      f"(attempt {attempt})", file=sys.stderr)
-            else:
-                wav_tmp.unlink(missing_ok=True)
-                print(f"  REJECT {p['id']}: {dur:.2f}s > {limit:.2f}s "
-                      f"after {args.max_attempts} attempts", file=sys.stderr)
-                rejected += 1
-                continue
-            subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(wav_tmp),
-                            "-c:a", "libopus", "-b:a", "32k", "-vbr", "constrained",
-                            "-ar", "48000", "-ac", "1",
-                            "-application", "voip", str(target)], check=True)
-            wav_tmp.unlink()
-            print(f"  wrote {p['id']} ({dur:.2f}s)")
-        manifest["Voicelines"][p["id"]] = {
-            "Lang": args.lang, "VoiceId": p["voice"], "NpcId": p["npc"],
-            "Sentence": p["sentence"], "Bytes": target.stat().st_size,
-            "DurationSeconds": media_duration(target), "Codec": "opus"}
+            wav_tmp.unlink(missing_ok=True)
+            print(f"  REJECT {p['id']}: {dur:.2f}s > {limit:.2f}s "
+                  f"after {args.max_attempts} attempts", file=sys.stderr)
+            rejected += 1
+            continue
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(wav_tmp),
+                        "-c:a", "libopus", "-b:a", "32k", "-vbr", "constrained",
+                        "-ar", "48000", "-ac", "1",
+                        "-application", "voip", str(target)], check=True)
+        wav_tmp.unlink()
+        print(f"  wrote {p['id']} ({dur:.2f}s)")
+        manifest["Voicelines"][p["id"]] = line_entry(
+            p, target, generation_fp)
 
     if rejected:
         print(f"{rejected} line(s) rejected for implausible duration; "

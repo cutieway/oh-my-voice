@@ -5,6 +5,10 @@ This is not training.  Every WAV under ``<audio-root>/<speaker_token>/`` is
 embedded by the frozen Qwen3-TTS Base model; the embeddings are averaged into a
 single 2048-float vector.  No speech is generated.
 
+Existing vectors are reused only when the WAV corpus, model weights, and audio
+processing version recorded beside them still match.  Otherwise the speaker is
+rebuilt automatically.
+
 Layout::
 
     <audio-root>/<speaker_token>/<clip>.wav
@@ -15,19 +19,24 @@ Layout::
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import pathlib
 import re
 import sys
 import time
 
-import librosa
-import numpy as np
-import soundfile as sf
-import torch
-from qwen_tts import Qwen3TTSModel
+# Heavy runtime dependencies are imported by the functions that need them.
+# This keeps fingerprint/cache helpers testable without the GPU stack.
 
 SAMPLE_RATE = 24_000
+SCHEMA_VERSION = 2
+# Bump when load_audio/resampling or the embedding input changes.  This is part
+# of the cache key because identical WAVs can produce different vectors after a
+# processing-pipeline change.
+PIPELINE_VERSION = 1
+HASH_CHUNK = 1024 * 1024
+MODEL_IGNORED_FILES = {"README.md", ".gitattributes"}
 SAFE_NAME = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
@@ -51,7 +60,88 @@ def safe_name(token: str) -> str:
     return SAFE_NAME.sub("_", token).strip("._") or "speaker"
 
 
+def file_sha256(path: pathlib.Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(HASH_CHUNK), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def clip_fingerprint(path: pathlib.Path) -> str:
+    # A bad clip should not prevent the rest of a speaker from being cached.
+    # If it becomes readable later, this value changes and forces a rebuild.
+    try:
+        return "sha256:" + file_sha256(path)
+    except OSError as exc:
+        return f"unreadable:{exc.errno}"
+
+
+def corpus_fingerprint(files: list[pathlib.Path],
+                       speaker_dir: pathlib.Path) -> str:
+    digest = hashlib.sha256()
+    digest.update(f"pipeline:{PIPELINE_VERSION}\n".encode("utf-8"))
+    for path in sorted(files):
+        relative = path.relative_to(speaker_dir).as_posix()
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(clip_fingerprint(path).encode("ascii"))
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
+def model_fingerprint(model: str) -> str:
+    path = pathlib.Path(model).expanduser()
+    if not path.is_dir():
+        raise SystemExit(f"model directory not found: {path}")
+    digest = hashlib.sha256()
+    for file_path in sorted(p for p in path.rglob("*") if p.is_file()):
+        relative = file_path.relative_to(path)
+        if (relative.name in MODEL_IGNORED_FILES
+                or any(part.startswith(".") for part in relative.parts)):
+            continue
+        digest.update(relative.as_posix().encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(file_sha256(file_path).encode("ascii"))
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
+def load_speaker_stats(path: pathlib.Path) -> dict | None:
+    try:
+        stats = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    return stats if isinstance(stats, dict) else None
+
+
+def reuse_status(stats_path: pathlib.Path, vector_path: pathlib.Path,
+                 corpus_fp: str, model_fp: str) -> tuple[bool, str]:
+    if not vector_path.is_file():
+        return False, "vector missing"
+    stats = load_speaker_stats(stats_path)
+    if stats is None:
+        return False, "metadata missing or invalid"
+    if stats.get("Schema") != SCHEMA_VERSION:
+        return False, "metadata schema changed"
+    if stats.get("PipelineVersion") != PIPELINE_VERSION:
+        return False, "audio pipeline changed"
+    if stats.get("CorpusFingerprint") != corpus_fp:
+        if not stats.get("CorpusFingerprint"):
+            return False, "corpus fingerprint missing"
+        return False, "clips changed"
+    if stats.get("ModelFingerprint") != model_fp:
+        if not stats.get("ModelFingerprint"):
+            return False, "model fingerprint missing"
+        return False, "model changed"
+    return True, "fingerprints match"
+
+
 def load_audio(path: pathlib.Path) -> tuple[np.ndarray, float]:
+    import librosa
+    import numpy as np
+    import soundfile as sf
+
     audio, sr = sf.read(path, dtype="float32")
     if audio.ndim > 1:
         audio = audio.mean(axis=1)
@@ -62,11 +152,14 @@ def load_audio(path: pathlib.Path) -> tuple[np.ndarray, float]:
 
 
 def speaker_stats(path: pathlib.Path, token: str, model: str,
+                  model_fp: str, corpus_fp: str, clip_files: int,
                   clips: int, errors: int, seconds: float,
                   dim: int, norm: float) -> dict:
     return {
+        "Schema": SCHEMA_VERSION,
         "Token": token,
         "File": path.name,
+        "ClipFiles": clip_files,
         "Clips": clips,
         "Errors": errors,
         "Seconds": round(seconds, 3),
@@ -74,6 +167,9 @@ def speaker_stats(path: pathlib.Path, token: str, model: str,
         "Norm": round(norm, 6),
         "SampleRate": SAMPLE_RATE,
         "Model": model,
+        "ModelFingerprint": model_fp,
+        "CorpusFingerprint": corpus_fp,
+        "PipelineVersion": PIPELINE_VERSION,
     }
 
 
@@ -81,27 +177,44 @@ def write_json(path: pathlib.Path, value: object) -> None:
     path.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n")
 
 
-def read_manifest(out_dir: pathlib.Path, model: str) -> dict:
+def manifest_model_fields(speakers: dict) -> dict:
+    models = {}
+    for stats in speakers.values():
+        name = str(stats.get("Model") or "unknown")
+        fingerprint = str(stats.get("ModelFingerprint") or "unknown")
+        key = (name, fingerprint)
+        models[key] = models.get(key, 0) + 1
+    if len(models) == 1:
+        (name, fingerprint), _ = next(iter(models.items()))
+        return {"Model": name, "ModelFingerprint": fingerprint}
+    return {
+        "Model": "mixed",
+        "Models": [
+            {"Name": name, "Fingerprint": fingerprint, "Speakers": count}
+            for (name, fingerprint), count in sorted(models.items())
+        ],
+    }
+
+
+def read_manifest(out_dir: pathlib.Path) -> dict:
     speakers = {}
     for path in sorted(out_dir.glob("*.json")):
         if path.name == "manifest.json":
             continue
-        try:
-            stats = json.loads(path.read_text())
-        except (OSError, json.JSONDecodeError):
-            continue
-        if not isinstance(stats, dict) or "Token" not in stats:
+        stats = load_speaker_stats(path)
+        if stats is None or "Token" not in stats:
             continue
         if not (out_dir / str(stats.get("File", ""))).is_file():
             continue
         speakers[stats["Token"]] = stats
-    return {
-        "Schema": 1,
-        "Model": model,
+    manifest = {
+        "Schema": SCHEMA_VERSION,
         "Dim": 2048,
         "SampleRate": SAMPLE_RATE,
         "Speakers": dict(sorted(speakers.items())),
     }
+    manifest.update(manifest_model_fields(speakers))
+    return manifest
 
 
 def main() -> int:
@@ -115,6 +228,7 @@ def main() -> int:
     wanted = {s.lower() for s in args.speaker}
     jobs = []
     skipped = 0
+    model_fp: str | None = None
     for speaker_dir in sorted(p for p in audio_root.iterdir() if p.is_dir()):
         token = speaker_dir.name
         if wanted and token.lower() not in wanted:
@@ -126,13 +240,26 @@ def main() -> int:
         stem = safe_name(token)
         vector_path = out_dir / f"{stem}.npy"
         stats_path = out_dir / f"{stem}.json"
-        if not args.force and vector_path.is_file() and stats_path.is_file():
-            skipped += 1
-            print(f"skip {token}: already built")
-            continue
-        jobs.append((token, stem, files))
+        corpus_fp = corpus_fingerprint(files, speaker_dir)
+        if model_fp is None:
+            model_fp = model_fingerprint(args.model)
+        if not args.force:
+            reusable, reason = reuse_status(
+                stats_path, vector_path, corpus_fp, model_fp,
+            )
+            if reusable:
+                skipped += 1
+                print(f"skip {token}: {reason}")
+                continue
+            print(f"rebuild {token}: {reason}", file=sys.stderr)
+        jobs.append((token, stem, files, corpus_fp))
 
     if jobs:
+        assert model_fp is not None
+        import numpy as np
+        import torch
+        from qwen_tts import Qwen3TTSModel
+
         print(f"loading {args.model}")
         tts = Qwen3TTSModel.from_pretrained(
             args.model,
@@ -144,7 +271,7 @@ def main() -> int:
             raise SystemExit("this builder requires a Qwen3-TTS Base model")
 
         started = time.monotonic()
-        for index, (token, stem, files) in enumerate(jobs, 1):
+        for index, (token, stem, files, corpus_fp) in enumerate(jobs, 1):
             embeddings = []
             errors = 0
             seconds = 0.0
@@ -170,8 +297,9 @@ def main() -> int:
             vector_path = out_dir / f"{stem}.npy"
             np.save(vector_path, average, allow_pickle=False)
             stats = speaker_stats(
-                vector_path, token, args.model, len(embeddings), errors,
-                seconds, int(average.size), float(np.linalg.norm(average)),
+                vector_path, token, args.model, model_fp, corpus_fp,
+                len(files), len(embeddings), errors, seconds,
+                int(average.size), float(np.linalg.norm(average)),
             )
             write_json(out_dir / f"{stem}.json", stats)
             print(
@@ -182,7 +310,7 @@ def main() -> int:
     else:
         print("nothing to build")
 
-    manifest = read_manifest(out_dir, args.model)
+    manifest = read_manifest(out_dir)
     write_json(out_dir / "manifest.json", manifest)
     print(f"wrote {out_dir / 'manifest.json'} with {len(manifest['Speakers'])} speakers "
           f"({skipped} skipped)")
