@@ -1,32 +1,49 @@
-using System.Diagnostics;
 using System.Globalization;
-using System.Text;
+using System.Text.Json;
 using Lumina;
 using Lumina.Data;
-using Lumina.Excel;
-using Lumina.Excel.Sheets;
-using Lumina.Text.ReadOnly;
 
 namespace XivData;
 
 /// <summary>
-/// Extracts FFXIV cutscene voice SCDs and attributes each line to an NPC.
+/// Offline FFXIV dialogue harvester.
 ///
-/// The mapping is game-data driven, not filename guessing:
-///   cut_scene/* Excel rows carry TEXT_VOICEMAN_&lt;scene&gt;_&lt;line&gt;_&lt;SPEAKER&gt;.
-///   TEXT_ -> vo_, drop _SPEAKER -> vo_voiceman_&lt;scene&gt;_&lt;line&gt;.
-///   VoiceScdPaths turns that base into cut/&lt;exp&gt;/sound/voicem/...
-///   The speaker token is resolved against ENpcResident's normalized names.
+/// Reads only local game data (Lumina). It never hooks the game and never
+/// needs Dalamud running. The canonical output is a SQLite build database:
+/// every text line, its speaker, whether the game ships an SCD for it, and the
+/// generation state. CSV/SCD/WAV remain available for the cutscene pipeline.
 /// </summary>
 internal static class Program
 {
-    private static readonly string[] Expansions = ["ffxiv", "ex1", "ex2", "ex3", "ex4", "ex5"];
-    private static readonly string[] GenderSuffixes = ["_m_", "_", "_f_"];
-    private const int MinVoicedScdBytes = 1024;
+    private static readonly string[] AllSources =
+    [
+        "cutscene",
+        "defaulttalk",
+        "balloon",
+        "contenttalk",
+        "npcyell",
+        "instancecontent",
+        "publiccontent",
+        "partycontent",
+        "massivepc",
+        "gimmicktalk",
+        "goldsaucertalk",
+        "quest",
+        "custom",
+        "raid",
+        "content",
+        "warp",
+        "transport",
+        "opening",
+        "guild_order",
+        "leve",
+    ];
 
     private sealed record Options(
         string SqPack,
         string OutDir,
+        string DbPath,
+        string XVectorDir,
         Language Language,
         string LangCode,
         int Limit,
@@ -34,9 +51,8 @@ internal static class Program
         string? SpeakerFilter,
         string? Vgmstream,
         bool ExtractAudio,
-        bool ByToken);
-
-    private sealed record NpcInfo(uint Id, string Name, uint RaceId, byte Gender);
+        bool ByToken,
+        IReadOnlyList<string> Sources);
 
     private static int Main(string[] args)
     {
@@ -52,122 +68,92 @@ internal static class Program
             return 2;
         }
 
-        if (options.SqPack is "help")
+        if (options.SqPack == "help")
         {
             PrintHelp();
             return 0;
         }
 
-        Directory.CreateDirectory(options.OutDir);
-        var data = new GameData(options.SqPack, new LuminaOptions
+        try
         {
-            PanicOnSheetChecksumMismatch = false,
-            DefaultExcelLanguage = options.Language,
-        });
-
-        var npcIndex = BuildNpcIndex(data, options.Language);
-        Console.WriteLine($"NPC names indexed: {npcIndex.Names.Count}");
-        Console.WriteLine($"Cutscene sheets: {data.Excel.SheetNames.Count(n => n.StartsWith("cut_scene/", StringComparison.OrdinalIgnoreCase))}");
-
-        var rows = new List<ExtractedLine>();
-        var sheets = data.Excel.SheetNames
-            .Where(n => n.StartsWith("cut_scene/", StringComparison.OrdinalIgnoreCase))
-            .Where(n => options.SheetFilter is null || n.Contains(options.SheetFilter, StringComparison.OrdinalIgnoreCase))
-            .OrderBy(n => n, StringComparer.Ordinal)
-            .ToArray();
-
-        var unparsed = 0;
-        var unvoiced = 0;
-        var unresolved = 0;
-        var extracted = 0;
-        var scdBytes = 0L;
-        var unvoicedByPrefix = new Dictionary<string, int>(StringComparer.Ordinal);
-
-        foreach (var sheetName in sheets)
-        {
-            ExcelSheet<RawRow> sheet;
-            try
+            var data = new GameData(options.SqPack, new LuminaOptions
             {
-                sheet = data.Excel.GetSheet<RawRow>(options.Language, sheetName);
-            }
-            catch (Exception ex)
+                PanicOnSheetChecksumMismatch = false,
+                DefaultExcelLanguage = options.Language,
+            });
+
+            using var db = DialogueDb.Open(options.DbPath);
+            string sources = string.Join(",", options.Sources);
+            long runId = db.BeginRun(options.LangCode, options.SqPack, sources, "xivdata/2");
+            var result = Harvester.Run(new HarvestOptions
             {
-                Console.Error.WriteLine($"skip {sheetName}: {ex.Message}");
-                continue;
-            }
+                Data = data,
+                Db = db,
+                Language = options.Language,
+                LangCode = options.LangCode,
+                OutDir = options.OutDir,
+                Sources = options.Sources,
+                RunId = runId,
+                SheetFilter = options.SheetFilter,
+                SpeakerFilter = options.SpeakerFilter,
+                Limit = options.Limit,
+                ExtractAudio = options.ExtractAudio,
+                Vgmstream = options.Vgmstream,
+                ByToken = options.ByToken,
+                XVectorDir = options.XVectorDir,
+            });
 
-            for (var rowIndex = 0; rowIndex < sheet.Count; rowIndex++)
+            string countsJson = JsonSerializer.Serialize(new
             {
-                var row = sheet.GetRowAt(rowIndex);
-                var key = row.ReadStringColumn(0).ExtractText();
-                if (string.IsNullOrWhiteSpace(key)) continue;
-                if (!TryParseKey(key, out var speakerToken, out var audioBase))
-                {
-                    unparsed++;
-                    continue;
-                }
+                result.Stats.Rows,
+                result.Stats.WithScd,
+                result.Stats.WithoutScd,
+                result.Stats.ResolvedSpeakers,
+                result.Stats.UnresolvedSpeakers,
+                result.Stats.Skipped,
+                result.Stats.Errors,
+                Sources = result.Stats.BySource,
+                Kinds = result.Stats.ByKind,
+            });
+            db.FinishRun(runId, countsJson, result.Stats.Rows, result.Stats.Errors);
 
-                if (options.SpeakerFilter is not null &&
-                    !speakerToken.Equals(options.SpeakerFilter, StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                var resolved = FindScd(data, audioBase, options.LangCode);
-                if (resolved is null)
-                {
-                    unvoiced++;
-                    var prefix = AudioPrefix(audioBase);
-                    unvoicedByPrefix[prefix] = unvoicedByPrefix.GetValueOrDefault(prefix) + 1;
-                    continue;
-                }
-
-                var text = row.ReadStringColumn(1).ExtractText();
-                var npc = npcIndex.Resolve(speakerToken);
-                if (npc is null) unresolved++;
-                else extracted++;
-
-                var line = new ExtractedLine(
-                    Sheet: sheetName,
-                    RowId: row.RowId,
-                    TextKey: key,
-                    AudioBase: audioBase,
-                    SpeakerToken: speakerToken,
-                    NpcId: npc?.Id,
-                    NpcName: npc?.Name ?? string.Empty,
-                    RaceId: npc?.RaceId ?? 0,
-                    Gender: npc?.Gender ?? 0,
-                    ScdPath: resolved.Value.Path,
-                    ScdBytes: resolved.Value.Bytes,
-                    Text: text);
-
-                rows.Add(line);
-                scdBytes += resolved.Value.Bytes;
-
-                if (options.ExtractAudio)
-                {
-                    Extract(line, data, options);
-                }
-
-                if (options.Limit > 0 && rows.Count >= options.Limit)
-                    goto Done;
+            Console.WriteLine();
+            Console.WriteLine($"rows written:          {result.Stats.Rows}");
+            Console.WriteLine($"  with SCD:            {result.Stats.WithScd}");
+            Console.WriteLine($"  without SCD:         {result.Stats.WithoutScd}");
+            Console.WriteLine($"  resolved speaker:    {result.Stats.ResolvedSpeakers}");
+            Console.WriteLine($"  unresolved speaker:  {result.Stats.UnresolvedSpeakers}");
+            Console.WriteLine($"  skipped:             {result.Stats.Skipped}");
+            Console.WriteLine($"  errors:              {result.Stats.Errors}");
+            PrintCounts("  by source", result.Stats.BySource);
+            PrintCounts("  by kind", result.Stats.ByKind);
+            foreach (var (check, failures) in db.Integrity())
+            {
+                if (failures > 0)
+                    Console.WriteLine($"WARN integrity: {check} = {failures}");
             }
+            Console.WriteLine($"DB:   {db.Path}");
+            if (result.CsvPath is not null && result.CutsceneRows.Count > 0)
+                Console.WriteLine($"CSV:  {result.CsvPath}");
+            if (options.ExtractAudio && result.CutsceneRows.Count > 0)
+                Console.WriteLine($"Audio: {Path.Combine(options.OutDir, "scd")} and {Path.Combine(options.OutDir, "wav")}");
+            return 0;
         }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"fatal: {ex.Message}");
+            if (ex.InnerException is not null)
+                Console.Error.WriteLine($"       {ex.InnerException.Message}");
+            return 1;
+        }
+    }
 
-    Done:
-        var csvPath = Path.Combine(options.OutDir, "dialogue.csv");
-        WriteCsv(csvPath, rows);
-        Console.WriteLine();
-        Console.WriteLine($"rows with resolved SCD: {rows.Count}");
-        Console.WriteLine($"  speaker resolved:      {extracted}");
-        Console.WriteLine($"  speaker unresolved:    {unresolved}");
-        Console.WriteLine($"  unparsed text keys:    {unparsed}");
-        Console.WriteLine($"  keys without SCD:      {unvoiced}");
-        if (unvoicedByPrefix.Count > 0)
-            Console.WriteLine($"    by prefix:           {string.Join(", ", unvoicedByPrefix.OrderBy(kv => kv.Key, StringComparer.Ordinal).Select(kv => $"{kv.Key}={kv.Value}"))}");
-        Console.WriteLine($"  SCD payload:           {scdBytes / 1024.0 / 1024.0:F1} MiB");
-        Console.WriteLine($"CSV: {csvPath}");
-        if (options.ExtractAudio)
-            Console.WriteLine($"Audio: {Path.Combine(options.OutDir, "scd")} and {Path.Combine(options.OutDir, "wav")}");
-        return 0;
+    private static void PrintCounts(string title, Dictionary<string, long> counts)
+    {
+        if (counts.Count == 0) return;
+        Console.WriteLine(title + ":");
+        foreach (var (key, value) in counts.OrderBy(kv => kv.Key, StringComparer.Ordinal))
+            Console.WriteLine($"    {key,-22} {value}");
     }
 
     private static Options ParseArgs(string[] args)
@@ -176,6 +162,8 @@ internal static class Program
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             "Public/xlcore/ffxiv/game/sqpack");
         string outDir = Path.Combine(Environment.CurrentDirectory, "xivdata-out");
+        string dbPath = Path.Combine(Environment.CurrentDirectory, "data", "dialogue.db");
+        string xvectorDir = Path.Combine(Environment.CurrentDirectory, "data", "xvectors");
         var language = Language.English;
         string langCode = "en";
         var limit = 0;
@@ -184,6 +172,7 @@ internal static class Program
         string? vgmstream = "vgmstream-cli";
         var extract = false;
         var byToken = false;
+        var sources = new List<string>();
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -193,7 +182,8 @@ internal static class Program
             {
                 case "-h" or "--help":
                     sqpack = "help";
-                    return new Options(sqpack, outDir, language, langCode, limit, sheetFilter, null, vgmstream, extract, byToken);
+                    return new Options(sqpack, outDir, dbPath, xvectorDir, language, langCode,
+                        limit, sheetFilter, speakerFilter, vgmstream, extract, byToken, sources);
                 case "--sqpack":
                     sqpack = Path.GetFullPath(Next());
                     break;
@@ -203,8 +193,15 @@ internal static class Program
                 case "--out":
                     outDir = Path.GetFullPath(Next());
                     break;
+                case "--db":
+                    dbPath = Path.GetFullPath(Next());
+                    break;
+                case "--xvectors":
+                    xvectorDir = Path.GetFullPath(Next());
+                    break;
                 case "--limit":
                     limit = int.Parse(Next(), CultureInfo.InvariantCulture);
+                    if (limit < 0) throw new ArgumentException("--limit must be >= 0");
                     break;
                 case "--sheet":
                     sheetFilter = Next();
@@ -223,6 +220,9 @@ internal static class Program
                         _ => throw new ArgumentException($"unsupported language: {lang}"),
                     };
                     break;
+                case "--source":
+                    AddSources(sources, Next());
+                    break;
                 case "--extract":
                     extract = true;
                     break;
@@ -239,249 +239,71 @@ internal static class Program
 
         if (!Directory.Exists(sqpack))
             throw new ArgumentException($"sqpack directory not found: {sqpack}");
-        return new Options(sqpack, outDir, language, langCode, limit, sheetFilter, speakerFilter, vgmstream, extract, byToken);
+        if (sources.Count == 0) sources.Add("cutscene");
+        if (extract && !sources.Contains("cutscene", StringComparer.OrdinalIgnoreCase))
+            throw new ArgumentException("--extract only applies to the cutscene source; add --source cutscene");
+        return new Options(sqpack, outDir, dbPath, xvectorDir, language, langCode,
+            limit, sheetFilter, speakerFilter, vgmstream, extract, byToken, sources);
+    }
+
+    private static void AddSources(List<string> sources, string value)
+    {
+        foreach (string raw in value.Split([',', ' ', ';'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            string source = raw.Trim().ToLowerInvariant();
+            if (source == "all")
+            {
+                foreach (string all in AllSources)
+                    if (!sources.Contains(all, StringComparer.OrdinalIgnoreCase)) sources.Add(all);
+                continue;
+            }
+            if (source is "scripted")
+            {
+                if (!sources.Contains(source, StringComparer.OrdinalIgnoreCase)) sources.Add(source);
+                continue;
+            }
+            if (!sources.Contains(source, StringComparer.OrdinalIgnoreCase)) sources.Add(source);
+        }
     }
 
     private static void PrintHelp()
     {
         Console.WriteLine("""
-            xivdata — extract FFXIV cutscene SCD audio and attribute it to NPCs.
+            xivdata — offline FFXIV dialogue harvester (SQLite).
 
             Usage:
-              xivdata [--sqpack DIR] [--out DIR] [--limit N] [--sheet FILTER]
-                      [--speaker TOKEN] [--lang en|de|fr|ja] [--extract]
-                      [--by-token] [--vgmstream PATH]
+              xivdata [--sqpack DIR] [--out DIR] [--db FILE] [--source LIST]
+                      [--limit N] [--sheet FILTER] [--speaker TOKEN]
+                      [--lang en|de|fr|ja] [--extract] [--by-token]
+                      [--xvectors DIR] [--vgmstream PATH]
 
             Defaults:
-              --sqpack ~/Public/xlcore/ffxiv/game/sqpack
-              --out    ./xivdata-out
-              --lang   en
+              --sqpack   ~/Public/xlcore/ffxiv/game/sqpack
+              --out      ./xivdata-out
+              --db       ./data/dialogue.db
+              --xvectors ./data/xvectors
+              --lang     en
+              --source   cutscene
 
-            Options:
-              --extract    write SCDs and decoded WAVs
-              --by-token   group scd/ and wav/ by speaker_token (for x-vectors)
+            Sources:
+              cutscene, defaulttalk, balloon, contenttalk, npcyell,
+              instancecontent, publiccontent, partycontent, massivepc,
+              gimmicktalk, goldsaucertalk, quest, custom, raid, content,
+              warp, transport, opening, guild_order, leve, scripted, all
 
-            Output:
-              dialogue.csv  sheet,row,text_key,audio_base,speaker_token,npc_id,
-                            npc_name,race_id,gender,scd_path,scd_bytes,text
-              scd/          raw SCDs (with --extract)
-              wav/          decoded WAVs (with --extract; needs vgmstream-cli)
-                            grouped by speaker_token with --by-token
+            Notes:
+              --source all is the full text corpus (~252k dialogue, 379k total rows).
+              --limit caps total rows written (0 = no cap).
+              --extract writes SCD/WAV for cutscene rows that have game audio.
+              The DB is the source of truth; dialogue.csv is cutscene-only.
+
+            Tables/views:
+              dialogs, dialog_speakers, speakers, harvest_runs
+              v_generation_queue, v_speaker_workload, v_pack_npcs, v_integrity
+
+            Useful next-step query:
+              SELECT * FROM v_generation_queue
+              WHERE speaker_id = 'alphinaud' ORDER BY source, sheet, row_id;
             """);
-    }
-
-    private static bool TryParseKey(string textKey, out string speakerToken, out string audioBase)
-    {
-        speakerToken = string.Empty;
-        audioBase = string.Empty;
-        if (textKey.EndsWith("_NONE_VOICE", StringComparison.OrdinalIgnoreCase))
-            textKey = textKey[..^"_NONE_VOICE".Length];
-
-        var parts = textKey.Split('_');
-        if (parts.Length != 5) return false;
-        if (!parts[0].Equals("TEXT", StringComparison.OrdinalIgnoreCase)) return false;
-
-        speakerToken = parts[4].ToLowerInvariant();
-        var withoutSpeaker = textKey[..^(parts[4].Length + 1)];
-        audioBase = withoutSpeaker.Replace("TEXT", "vo", StringComparison.OrdinalIgnoreCase).ToLowerInvariant();
-        return true;
-    }
-
-    private static string AudioPrefix(string audioBase)
-    {
-        if (audioBase.Contains("manfst", StringComparison.Ordinal)) return "manfst";
-        if (audioBase.Contains("voiceman", StringComparison.Ordinal)) return "voiceman";
-        return "other";
-    }
-
-    private static (string Path, int Bytes)? FindScd(GameData data, string audioBase, string langCode)
-    {
-        if (audioBase.Length < 17) return null;
-        var folder6 = audioBase.Substring(3, 6);
-        var folder14 = audioBase.Substring(3, 14);
-        var isManFst = audioBase.Contains("manfst", StringComparison.Ordinal);
-
-        foreach (var exp in Expansions)
-        {
-            foreach (var suffix in GenderSuffixes)
-            {
-                string path;
-                if (isManFst && audioBase.Length >= 12)
-                {
-                    var folder9 = audioBase.Substring(3, 9);
-                    path = $"cut/{exp}/sound/{folder6}/{folder9}/{audioBase[..12]}{suffix}{langCode}.scd";
-                }
-                else
-                {
-                    path = $"cut/{exp}/sound/{folder6}/{folder14}/{audioBase}{suffix}{langCode}.scd";
-                }
-
-                try
-                {
-                    if (!data.FileExists(path)) continue;
-                    var file = data.GetFile(path);
-                    if (file is null || file.Data.Length < MinVoicedScdBytes) continue;
-                    return (path, file.Data.Length);
-                }
-                catch
-                {
-                    // Lumina throws on some speculative paths; keep scanning.
-                }
-            }
-        }
-
-        return null;
-    }
-
-    private static NpcIndex BuildNpcIndex(GameData data, Language language)
-    {
-        var resident = data.Excel.GetSheet<ENpcResident>(language);
-        var baseSheet = data.Excel.GetSheet<ENpcBase>(language);
-        var names = new Dictionary<string, List<uint>>(StringComparer.OrdinalIgnoreCase);
-        var infos = new Dictionary<uint, NpcInfo>();
-
-        foreach (var row in resident)
-        {
-            var name = row.Singular.ExtractText().Trim();
-            if (name.Length == 0) continue;
-
-            var raceId = 0u;
-            var gender = (byte)0;
-            if (baseSheet.TryGetRow(row.RowId, out var npcBase))
-            {
-                raceId = npcBase.Race.RowId;
-                gender = npcBase.Gender;
-            }
-
-            var info = new NpcInfo(row.RowId, name, raceId, gender);
-            infos[row.RowId] = info;
-
-            AddName(names, Normalize(name), row.RowId);
-            var firstSpace = name.IndexOf(' ');
-            if (firstSpace > 0)
-                AddName(names, Normalize(name[..firstSpace]), row.RowId);
-        }
-
-        return new NpcIndex(names, infos);
-    }
-
-    private static void AddName(Dictionary<string, List<uint>> index, string key, uint id)
-    {
-        if (key.Length == 0) return;
-        if (!index.TryGetValue(key, out var ids))
-            index[key] = ids = [];
-        if (!ids.Contains(id)) ids.Add(id);
-    }
-
-    private static string Normalize(string value)
-    {
-        var sb = new StringBuilder(value.Length);
-        foreach (var ch in value)
-        {
-            if (ch is ' ' or '\'' or '-') continue;
-            sb.Append(char.ToLowerInvariant(ch));
-        }
-        return sb.ToString();
-    }
-
-    private static void Extract(ExtractedLine line, GameData data, Options options)
-    {
-        var owner = options.ByToken
-            ? line.SpeakerToken
-            : string.IsNullOrEmpty(line.NpcName) ? "unresolved" : SafeName(line.NpcName);
-        var stem = SafeName(line.AudioBase);
-        var scdDir = Path.Combine(options.OutDir, "scd", owner);
-        var wavDir = Path.Combine(options.OutDir, "wav", owner);
-        Directory.CreateDirectory(scdDir);
-        Directory.CreateDirectory(wavDir);
-
-        var scdPath = Path.Combine(scdDir, stem + ".scd");
-        var wavPath = Path.Combine(wavDir, stem + ".wav");
-        if (!File.Exists(scdPath))
-        {
-            var file = data.GetFile(line.ScdPath) ?? throw new InvalidOperationException($"SCD vanished: {line.ScdPath}");
-            File.WriteAllBytes(scdPath, file.Data);
-        }
-
-        if (options.Vgmstream is null || File.Exists(wavPath)) return;
-
-        var psi = new ProcessStartInfo(options.Vgmstream)
-        {
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        };
-        psi.ArgumentList.Add("-o");
-        psi.ArgumentList.Add(wavPath);
-        psi.ArgumentList.Add(scdPath);
-        using var process = Process.Start(psi);
-        if (process is null)
-        {
-            Console.Error.WriteLine($"could not start {options.Vgmstream}; SCD saved only");
-            return;
-        }
-        process.WaitForExit();
-        if (process.ExitCode != 0)
-            Console.Error.WriteLine($"vgmstream failed ({process.ExitCode}) for {scdPath}");
-    }
-
-    private static string SafeName(string value)
-    {
-        var invalid = Path.GetInvalidFileNameChars();
-        var sb = new StringBuilder(value.Length);
-        foreach (var ch in value)
-            sb.Append(invalid.Contains(ch) || ch == Path.DirectorySeparatorChar ? '_' : ch);
-        return sb.ToString();
-    }
-
-    private static void WriteCsv(string path, List<ExtractedLine> rows)
-    {
-        static string Csv(string value) => $"\"{value.Replace("\"", "\"\"")}\"";
-        using var writer = new StreamWriter(path, false, new UTF8Encoding(false));
-        writer.NewLine = "\n";
-        writer.WriteLine("sheet,row_id,text_key,audio_base,speaker_token,npc_id,npc_name,race_id,gender,scd_path,scd_bytes,text");
-        foreach (var r in rows)
-        {
-            writer.Write(Csv(r.Sheet)); writer.Write(',');
-            writer.Write(r.RowId.ToString(CultureInfo.InvariantCulture)); writer.Write(',');
-            writer.Write(Csv(r.TextKey)); writer.Write(',');
-            writer.Write(Csv(r.AudioBase)); writer.Write(',');
-            writer.Write(Csv(r.SpeakerToken)); writer.Write(',');
-            writer.Write(r.NpcId?.ToString(CultureInfo.InvariantCulture) ?? ""); writer.Write(',');
-            writer.Write(Csv(r.NpcName)); writer.Write(',');
-            writer.Write(r.RaceId.ToString(CultureInfo.InvariantCulture)); writer.Write(',');
-            writer.Write(r.Gender.ToString(CultureInfo.InvariantCulture)); writer.Write(',');
-            writer.Write(Csv(r.ScdPath)); writer.Write(',');
-            writer.Write(r.ScdBytes.ToString(CultureInfo.InvariantCulture)); writer.Write(',');
-            writer.Write(Csv(r.Text));
-            writer.WriteLine();
-        }
-    }
-
-    private sealed record ExtractedLine(
-        string Sheet,
-        uint RowId,
-        string TextKey,
-        string AudioBase,
-        string SpeakerToken,
-        uint? NpcId,
-        string NpcName,
-        uint RaceId,
-        byte Gender,
-        string ScdPath,
-        int ScdBytes,
-        string Text);
-
-    private sealed class NpcIndex(Dictionary<string, List<uint>> names, Dictionary<uint, NpcInfo> infos)
-    {
-        public Dictionary<string, List<uint>> Names { get; } = names;
-
-        public NpcInfo? Resolve(string token)
-        {
-            var key = Normalize(token);
-            if (key.Length == 0) return null;
-            if (!Names.TryGetValue(key, out var ids) || ids.Count == 0) return null;
-            return infos.TryGetValue(ids[0], out var info) ? info : null;
-        }
     }
 }

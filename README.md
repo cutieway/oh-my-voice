@@ -28,6 +28,10 @@ AGPL-3.0. See `LICENSE.md`.
 - X-vector builder: averages every extracted game clip for a
   `speaker_token` into one 2,048-float Qwen speaker embedding. No training,
   no speech generation.
+- Offline dialogue DB (`data/dialogue.db`): all static text, speaker/token
+  attribution, `has_scd`, and generation queue. Built by `tools/xivdata`;
+  SQLite/WAL, indexed, editable while testing. See
+  [tools/xivdata/README.md](tools/xivdata/README.md).
 
 ## Layout
 
@@ -54,12 +58,13 @@ tools/
   qwen/               # Qwen3-TTS Dockerfile, entrypoint, generator
   voice.sh            # one-command live dev loop
   voice-map.json      # NPC -> xvector name
-  xivdata/            # optional cutscene SCD extractor (Lumina)
+  xivdata/            # offline dialogue DB + cutscene SCD extractor (Lumina)
   xvector/            # average speaker x-vector builder (no generation)
 data/                 # gitignored runtime root
   models/             # Qwen3-TTS Base weights
   cache/              # HF/Torch/MIOpen caches
   game-voices/        # xivdata output: scd/ + wav/ per speaker_token
+  dialogue.db         # xivdata dialogue/worklist DB (SQLite, WAL)
   xvectors/           # one .npy + .json per speaker_token, manifest.json
   out/                # generated pack
 archive/tts-backends/ # XTTS/IndexTTS code, reference only, not built

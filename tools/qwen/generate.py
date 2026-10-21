@@ -447,7 +447,11 @@ def main():
     for voice in {p["voice"] for p in plan}:
         manifest["Voices"][voice] = {"IsGeneric": voice.startswith("generic-")}
     for p in plan:
-        manifest["Npcs"].setdefault(p["npc"], {"NpcId": p["npc"], "VoiceId": p["voice"]})
+        # PackStore.ResolveNpc looks up Npcs by the runtime-cleaned speaker
+        # name, not by the numeric/string NpcId used in the line hash. Keying
+        # by p["npc"] here silently missed every line when NpcId was numeric.
+        npc_lookup = p["speaker"] or p["npc"]
+        manifest["Npcs"].setdefault(npc_lookup, {"NpcId": p["npc"], "VoiceId": p["voice"]})
 
     rejected = 0
     for p in plan:
