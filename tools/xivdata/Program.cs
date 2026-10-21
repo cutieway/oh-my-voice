@@ -56,6 +56,9 @@ internal static class Program
 
     private static int Main(string[] args)
     {
+        if (args.Length > 0 && args[0].Equals("export", StringComparison.OrdinalIgnoreCase))
+            return ExportCommand.Run(args[1..]);
+
         Options options;
         try
         {
@@ -272,6 +275,7 @@ internal static class Program
             xivdata — offline FFXIV dialogue harvester (SQLite).
 
             Usage:
+              xivdata export --db FILE --speaker ID [--out FILE]
               xivdata [--sqpack DIR] [--out DIR] [--db FILE] [--source LIST]
                       [--limit N] [--sheet FILTER] [--speaker TOKEN]
                       [--lang en|de|fr|ja] [--extract] [--by-token]

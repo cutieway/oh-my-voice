@@ -218,6 +218,42 @@ preserves `audio_status`, `audio_path`, `generation_profile`, `notes`, and
 `error`; changed text/speaker sets `audio_stale=1` instead of silently
 overwriting a finished line.
 
+## Export a generation worklist
+
+The DB is speaker-scoped on demand; the generator still consumes
+`events.jsonl`, so export one voice:
+
+```bash
+# voice_id, cleaned NPC key, or numeric NPC id
+dotnet run --project tools/xivdata -- export \
+  --db data/dialogue.db \
+  --speaker alphinaud \
+  --out data/worklists/alphinaud.jsonl
+
+# pilot
+dotnet run --project tools/xivdata -- export \
+  --speaker yshtola --limit 20
+```
+
+The output uses the plugin miss-event shape (`Result="miss"`, `Id`,
+`VoiceId`, `NpcId`, `Speaker`, `Sentence`, `RawSpeaker`, `RawSentence`,
+`Source`, `Npc`, `Utc`). `Id` is exactly `dialogs.voice_line_id`, and
+`Speaker` is `npc_key`. The existing generator consumes it directly:
+
+```bash
+python3 tools/qwen/generate.py \
+  --events data/worklists/alphinaud.jsonl \
+  --xvectors data/xvectors \
+  --map tools/voice-map.json \
+  --out data/out \
+  --sanitizer-pin "<v1:... from /omv>" \
+  --dry-run
+```
+
+`--dry-run` should print the same number of planned lines as the exported
+queue, with matching ids. Manifest `Npcs` is keyed by `Speaker` (the
+runtime-cleaned name) and stores the numeric `NpcId` used in the hash.
+
 ## Cutscene SCD / audio extraction
 
 `--extract` still writes:

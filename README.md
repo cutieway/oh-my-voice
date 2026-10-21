@@ -217,6 +217,28 @@ docker compose -f compose.xvector.yaml run --rm xvector --speaker sphene --force
   832.0 s total, 0 clip errors, 11 MB of vectors. Extraction produced 18 GB
   of SCD+WAV and took 731 s; one `vgmstream` clip failed.
 
+### From the dialogue DB
+
+`tools/xivdata` can export one voiced character's unvoiced worklist directly
+from the SQLite DB. This is the offline alternative to waiting for live
+`events.jsonl` misses:
+
+```bash
+dotnet run --project tools/xivdata -- export \
+  --db data/dialogue.db --speaker alphinaud \
+  --out data/worklists/alphinaud.jsonl
+
+python3 tools/qwen/generate.py \
+  --events data/worklists/alphinaud.jsonl \
+  --xvectors data/xvectors --map tools/voice-map.json \
+  --out data/out --sanitizer-pin "v1:..." --dry-run
+```
+
+The exported `Id` is `voice_line_id` from the DB; the generator resolves the
+same voice/token and plans the same ids. Manifest `Npcs` is keyed by the
+cleaned speaker name (`Speaker`), with `NpcId` set to the numeric id used in
+the hash.
+
 ### Live dev loop
 
 `tools/voice.sh` is the one-command loop: it stages the installed pack,
