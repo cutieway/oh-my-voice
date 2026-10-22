@@ -110,6 +110,28 @@ speakers, pass `--merge`; `tools/voice.sh` always does. Merge:
 A bare run without `--merge` is still the clean-room mode for tests. A merge
 against a corrupt manifest is fatal rather than silently replacing it.
 
+## Pause and resume
+
+The generator writes `manifest.json` atomically after every completed line,
+so a long run can be stopped without losing finished audio. Rerun the same
+command; completed lines are skipped by their generation fingerprints. A
+manifest written mid-run is a valid partial pack.
+
+For a hard pause that keeps the model and GPU state, start a named container
+and use Docker:
+
+```bash
+docker compose run -d --name omv-alphinaud tts-qwen
+docker logs -f omv-alphinaud
+docker pause omv-alphinaud     # pause
+docker unpause omv-alphinaud   # continue
+```
+
+For a stop-and-resume, Ctrl-C or `docker stop omv-alphinaud`, then run the
+same compose command again. Do not use `tools/voice.sh` for multi-hour runs:
+it stages into a temporary directory and deletes it on interruption. Use the
+persistent `--out` path directly.
+
 Prefer a local `--qwen3-model` directory: `model_revision` hashes every weight
 file (ignoring `README.md`/`.gitattributes`), so the revision is exact. A repo
 id resolves through the HF cache after `from_pretrained`; if it stays

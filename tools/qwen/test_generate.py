@@ -92,6 +92,14 @@ class MergeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.gen.read_previous_manifest(self.out)
 
+    def test_manifest_checkpoint_is_atomic(self):
+        value = self.manifest(Voicelines={"line": {"Bytes": 3}})
+
+        self.gen.write_manifest(self.out, value)
+
+        self.assertEqual(json.loads((self.out / "manifest.json").read_text()), value)
+        self.assertFalse((self.out / "manifest.json.tmp").exists())
+
     def test_missing_entries_do_not_count_as_loss(self):
         # 5 previous, 2 already broken, 3 carried: repair, not loss.
         self.assertEqual(self.gen.merge_line_loss(5, 2, 3), 0)

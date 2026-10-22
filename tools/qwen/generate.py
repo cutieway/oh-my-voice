@@ -43,6 +43,11 @@ settings, encoder settings, and that voice's x-vector hash. --force rebuilds
 every planned line. A line with a missing x-vector keeps its existing audio
 (it cannot be validated or rebuilt) and is skipped when it has none.
 
+The manifest is checkpointed atomically after every completed line. Stopping
+the process is safe: rerun the same command to resume, and completed lines
+are skipped. A checkpoint is a valid partial pack; do not reload it into the
+plugin mid-run unless a partial pack is intentional.
+
 --merge carries lines and metadata from the existing <out>/manifest.json into
 a speaker-scoped run. It only carries a line whose .ogg still exists, drops
 entries whose audio is already missing, refuses to mix
@@ -176,6 +181,19 @@ def load_previous_lines(out):
         return {}
     lines = manifest.get("Voicelines")
     return lines if isinstance(lines, dict) else {}
+
+
+def write_manifest(out, manifest):
+    """Atomically checkpoint the manifest.
+
+    A long run can be stopped at any time: every completed line is already in
+    the manifest, and the next run reuses it. The temp file is replaced, so a
+    crash never leaves a half-written manifest.
+    """
+    target = out / "manifest.json"
+    tmp = target.with_name("manifest.json.tmp")
+    tmp.write_text(json.dumps(manifest, indent=1, ensure_ascii=False))
+    tmp.replace(target)
 
 
 MERGE_KEYS = ("Schema", "Language", "Sanitizer", "Backend", "Model",
@@ -581,11 +599,26 @@ def main():
         npc_lookup = p["speaker"] or p["npc"]
         manifest["Npcs"].setdefault(npc_lookup, {"NpcId": p["npc"], "VoiceId": p["voice"]})
 
+    missing = 0
     if previous_manifest is not None:
         merge_error = manifest_merge_error(previous_manifest, manifest)
         if merge_error:
             sys.exit(f"REFUSING TO MERGE: {merge_error}. "
                      "Generate into a fresh --out instead.")
+        # Merge before generation so every checkpoint already contains the
+        # untouched speakers. An interrupted run can then be resumed safely.
+        added, missing = merge_previous_manifest(manifest, previous_manifest, vdir)
+        if missing:
+            print(f"warning: dropping {missing} existing line(s) whose audio "
+                  f"is already missing", file=sys.stderr)
+        print(f"merged {added} existing line(s)")
+        lost = merge_line_loss(previous_count, missing,
+                               len(manifest["Voicelines"]))
+        if lost:
+            sys.exit(f"REFUSING TO WRITE: merged pack would lose {lost} "
+                     f"line(s) that had audio ({previous_count} previous, "
+                     f"{missing} broken).")
+    write_manifest(out, manifest)
 
     rejected = 0
     for p in plan:
@@ -608,6 +641,7 @@ def main():
                   file=sys.stderr)
             manifest["Voicelines"][p["id"]] = line_entry(
                 p, target, kept_fp or "unverified")
+            write_manifest(out, manifest)
             continue
 
         if target.exists() and not args.force:
@@ -616,6 +650,7 @@ def main():
                 print(f"  skip {p['id']}: {reason}")
                 manifest["Voicelines"][p["id"]] = line_entry(
                     p, target, generation_fp)
+                write_manifest(out, manifest)
                 continue
             print(f"  rebuild {p['id']}: {reason}", file=sys.stderr)
         elif target.exists():
@@ -653,23 +688,12 @@ def main():
         print(f"  wrote {p['id']} ({encoded_duration:.2f}s)")
         manifest["Voicelines"][p["id"]] = line_entry(
             p, target, generation_fp)
+        write_manifest(out, manifest)
 
     if rejected:
         print(f"{rejected} line(s) rejected for implausible duration; "
               f"they remain in the worklist.", file=sys.stderr)
-    if previous_manifest is not None:
-        added, missing = merge_previous_manifest(manifest, previous_manifest, vdir)
-        if missing:
-            print(f"warning: dropping {missing} existing line(s) whose audio "
-                  f"is already missing", file=sys.stderr)
-        print(f"merged {added} existing line(s)")
-        after_count = len(manifest["Voicelines"])
-        lost = merge_line_loss(previous_count, missing, after_count)
-        if lost:
-            sys.exit(f"REFUSING TO WRITE: merged pack would lose {lost} "
-                     f"line(s) that had audio ({previous_count} previous, "
-                     f"{missing} broken, {after_count} after merge).")
-    (out / "manifest.json").write_text(json.dumps(manifest, indent=1, ensure_ascii=False))
+    write_manifest(out, manifest)
     print(f"pack: {len(manifest['Voicelines'])} lines -> {out}")
 
 

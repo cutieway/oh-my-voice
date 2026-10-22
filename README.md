@@ -268,6 +268,13 @@ reused only when their generation profile matches; new ids are synthesized.
 The first run builds the image, downloads the model, and creates the `data/`
 tree.
 
+`voice.sh` stages into a temporary directory, so use it for short live loops.
+For a multi-hour or multi-thousand-line pack, run the compose command against
+a persistent `--out` path. The generator checkpoints `manifest.json` after
+every line: Ctrl-C/`docker stop` loses at most the current line, and rerunning
+the same command resumes. `docker pause`/`docker unpause` works for a live
+container.
+
 The model occasionally appends an invented sentence to otherwise correct
 speech. The generator measures every new WAV and retries audio longer than
 `1.05 * max(4.5s, words / 2.2 + 1s)` with lower-temperature sampling; after
