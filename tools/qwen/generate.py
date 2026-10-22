@@ -294,6 +294,27 @@ def line_entry(p, target, generation_fp):
     }
 
 
+def reused_line_entry(p, action):
+    """Manifest entry for a line whose audio is already reusable.
+
+    Reuse the previous entry when possible so a no-op resume does not run
+    ffprobe over every line or rewrite equivalent metadata.
+    """
+    previous = action["previous"]
+    if isinstance(previous, dict) and previous:
+        return previous
+    if action["kind"] == "keep":
+        kept_fp = (previous.get("GenerationFingerprint")
+                   if previous else "unverified")
+        return line_entry(p, action["target"], kept_fp or "unverified")
+    return line_entry(p, action["target"], action["generation_fp"])
+
+
+def store_reused_line(manifest, p, action):
+    if p["id"] not in manifest["Voicelines"]:
+        manifest["Voicelines"][p["id"]] = reused_line_entry(p, action)
+
+
 def remove_orphan_temps(vdir):
     """Delete temporary WAV/Ogg files left by an interrupted earlier run."""
     removed = 0
@@ -669,15 +690,8 @@ def main():
               f"{', '.join(blocked_voices)})", file=sys.stderr)
     if remaining_total == 0:
         for p, action in zip(plan, actions):
-            if action["kind"] == "skip" and p["id"] not in manifest["Voicelines"]:
-                manifest["Voicelines"][p["id"]] = line_entry(
-                    p, action["target"], action["generation_fp"])
-            elif action["kind"] == "keep" and p["id"] not in manifest["Voicelines"]:
-                previous = action["previous"]
-                kept_fp = (previous.get("GenerationFingerprint")
-                           if previous else "unverified")
-                manifest["Voicelines"][p["id"]] = line_entry(
-                    p, action["target"], kept_fp or "unverified")
+            if action["kind"] in ("skip", "keep"):
+                store_reused_line(manifest, p, action)
         write_manifest(out, manifest)
         print(f"pack: {len(manifest['Voicelines'])} lines -> {out} "
               f"(nothing to generate)")
@@ -688,26 +702,14 @@ def main():
     for p, action in zip(plan, actions):
         kind = action["kind"]
         target = action["target"]
-        previous = action["previous"]
         generation_fp = action["generation_fp"]
 
-        if kind == "skip":
+        if kind in ("skip", "keep"):
             if args.verbose:
-                print(f"  skip {p['id']}: {action['reason']}")
-            if p["id"] not in manifest["Voicelines"]:
-                manifest["Voicelines"][p["id"]] = line_entry(
-                    p, target, generation_fp)
-            continue
-
-        if kind == "keep":
-            if args.verbose:
-                print(f"  keep {p['id']}: {action['reason']}",
-                      file=sys.stderr)
-            kept_fp = (previous.get("GenerationFingerprint")
-                       if previous else "unverified")
-            if p["id"] not in manifest["Voicelines"]:
-                manifest["Voicelines"][p["id"]] = line_entry(
-                    p, target, kept_fp or "unverified")
+                stream = sys.stderr if kind == "keep" else sys.stdout
+                print(f"  {kind} {p['id']}: {action['reason']}",
+                      file=stream)
+            store_reused_line(manifest, p, action)
             continue
 
         if kind == "blocked":

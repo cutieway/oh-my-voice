@@ -100,6 +100,27 @@ class MergeTests(unittest.TestCase):
         self.assertEqual(json.loads((self.out / "manifest.json").read_text()), value)
         self.assertFalse((self.out / "manifest.json.tmp").exists())
 
+    def test_reused_line_keeps_previous_entry_without_probe(self):
+        previous = {"Bytes": 3, "GenerationFingerprint": "fp",
+                    "Sentence": "hello"}
+        manifest = self.manifest()
+        action = {"kind": "skip", "previous": previous,
+                  "target": self.vdir / "line.ogg", "generation_fp": "fp"}
+
+        self.gen.store_reused_line(manifest, {"id": "line"}, action)
+
+        self.assertIs(manifest["Voicelines"]["line"], previous)
+
+    def test_reused_line_does_not_overwrite_merged_entry(self):
+        merged = {"Bytes": 9, "GenerationFingerprint": "fp"}
+        manifest = self.manifest(Voicelines={"line": merged})
+        action = {"kind": "skip", "previous": {"Bytes": 3},
+                  "target": self.vdir / "line.ogg", "generation_fp": "fp"}
+
+        self.gen.store_reused_line(manifest, {"id": "line"}, action)
+
+        self.assertIs(manifest["Voicelines"]["line"], merged)
+
     def test_missing_entries_do_not_count_as_loss(self):
         # 5 previous, 2 already broken, 3 carried: repair, not loss.
         self.assertEqual(self.gen.merge_line_loss(5, 2, 3), 0)
