@@ -92,6 +92,12 @@ class MergeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.gen.read_previous_manifest(self.out)
 
+    def test_missing_entries_do_not_count_as_loss(self):
+        # 5 previous, 2 already broken, 3 carried: repair, not loss.
+        self.assertEqual(self.gen.merge_line_loss(5, 2, 3), 0)
+        # 4 previous, none broken, only 3 after merge: real loss.
+        self.assertEqual(self.gen.merge_line_loss(4, 0, 3), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

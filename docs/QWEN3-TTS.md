@@ -101,9 +101,11 @@ speakers, pass `--merge`; `tools/voice.sh` always does. Merge:
   `VoiceEmbeddings`;
 - only carries a line whose `<id>.ogg` still exists, and refreshes its byte
   size/duration if the file changed;
+- drops entries whose audio is already missing, with a warning, so one broken
+  entry cannot deadlock every later merge;
 - requires matching `Language`, `Sanitizer`, `Backend`, `Model`, `Generation`,
   and `Encoder` settings, because one manifest cannot describe mixed profiles;
-- refuses to write a manifest with fewer `Voicelines` than the previous one.
+- refuses to write a manifest that loses a line which had audio.
 
 A bare run without `--merge` is still the clean-room mode for tests. A merge
 against a corrupt manifest is fatal rather than silently replacing it.

@@ -44,10 +44,11 @@ every planned line. A line with a missing x-vector keeps its existing audio
 (it cannot be validated or rebuilt) and is skipped when it has none.
 
 --merge carries lines and metadata from the existing <out>/manifest.json into
-a speaker-scoped run. It only carries a line whose .ogg still exists, refuses
-to mix Language/Sanitizer/Backend/Model/Generation/Encoder settings, and
-refuses to write a manifest with fewer lines than before. This is the safe way
-to add one speaker to a multi-speaker pack.
+a speaker-scoped run. It only carries a line whose .ogg still exists, drops
+entries whose audio is already missing, refuses to mix
+Language/Sanitizer/Backend/Model/Generation/Encoder settings, and refuses to
+lose a line that had audio. This is the safe way to add one speaker to a
+multi-speaker pack.
 
 The model occasionally appends an invented sentence to otherwise correct
 speech. Each synthesized WAV is measured; implausibly long audio is retried
@@ -235,6 +236,15 @@ def merge_previous_manifest(manifest, previous, vdir):
         manifest["VoiceEmbeddings"] = merged
 
     return added, missing
+
+
+def merge_line_loss(previous_count, missing, after_count):
+    """Lines with existing audio that disappeared during a merge.
+
+    ``missing`` entries had no audio to begin with, so dropping them repairs
+    the manifest instead of losing a voiced line.
+    """
+    return max(0, previous_count - missing - after_count)
 
 
 def cached_line_status(previous, target, profile_fp):
@@ -649,13 +659,16 @@ def main():
               f"they remain in the worklist.", file=sys.stderr)
     if previous_manifest is not None:
         added, missing = merge_previous_manifest(manifest, previous_manifest, vdir)
-        print(f"merged {added} existing line(s)"
-              + (f"; skipped {missing} with missing audio" if missing else ""))
+        if missing:
+            print(f"warning: dropping {missing} existing line(s) whose audio "
+                  f"is already missing", file=sys.stderr)
+        print(f"merged {added} existing line(s)")
         after_count = len(manifest["Voicelines"])
-        if after_count < previous_count:
-            sys.exit(f"REFUSING TO WRITE: merged pack would lose "
-                     f"{previous_count - after_count} line(s) "
-                     f"({previous_count} -> {after_count}).")
+        lost = merge_line_loss(previous_count, missing, after_count)
+        if lost:
+            sys.exit(f"REFUSING TO WRITE: merged pack would lose {lost} "
+                     f"line(s) that had audio ({previous_count} previous, "
+                     f"{missing} broken, {after_count} after merge).")
     (out / "manifest.json").write_text(json.dumps(manifest, indent=1, ensure_ascii=False))
     print(f"pack: {len(manifest['Voicelines'])} lines -> {out}")
 
