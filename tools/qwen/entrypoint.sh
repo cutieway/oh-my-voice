@@ -32,4 +32,8 @@ if [ "${OMV_FORCE:-0}" = "1" ]; then
   set -- --force "$@"
 fi
 
+if [ "${OMV_MERGE:-0}" = "1" ]; then
+  set -- --merge "$@"
+fi
+
 exec python /opt/omv/generate.py "$@"

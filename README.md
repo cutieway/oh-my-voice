@@ -243,19 +243,20 @@ same voice/token and plans the same ids. Manifest `Npcs` is keyed by the
 cleaned speaker name (`Speaker`), with `NpcId` set to the numeric id used in
 the hash.
 
-**Do not install a speaker-scoped export over an existing pack.** The
-generator's manifest contains only the rows it planned, so using
-`tools/voice.sh` with a one-character worklist would drop every other
-speaker. Generate to a separate `--out` for tests until merge support
-exists.
+**Adding one speaker to an existing pack requires merge.** A bare generator
+run writes only the rows it planned. Use `tools/voice.sh` (which always
+merges) or pass `--merge` with an `--out` that already holds the pack. Merge
+carries existing `Voicelines`/`Voices`/`Npcs` entries and refuses mismatched
+pack settings or a manifest that would lose lines. For a clean test, use a
+separate `--out` without `--merge`.
 
 ### Live dev loop
 
 `tools/voice.sh` is the one-command loop: it stages the installed pack,
-generates every missed line, validates the manifest, and installs it into
-`~/.xlcore/pluginConfigs/OhMyVoice`. It reads the sanitizer pin from the
-installed manifest, so no env exports are needed. Then use `/omv` →
-**Reload pack**.
+generates every missed line, merges them into the staged manifest, validates
+it, and installs it into `~/.xlcore/pluginConfigs/OhMyVoice`. It reads the
+sanitizer pin from the installed manifest, so no env exports are needed. Then
+use `/omv` → **Reload pack**.
 
 ```bash
 ./tools/voice.sh            # reuse lines whose generation profile matches
@@ -269,9 +270,9 @@ tree.
 
 The model occasionally appends an invented sentence to otherwise correct
 speech. The generator measures every new WAV and retries audio longer than
-`max(4.5s, words / 2.2 + 1s)` with lower-temperature sampling; after three
-attempts it rejects the line, leaves it in the worklist, and installs no bad
-audio.
+`1.05 * max(4.5s, words / 2.2 + 1s)` with lower-temperature sampling; after
+three attempts it rejects the line, leaves it in the worklist, and installs
+no bad audio.
 
 ### Removed backends
 

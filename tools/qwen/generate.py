@@ -4,7 +4,7 @@
 Usage:
   generate.py --events <events.jsonl> --xvectors <xvectors> --map voice-map.json \
       --out <packdir> --sanitizer-pin <v1:sha> [--lang en] \
-      [--qwen3-model <id-or-dir>] [--force]
+      [--qwen3-model <id-or-dir>] [--force] [--merge]
 
 The event log contains both cache hits and misses. Only rows with
 Result="miss" (or no Result, as in the legacy misses.jsonl) are generated.
@@ -42,6 +42,12 @@ GenerationFingerprint still matches the exact model revision, generation
 settings, encoder settings, and that voice's x-vector hash. --force rebuilds
 every planned line. A line with a missing x-vector keeps its existing audio
 (it cannot be validated or rebuilt) and is skipped when it has none.
+
+--merge carries lines and metadata from the existing <out>/manifest.json into
+a speaker-scoped run. It only carries a line whose .ogg still exists, refuses
+to mix Language/Sanitizer/Backend/Model/Generation/Encoder settings, and
+refuses to write a manifest with fewer lines than before. This is the safe way
+to add one speaker to a multi-speaker pack.
 
 The model occasionally appends an invented sentence to otherwise correct
 speech. Each synthesized WAV is measured; implausibly long audio is retried
@@ -141,17 +147,94 @@ def profile_fingerprint(profile):
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def load_previous_lines(out):
+def read_previous_manifest(out):
+    """Load a previous pack manifest, or None when the pack is new.
+
+    Merge callers treat a corrupt manifest as fatal: silently replacing it
+    would drop audio the pack still contains.
+    """
     path = out / "manifest.json"
     if not path.is_file():
-        return {}
+        return None
     try:
         manifest = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError):
-        print(f"warning: ignoring unreadable {path}", file=sys.stderr)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"cannot read previous manifest {path}: {exc}") from exc
+    if not isinstance(manifest, dict):
+        raise ValueError(f"previous manifest is not an object: {path}")
+    return manifest
+
+
+def load_previous_lines(out):
+    try:
+        manifest = read_previous_manifest(out)
+    except ValueError as exc:
+        print(f"warning: {exc}", file=sys.stderr)
         return {}
-    lines = manifest.get("Voicelines") if isinstance(manifest, dict) else None
+    if manifest is None:
+        return {}
+    lines = manifest.get("Voicelines")
     return lines if isinstance(lines, dict) else {}
+
+
+MERGE_KEYS = ("Schema", "Language", "Sanitizer", "Backend", "Model",
+              "Generation", "Encoder")
+
+
+def manifest_merge_error(previous, current):
+    for key in MERGE_KEYS:
+        if previous.get(key) != current.get(key):
+            return (f"{key} differs: previous={previous.get(key)!r}, "
+                    f"current={current.get(key)!r}")
+    return None
+
+
+def merge_previous_manifest(manifest, previous, vdir):
+    """Carry existing lines and metadata into a speaker-scoped manifest.
+
+    Only lines whose Ogg still exists are carried. Metadata for a carried line
+    is refreshed when its byte size changed, so the plugin's size check does
+    not reject a line that was re-encoded outside this generator.
+    """
+    added = 0
+    missing = 0
+    previous_lines = previous.get("Voicelines")
+    if isinstance(previous_lines, dict):
+        for vid, entry in previous_lines.items():
+            if vid in manifest["Voicelines"]:
+                continue
+            target = vdir / f"{vid}.ogg"
+            if not target.is_file():
+                missing += 1
+                continue
+            entry = dict(entry) if isinstance(entry, dict) else {}
+            size = target.stat().st_size
+            if entry.get("Bytes") != size:
+                entry["Bytes"] = size
+                entry["DurationSeconds"] = media_duration(target)
+            entry.setdefault("Codec", "opus")
+            manifest["Voicelines"][vid] = entry
+            added += 1
+
+    for key in ("Voices", "Npcs"):
+        previous_map = previous.get(key)
+        if isinstance(previous_map, dict):
+            merged = dict(previous_map)
+            merged.update(manifest[key])
+            manifest[key] = merged
+
+    previous_ignored = previous.get("IgnoredSpeakers")
+    if isinstance(previous_ignored, list):
+        manifest["IgnoredSpeakers"] = list(dict.fromkeys(
+            previous_ignored + manifest["IgnoredSpeakers"]))
+
+    previous_embeddings = previous.get("VoiceEmbeddings")
+    if isinstance(previous_embeddings, dict):
+        merged = dict(previous_embeddings)
+        merged.update(manifest["VoiceEmbeddings"])
+        manifest["VoiceEmbeddings"] = merged
+
+    return added, missing
 
 
 def cached_line_status(previous, target, profile_fp):
@@ -297,6 +380,9 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--force", action="store_true",
                     help="regenerate every planned line even when its cached generation profile matches")
+    ap.add_argument("--merge", action="store_true",
+                    help="carry existing lines/metadata from --out/manifest.json into "
+                         "this speaker-scoped run; refuses to lose lines or mix pack settings")
     ap.add_argument("--min-wps", type=float, default=2.2,
                     help="Retry audio slower than this words/sec (default 2.2).")
     ap.add_argument("--max-attempts", type=int, default=3,
@@ -415,7 +501,22 @@ def main():
     if args.dry_run:
         return
 
-    previous_lines = load_previous_lines(out)
+    previous_manifest = None
+    if args.merge:
+        try:
+            previous_manifest = read_previous_manifest(out)
+        except ValueError as exc:
+            ap.error(str(exc))
+        if previous_manifest is None:
+            previous_lines = {}
+        else:
+            previous_lines = previous_manifest.get("Voicelines")
+            if not isinstance(previous_lines, dict):
+                ap.error("previous manifest has no Voicelines object; refusing to merge")
+    else:
+        previous_lines = load_previous_lines(out)
+    previous_count = len(previous_lines)
+
     vdir = out / "voicelines"
     vdir.mkdir(parents=True, exist_ok=True)
     orphans = remove_orphan_temps(vdir)
@@ -470,6 +571,12 @@ def main():
         npc_lookup = p["speaker"] or p["npc"]
         manifest["Npcs"].setdefault(npc_lookup, {"NpcId": p["npc"], "VoiceId": p["voice"]})
 
+    if previous_manifest is not None:
+        merge_error = manifest_merge_error(previous_manifest, manifest)
+        if merge_error:
+            sys.exit(f"REFUSING TO MERGE: {merge_error}. "
+                     "Generate into a fresh --out instead.")
+
     rejected = 0
     for p in plan:
         target = vdir / (p["id"] + ".ogg")
@@ -509,7 +616,9 @@ def main():
             print(f"  MISSING XVECTOR {xvector}; skipping {p['id']}", file=sys.stderr)
             continue
         wav_tmp = vdir / (p["id"] + ".tmp.wav")
-        limit = max(4.5, len(p["sentence"].split()) / args.min_wps + 1.0)
+        # 5% grace: punctuation and dramatic pauses routinely land just over
+        # the words/sec estimate. The check still catches appended sentences.
+        limit = max(4.5, len(p["sentence"].split()) / args.min_wps + 1.0) * 1.05
         max_new_tokens = (args.max_new_tokens
                           or auto_max_new_tokens(p["sentence"], args.min_wps))
         try:
@@ -538,6 +647,15 @@ def main():
     if rejected:
         print(f"{rejected} line(s) rejected for implausible duration; "
               f"they remain in the worklist.", file=sys.stderr)
+    if previous_manifest is not None:
+        added, missing = merge_previous_manifest(manifest, previous_manifest, vdir)
+        print(f"merged {added} existing line(s)"
+              + (f"; skipped {missing} with missing audio" if missing else ""))
+        after_count = len(manifest["Voicelines"])
+        if after_count < previous_count:
+            sys.exit(f"REFUSING TO WRITE: merged pack would lose "
+                     f"{previous_count - after_count} line(s) "
+                     f"({previous_count} -> {after_count}).")
     (out / "manifest.json").write_text(json.dumps(manifest, indent=1, ensure_ascii=False))
     print(f"pack: {len(manifest['Voicelines'])} lines -> {out}")
 

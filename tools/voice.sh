@@ -92,10 +92,11 @@ echo "Do not click new dialogue until generation finishes."
 # Rebuild so the image always contains the current tools/qwen/generate.py; the
 # layer cache makes an unchanged run a no-op.
 docker compose build tts-qwen
+# Always merge: the staged manifest may cover speakers outside this worklist.
 if (( FORCE )); then
-  docker compose run --rm -e OMV_FORCE=1 tts-qwen
+  docker compose run --rm -e OMV_FORCE=1 -e OMV_MERGE=1 tts-qwen
 else
-  docker compose run --rm tts-qwen
+  docker compose run --rm -e OMV_MERGE=1 tts-qwen
 fi
 
 [[ -s "$TMP/manifest.json" ]] || { echo "generator produced no manifest" >&2; exit 1; }

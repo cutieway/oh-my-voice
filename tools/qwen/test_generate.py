@@ -1,0 +1,97 @@
+import importlib.util
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+
+
+def load_generator():
+    spec = importlib.util.spec_from_file_location("omv_generate", HERE / "generate.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class MergeTests(unittest.TestCase):
+    def setUp(self):
+        self.gen = load_generator()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.out = Path(self.tmp.name)
+        self.vdir = self.out / "voicelines"
+        self.vdir.mkdir()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def manifest(self, **overrides):
+        value = {
+            "Schema": 1,
+            "Language": "en",
+            "Sanitizer": "v1:" + "a" * 64,
+            "Backend": "qwen3tts",
+            "Model": {"Id": "model", "Revision": "revision"},
+            "Generation": {"Seed": None},
+            "Encoder": {"Codec": "opus"},
+            "Voices": {},
+            "Npcs": {},
+            "IgnoredSpeakers": [],
+            "VoiceEmbeddings": {},
+            "Voicelines": {},
+        }
+        value.update(overrides)
+        return value
+
+    def test_merge_carries_lines_and_metadata(self):
+        (self.vdir / "old.ogg").write_bytes(b"old")
+        previous = self.manifest(
+            Voices={"old": {"IsGeneric": False}},
+            Npcs={"Old": {"NpcId": "1", "VoiceId": "old"}},
+            IgnoredSpeakers=["ignored"],
+            VoiceEmbeddings={"old": "sha"},
+            Voicelines={"old": {"Bytes": 3, "VoiceId": "old"}},
+        )
+        current = self.manifest(
+            Voices={"new": {"IsGeneric": False}},
+            Npcs={"New": {"NpcId": "2", "VoiceId": "new"}},
+            IgnoredSpeakers=["new-ignored"],
+            VoiceEmbeddings={"new": "sha2"},
+            Voicelines={"new": {"Bytes": 3}},
+        )
+
+        added, missing = self.gen.merge_previous_manifest(current, previous, self.vdir)
+
+        self.assertEqual((added, missing), (1, 0))
+        self.assertEqual(set(current["Voicelines"]), {"old", "new"})
+        self.assertEqual(current["Voices"]["old"], {"IsGeneric": False})
+        self.assertEqual(current["Npcs"]["Old"]["NpcId"], "1")
+        self.assertEqual(current["IgnoredSpeakers"], ["ignored", "new-ignored"])
+        self.assertEqual(current["VoiceEmbeddings"], {"old": "sha", "new": "sha2"})
+
+    def test_missing_audio_is_not_carried(self):
+        previous = self.manifest(Voicelines={"gone": {"Bytes": 3}})
+        current = self.manifest(Voicelines={"new": {"Bytes": 3}})
+
+        added, missing = self.gen.merge_previous_manifest(current, previous, self.vdir)
+
+        self.assertEqual((added, missing), (0, 1))
+        self.assertNotIn("gone", current["Voicelines"])
+
+    def test_incompatible_settings_are_rejected(self):
+        previous = self.manifest()
+        current = self.manifest(Model={"Id": "other", "Revision": "revision"})
+
+        error = self.gen.manifest_merge_error(previous, current)
+
+        self.assertIn("Model differs", error)
+
+    def test_corrupt_manifest_raises(self):
+        (self.out / "manifest.json").write_text("{", encoding="utf-8")
+
+        with self.assertRaises(ValueError):
+            self.gen.read_previous_manifest(self.out)
+
+
+if __name__ == "__main__":
+    unittest.main()

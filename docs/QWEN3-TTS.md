@@ -85,9 +85,28 @@ a positive value overrides it. This matters for unattended batches: the
 upstream default is 2048 tokens, and a single looping line can otherwise spend
 many minutes decoding. A 20-line Sphene pilot hit one short line that took
 655 s on an uncapped retry; the capped run completed 20/20 in 9m12s with no
-rejections. The output pack directory must exist and be writable by
+rejections. The full 165-line Sphene queue also finished 165/165; two lines
+landed within 5% of the duration estimate and were accepted after a retry
+rather than dropped. The output pack directory must exist and be writable by
 `OMV_UID` before Docker starts; a bind mount created by root leaves
 `/out/voicelines` unwritable.
+
+## Merging speaker-scoped runs
+
+A worklist exported for one speaker writes a manifest containing only that
+speaker's planned lines. To add it to a pack that already holds other
+speakers, pass `--merge`; `tools/voice.sh` always does. Merge:
+
+- carries previous `Voicelines`, `Voices`, `Npcs`, `IgnoredSpeakers`, and
+  `VoiceEmbeddings`;
+- only carries a line whose `<id>.ogg` still exists, and refreshes its byte
+  size/duration if the file changed;
+- requires matching `Language`, `Sanitizer`, `Backend`, `Model`, `Generation`,
+  and `Encoder` settings, because one manifest cannot describe mixed profiles;
+- refuses to write a manifest with fewer `Voicelines` than the previous one.
+
+A bare run without `--merge` is still the clean-room mode for tests. A merge
+against a corrupt manifest is fatal rather than silently replacing it.
 
 Prefer a local `--qwen3-model` directory: `model_revision` hashes every weight
 file (ignoring `README.md`/`.gitattributes`), so the revision is exact. A repo

@@ -240,11 +240,11 @@ The output uses the plugin miss-event shape (`Result="miss"`, `Id`,
 `Source`, `Npc`, `Utc`). `Id` is exactly `dialogs.voice_line_id`, and
 `Speaker` is `npc_key`.
 
-**Do not install a speaker-scoped worklist over an existing pack.** The
-generator writes a manifest containing only the rows it planned, so feeding
-this JSONL to `tools/voice.sh` would replace the pack and drop every other
-speaker. Generate to a separate `--out` for tests, or add merge support
-first. The existing generator consumes it directly:
+**A speaker-scoped worklist needs merge when added to an existing pack.**
+A bare generator run writes only the rows it planned; `tools/voice.sh` always
+merges, and a direct run can pass `--merge`. Merge carries existing lines and
+metadata, and refuses mismatched pack settings or a manifest that would lose
+lines. The existing generator consumes the JSONL directly:
 
 ```bash
 # Docker bind mounts do not create a writable directory for a non-root
