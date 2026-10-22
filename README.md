@@ -50,13 +50,14 @@ OhMyVoice/            # Dalamud plugin (net10.0-windows)
   VoiceLog.cs         # hit/miss JSONL events, compacted on load
   Windows/            # /omv status + settings UI
 OhMyVoice.Common/     # net10.0 shared: Sanitizer v1, VoiceId, PackTypes
-scripts/check-refs.sh # Q6 guard: no voice audio/embeddings in repo
 compose.yaml          # batch generator: tts-qwen
 compose.xvector.yaml  # average x-vectors: xvector
-sample.sh             # one-off prompt sample into data/samples/
+voice.sh              # generate/resume one speaker's queued lines
+scripts/
+  sample.sh           # one-off prompt sample into data/samples/
+  check-refs.sh       # Q6 guard: no voice audio/embeddings in repo
 tools/
   qwen/               # Qwen3-TTS Dockerfile, entrypoint, generator
-  voice.sh            # one-command live dev loop
   voice-map.json      # NPC -> xvector name
   xivdata/            # offline dialogue DB + cutscene SCD extractor (Lumina)
   xvector/            # average speaker x-vector builder (no generation)
@@ -93,8 +94,9 @@ Dalamud dev DLLs resolve from `~/.xlcore/dalamud/Hooks/dev`
 
 One pinned ROCm/PyTorch image. Qwen3-TTS Base is driven by one precomputed
 average x-vector per voice. The host needs only the amdgpu driver,
-`/dev/kfd`, `/dev/dri`, and Docker — no host Python, CUDA, or Nix TTS
-package.
+`/dev/kfd`, `/dev/dri`, Docker, and .NET for the DB export. The normal entry
+point is `./voice.sh <speaker>`; the manual compose run below is the
+low-level path for an already-exported `events.jsonl`.
 
 ```bash
 mkdir -p data/{models,cache,xvectors,out}
@@ -143,18 +145,17 @@ docker compose run --rm tts-qwen    # -> data/out/voicelines/*.ogg + manifest.js
   MIOpen's exhaustive per-shape find drops decode from RTF ~3 to ~12; a
   6.65 s sample went from 41.9 s to 106.6 s wall. Details and regression
   history: [docs/QWEN3-TTS.md](docs/QWEN3-TTS.md#miopen-fast-find-is-required).
-- One-off sample: `./sample.sh <speaker_token> "<sentence>"` writes
+- One-off sample: `./scripts/sample.sh <speaker_token> "<sentence>"` writes
   `data/samples/<speaker_token>/` with the x-vector metadata and line audio.
-  It never uses `tools/voice.sh` or installs into the plugin pack.
+  It never uses `./voice.sh` or installs into the plugin pack.
 - Existing `.ogg` files are reused only when their recorded
   `GenerationFingerprint` matches the current model revision, generation
   settings, encoder settings, and that voice's x-vector hash. Manifests from
   before fingerprints cause a one-time rebuild. Use
-  `./tools/voice.sh --force` (or `--force` directly) to regenerate every
-  planned line. `tools/voice.sh` stages the installed manifest so profiles
-  survive the dev loop. Ogg writes are crash-safe: each line is encoded to a
-  sibling `.tmp.ogg`, ffprobe-validated, then atomically renamed; orphaned
-  temp files are removed before any line is encoded.
+  `OMV_FORCE=1 ./voice.sh <speaker>` to regenerate every planned line. Ogg
+  writes are crash-safe: each line is encoded to a sibling `.tmp.ogg`,
+  ffprobe-validated, then atomically renamed; orphaned temp files are removed
+  before any line is encoded.
 - Prefer a local `--qwen3-model` directory for the cache key: its weight
   files are hashed, so the recorded revision is exact. A repo id resolves to
   the Hugging Face cache commit after download; if it remains unresolved the
@@ -217,63 +218,53 @@ docker compose -f compose.xvector.yaml run --rm xvector --speaker sphene --force
   832.0 s total, 0 clip errors, 11 MB of vectors. Extraction produced 18 GB
   of SCD+WAV and took 731 s; one `vgmstream` clip failed.
 
-### From the dialogue DB
+### Generate one speaker
 
-`tools/xivdata` can export one voiced character's unvoiced worklist directly
-from the SQLite DB. This is the offline alternative to waiting for live
-`events.jsonl` misses:
-
-```bash
-dotnet run --project tools/xivdata -- export \
-  --db data/dialogue.db --speaker alphinaud \
-  --out data/worklists/alphinaud.jsonl
-
-# create the output directory as your host user first; Docker will not
-# create a writable bind-mount target for a non-root OMV_UID.
-mkdir -p data/out/alphinaud-test
-
-python3 tools/qwen/generate.py \
-  --events data/worklists/alphinaud.jsonl \
-  --xvectors data/xvectors --map tools/voice-map.json \
-  --out data/out/alphinaud-test --sanitizer-pin "v1:..." --dry-run
-```
-
-The exported `Id` is `voice_line_id` from the DB; the generator resolves the
-same voice/token and plans the same ids. Manifest `Npcs` is keyed by the
-cleaned speaker name (`Speaker`), with `NpcId` set to the numeric id used in
-the hash.
-
-**Adding one speaker to an existing pack requires merge.** A bare generator
-run writes only the rows it planned. Use `tools/voice.sh` (which always
-merges) or pass `--merge` with an `--out` that already holds the pack. Merge
-carries existing `Voicelines`/`Voices`/`Npcs` entries and refuses mismatched
-pack settings or a manifest that would lose lines. For a clean test, use a
-separate `--out` without `--merge`.
-
-### Live dev loop
-
-`tools/voice.sh` is the one-command loop: it stages the installed pack,
-generates every missed line, merges them into the staged manifest, validates
-it, and installs it into `~/.xlcore/pluginConfigs/OhMyVoice`. It reads the
-sanitizer pin from the installed manifest, so no env exports are needed. Then
-use `/omv` → **Reload pack**.
+`./voice.sh` resolves the speaker from `data/dialogue.db`, exports that
+speaker's queued lines, builds the image, and generates everything not already
+present in the output pack:
 
 ```bash
-./tools/voice.sh            # reuse lines whose generation profile matches
-./tools/voice.sh --force    # regenerate every planned line
+./voice.sh alphinaud
+./voice.sh 1003053
 ```
 
-The old manifest is kept as `manifest.json.bak`. Existing `.ogg` files are
-reused only when their generation profile matches; new ids are synthesized.
-The first run builds the image, downloads the model, and creates the `data/`
-tree.
+The output is `data/out/<voice_id>/` (`manifest.json` + `voicelines/*.ogg`),
+merged into any existing lines in that directory. The console prints
+`[done/remaining]` for lines still needing generation. On a resume, completed
+lines are excluded from the denominator, so continuing 100 lines after 5 were
+finished starts at `[1/95]`, not `[6/100]`.
 
-`voice.sh` stages into a temporary directory, so use it for short live loops.
-For a multi-hour or multi-thousand-line pack, run the compose command against
-a persistent `--out` path. The generator checkpoints `manifest.json` after
-every line: Ctrl-C/`docker stop` loses at most the current line, and rerunning
-the same command resumes. `docker pause`/`docker unpause` works for a live
-container.
+The generator checkpoints `manifest.json` atomically after every completed
+line. Ctrl+C or `-stop` loses at most the line currently being synthesized;
+rerunning `./voice.sh <speaker>` resumes. `-pause` freezes the container and
+keeps the model/GPU state; `-start` unpauses it:
+
+```bash
+./voice.sh alphinaud          # start/resume and attach
+./voice.sh -pause alphinaud   # from another terminal, or type -pause
+./voice.sh -start alphinaud   # unpause; also resumes a stopped run
+./voice.sh -stop alphinaud    # same as Ctrl+C
+```
+
+Sending `-pause`, `-start`, or `-stop` in the attached console works too.
+`OMV_FORCE=1` rebuilds every planned line; `OMV_LIMIT=N` exports only the
+first N queued lines (smoke tests). The pin is read from the shared
+`OhMyVoice.Common.Sanitizer` via `xivdata pin`; `OMV_SANITIZER_PIN` overrides
+it.
+
+To write directly into the live plugin pack instead of the per-character
+directory (the pack is merged, then reloaded with `/omv`):
+
+```bash
+OMV_OUT="$HOME/.xlcore/pluginConfigs/OhMyVoice" ./voice.sh alphinaud
+```
+
+A bare `tools/qwen/generate.py --dry-run` remains available for inspecting a
+worklist without Docker. The exported `Id` is `voice_line_id` from the DB;
+manifest `Npcs` is keyed by the cleaned speaker name (`Speaker`), with `NpcId`
+set to the numeric id used in the hash. A generator run without `--merge`
+writes only its planned rows; `./voice.sh` always passes `--merge`.
 
 The model occasionally appends an invented sentence to otherwise correct
 speech. The generator measures every new WAV and retries audio longer than

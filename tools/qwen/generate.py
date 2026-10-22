@@ -48,6 +48,10 @@ the process is safe: rerun the same command to resume, and completed lines
 are skipped. A checkpoint is a valid partial pack; do not reload it into the
 plugin mid-run unless a partial pack is intentional.
 
+Progress is printed as [completed/remaining], where remaining is the number
+of lines that still need work after fingerprint checks. Reused and preserved
+lines are summarized at startup and silent unless --verbose is given.
+
 --merge carries lines and metadata from the existing <out>/manifest.json into
 a speaker-scoped run. It only carries a line whose .ogg still exists, drops
 entries whose audio is already missing, refuses to mix
@@ -406,6 +410,8 @@ def main():
                     help="Seed Qwen sampling before each line (default: unseeded).")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--verbose", action="store_true",
+                    help="print every reused/kept line instead of only a summary")
     ap.add_argument("--force", action="store_true",
                     help="regenerate every planned line even when its cached generation profile matches")
     ap.add_argument("--merge", action="store_true",
@@ -620,8 +626,7 @@ def main():
                      f"{missing} broken).")
     write_manifest(out, manifest)
 
-    rejected = 0
-    for p in plan:
+    def line_action(p):
         target = vdir / (p["id"] + ".ogg")
         previous = previous_lines.get(p["id"])
         if not isinstance(previous, dict):
@@ -632,34 +637,88 @@ def main():
                 args, model_key, voice_sha))
             if voice_sha else None
         )
+        action = {"target": target, "previous": previous,
+                  "generation_fp": generation_fp}
 
         if target.exists() and generation_fp is None:
             # The audio exists but the x-vector needed to validate or rebuild
             # it is gone. Preserve the working line rather than dropping it.
-            kept_fp = previous.get("GenerationFingerprint") if previous else "unverified"
-            print(f"  keep {p['id']}: x-vector missing; not revalidated",
-                  file=sys.stderr)
-            manifest["Voicelines"][p["id"]] = line_entry(
-                p, target, kept_fp or "unverified")
-            write_manifest(out, manifest)
-            continue
-
+            return action | {"kind": "keep",
+                             "reason": "x-vector missing; not revalidated"}
         if target.exists() and not args.force:
-            reusable, reason = cached_line_status(previous, target, generation_fp)
-            if reusable:
-                print(f"  skip {p['id']}: {reason}")
+            reusable, reason = cached_line_status(previous, target,
+                                                  generation_fp)
+            return action | {"kind": "skip" if reusable else "rebuild",
+                             "reason": reason}
+        if target.exists():
+            return action | {"kind": "rebuild", "reason": "--force"}
+        if not (xvectors / (p["voice"] + ".npy")).is_file():
+            return action | {"kind": "blocked", "reason": "x-vector missing"}
+        return action | {"kind": "generate", "reason": ""}
+
+    actions = [line_action(p) for p in plan]
+    remaining_total = sum(a["kind"] in ("generate", "rebuild")
+                          for a in actions)
+    blocked = sum(a["kind"] == "blocked" for a in actions)
+    reused = len(plan) - remaining_total - blocked
+    blocked_voices = sorted({p["voice"] for p, a in zip(plan, actions)
+                             if a["kind"] == "blocked"})
+    print(f"{reused} line(s) already present; {remaining_total} remaining")
+    if blocked:
+        print(f"warning: {blocked} line(s) skipped (missing x-vector: "
+              f"{', '.join(blocked_voices)})", file=sys.stderr)
+    if remaining_total == 0:
+        for p, action in zip(plan, actions):
+            if action["kind"] == "skip" and p["id"] not in manifest["Voicelines"]:
+                manifest["Voicelines"][p["id"]] = line_entry(
+                    p, action["target"], action["generation_fp"])
+            elif action["kind"] == "keep" and p["id"] not in manifest["Voicelines"]:
+                previous = action["previous"]
+                kept_fp = (previous.get("GenerationFingerprint")
+                           if previous else "unverified")
+                manifest["Voicelines"][p["id"]] = line_entry(
+                    p, action["target"], kept_fp or "unverified")
+        write_manifest(out, manifest)
+        print(f"pack: {len(manifest['Voicelines'])} lines -> {out} "
+              f"(nothing to generate)")
+        return
+
+    rejected = 0
+    completed = 0
+    for p, action in zip(plan, actions):
+        kind = action["kind"]
+        target = action["target"]
+        previous = action["previous"]
+        generation_fp = action["generation_fp"]
+
+        if kind == "skip":
+            if args.verbose:
+                print(f"  skip {p['id']}: {action['reason']}")
+            if p["id"] not in manifest["Voicelines"]:
                 manifest["Voicelines"][p["id"]] = line_entry(
                     p, target, generation_fp)
-                write_manifest(out, manifest)
-                continue
-            print(f"  rebuild {p['id']}: {reason}", file=sys.stderr)
-        elif target.exists():
-            print(f"  rebuild {p['id']}: --force")
+            continue
+
+        if kind == "keep":
+            if args.verbose:
+                print(f"  keep {p['id']}: {action['reason']}",
+                      file=sys.stderr)
+            kept_fp = (previous.get("GenerationFingerprint")
+                       if previous else "unverified")
+            if p["id"] not in manifest["Voicelines"]:
+                manifest["Voicelines"][p["id"]] = line_entry(
+                    p, target, kept_fp or "unverified")
+            continue
+
+        if kind == "blocked":
+            print(f"  MISSING XVECTOR {xvectors / (p['voice'] + '.npy')}; "
+                  f"skipping {p['id']}", file=sys.stderr)
+            continue
+
+        if kind == "rebuild":
+            print(f"  rebuild {p['id']}: {action['reason']}", file=sys.stderr)
 
         xvector = xvectors / (p["voice"] + ".npy")
-        if not xvector.exists():
-            print(f"  MISSING XVECTOR {xvector}; skipping {p['id']}", file=sys.stderr)
-            continue
         wav_tmp = vdir / (p["id"] + ".tmp.wav")
         # 5% grace: punctuation and dramatic pauses routinely land just over
         # the words/sec estimate. The check still catches appended sentences.
@@ -678,14 +737,18 @@ def main():
                 print(f"  retry {p['id']}: {dur:.2f}s > {limit:.2f}s "
                       f"(attempt {attempt})", file=sys.stderr)
             else:
-                print(f"  REJECT {p['id']}: {dur:.2f}s > {limit:.2f}s "
-                      f"after {args.max_attempts} attempts", file=sys.stderr)
+                completed += 1
+                print(f"  [{completed}/{remaining_total}] REJECT {p['id']}: "
+                      f"{dur:.2f}s > {limit:.2f}s after "
+                      f"{args.max_attempts} attempts", file=sys.stderr)
                 rejected += 1
                 continue
             encoded_duration = encode_ogg(wav_tmp, target)
         finally:
             wav_tmp.unlink(missing_ok=True)
-        print(f"  wrote {p['id']} ({encoded_duration:.2f}s)")
+        completed += 1
+        print(f"  [{completed}/{remaining_total}] wrote {p['id']} "
+              f"({encoded_duration:.2f}s)")
         manifest["Voicelines"][p["id"]] = line_entry(
             p, target, generation_fp)
         write_manifest(out, manifest)

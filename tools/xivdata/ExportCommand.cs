@@ -181,7 +181,7 @@ internal static class ExportCommand
         Console.WriteLine($"exported {exported} queued lines -> {outPath}");
         foreach (var (source, count) in bySource.OrderBy(kv => kv.Key, StringComparer.Ordinal))
             Console.WriteLine($"  {source,-25} {count}");
-        Console.WriteLine("note: speaker-scoped worklist; use --merge (or tools/voice.sh) to add it to an existing pack.");
+        Console.WriteLine("note: speaker-scoped worklist; ./voice.sh merges it into data/out/<voice>.");
         return 0;
     }
 

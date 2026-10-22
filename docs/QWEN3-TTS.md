@@ -28,7 +28,7 @@ repo's AGPL-3.0 covers the integration code only.
 - `compose.yaml`: `tts-qwen`, consumes `data/xvectors` and defaults to the
   1.7B Base model.
 - `compose.xvector.yaml`: the separate average-x-vector builder.
-- `tools/voice.sh`: the one-command Qwen pack loop.
+- `./voice.sh`: the one-command speaker loop (export, generate, resume).
 - `tools/qwen/generate.py`: Qwen-only generator with `--events`,
   `--xvectors`, `--qwen3-model`, `--qwen3-attn` (`sdpa` default),
   `--qwen3-non-streaming`, `--qwen3-seed`. Only `Result="miss"` rows are
@@ -48,17 +48,15 @@ repo's AGPL-3.0 covers the integration code only.
   are a later phase, not a fallback.
 
 ```bash
-export OMV_EVENTS=... OMV_SANITIZER_PIN=v1:...
 docker compose -f compose.xvector.yaml run --rm xvector  # build/refresh vectors
-./tools/voice.sh            # reuse matching generation profiles
-./tools/voice.sh --force    # regenerate every planned line
-# or:
-docker compose build tts-qwen
-docker compose run --rm tts-qwen
+./voice.sh alphinaud        # export, generate missing lines, resume later
+OMV_FORCE=1 ./voice.sh alphinaud  # regenerate every planned line
 ```
 
-First run downloads the model into `data/models/qwen3-tts/<model>`; the HF
-cache lives in `data/cache/hf`, not beside the model.
+`./voice.sh` reads the sanitizer pin from `xivdata pin` and merges into
+`data/out/<voice_id>`. Use `OMV_OUT=...` to target another pack. First run
+downloads the model into `data/models/qwen3-tts/<model>`; the HF cache lives
+in `data/cache/hf`, not beside the model.
 
 ## Generation cache
 
@@ -95,7 +93,7 @@ rather than dropped. The output pack directory must exist and be writable by
 
 A worklist exported for one speaker writes a manifest containing only that
 speaker's planned lines. To add it to a pack that already holds other
-speakers, pass `--merge`; `tools/voice.sh` always does. Merge:
+speakers, pass `--merge`; `./voice.sh` always does. Merge:
 
 - carries previous `Voicelines`, `Voices`, `Npcs`, `IgnoredSpeakers`, and
   `VoiceEmbeddings`;
@@ -113,24 +111,21 @@ against a corrupt manifest is fatal rather than silently replacing it.
 ## Pause and resume
 
 The generator writes `manifest.json` atomically after every completed line,
-so a long run can be stopped without losing finished audio. Rerun the same
-command; completed lines are skipped by their generation fingerprints. A
-manifest written mid-run is a valid partial pack.
-
-For a hard pause that keeps the model and GPU state, start a named container
-and use Docker:
+so a long run can be stopped without losing finished audio. `./voice.sh`
+reruns the same speaker command, skips completed lines by generation
+fingerprint, and prints progress as `[done/remaining]` where the denominator
+counts only lines still needing generation.
 
 ```bash
-docker compose run -d --name omv-alphinaud tts-qwen
-docker logs -f omv-alphinaud
-docker pause omv-alphinaud     # pause
-docker unpause omv-alphinaud   # continue
+./voice.sh alphinaud          # start or resume
+./voice.sh -pause alphinaud   # freeze the running container
+./voice.sh -start alphinaud   # unpause, or start/resume after a stop
+./voice.sh -stop alphinaud    # same as Ctrl+C
 ```
 
-For a stop-and-resume, Ctrl-C or `docker stop omv-alphinaud`, then run the
-same compose command again. Do not use `tools/voice.sh` for multi-hour runs:
-it stages into a temporary directory and deletes it on interruption. Use the
-persistent `--out` path directly.
+The attached console also accepts `-pause`, `-start`, and `-stop`. A pause
+keeps the model and GPU state; a stop releases them, and the next start
+reloads the model. A manifest written mid-run is a valid partial pack.
 
 Prefer a local `--qwen3-model` directory: `model_revision` hashes every weight
 file (ignoring `README.md`/`.gitattributes`), so the revision is exact. A repo
@@ -224,7 +219,7 @@ per-shape find dominates decode on gfx1200. Repeated runs with the same
 | `FAST` | 20.3 s | 4.96 s | 4.1× |
 | `FAST` | 15.4 s | 5.12 s | 3.0× |
 
-End-to-end `./sample.sh` for a 6.65 s line: **106.6 s without FAST**,
+End-to-end `./scripts/sample.sh` for a 6.65 s line: **106.6 s without FAST**,
 **41.9 s with FAST**. The latter includes ~3.5 s imports, ~5.5 s model load,
 ~3.2 s hashing the 4.23 GiB local checkpoint, and container startup. A 25 s
 dialogue at the old ~12× decode is about 5 minutes; at ~3× it is about

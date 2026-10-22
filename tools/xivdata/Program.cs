@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using Lumina;
 using Lumina.Data;
+using OhMyVoice.Common;
 
 namespace XivData;
 
@@ -58,6 +59,12 @@ internal static class Program
     {
         if (args.Length > 0 && args[0].Equals("export", StringComparison.OrdinalIgnoreCase))
             return ExportCommand.Run(args[1..]);
+
+        if (args.Length > 0 && args[0].Equals("pin", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine(Sanitizer.Pin);
+            return 0;
+        }
 
         Options options;
         try
@@ -276,6 +283,7 @@ internal static class Program
 
             Usage:
               xivdata export --db FILE --speaker ID [--out FILE]
+              xivdata pin
               xivdata [--sqpack DIR] [--out DIR] [--db FILE] [--source LIST]
                       [--limit N] [--sheet FILTER] [--speaker TOKEN]
                       [--lang en|de|fr|ja] [--extract] [--by-token]
@@ -296,6 +304,7 @@ internal static class Program
               warp, transport, opening, guild_order, leve, scripted, all
 
             Notes:
+              pin prints the Sanitizer.Pin the DB and plugin must share.
               --source all is the full text corpus (~252k dialogue, 379k total rows).
               --limit caps total rows written (0 = no cap).
               --extract writes SCD/WAV for cutscene rows that have game audio.

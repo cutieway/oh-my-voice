@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Generate one off-the-cuff voice sample for a speaker token.
 #
-#   ./sample.sh wuklamat "ahoy there"
+#   ./scripts/sample.sh wuklamat "ahoy there"
 #
 # Output lives in data/samples/<speaker_token>/:
 #   <speaker_token>.json   x-vector metadata copied from data/xvectors/
@@ -9,15 +9,15 @@
 #   <line-id>.ogg          generated audio (stable md5(lang:voice:npc:sentence))
 #   <line-id>.json         manifest entry for that line
 #
-# This never uses tools/voice.sh and never installs into the live plugin pack.
+# This never uses ./voice.sh and never installs into the live plugin pack.
 set -euo pipefail
 
 usage() {
   cat >&2 <<'EOF'
-usage: ./sample.sh <speaker_token> "<sentence>"
+usage: ./scripts/sample.sh <speaker_token> "<sentence>"
 
 Example:
-  ./sample.sh wuklamat "ahoy there"
+  ./scripts/sample.sh wuklamat "ahoy there"
 EOF
 }
 
@@ -31,7 +31,7 @@ sentence=$*
   exit 2
 }
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 XVECTORS="${OMV_XVECTORS:-$ROOT/data/xvectors}"
 MODELS="${OMV_MODELS:-$ROOT/data/models}"
 CACHE="${OMV_CACHE:-$ROOT/data/cache}"
@@ -121,7 +121,7 @@ export OMV_GID="$(id -g)"
 cd "$ROOT"
 echo "speaker: $speaker ($npc_name, npc $npc_id)"
 echo "output:  $OUT"
-echo "Do not use tools/voice.sh for samples; this is isolated."
+echo "Do not use ./voice.sh for samples; this is isolated."
 docker compose build --quiet tts-qwen
 docker compose run --rm tts-qwen
 

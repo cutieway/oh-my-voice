@@ -57,7 +57,7 @@ services:
 
   # IndexTTS-2.5 on ROCm. The image is separate because upstream requires
   # Python 3.10-3.11 + torch 2.8, while the XTTS image is Python 3.12.
-  #   OMV_BACKEND=indextts2 tools/voice.sh
+  #   OMV_BACKEND=indextts2 ./voice.sh
   tts-indextts:
     build:
       context: ./tools
@@ -108,7 +108,7 @@ services:
 
   # Qwen3-TTS Base (voice clone) on ROCm. Separate image because qwen-tts
   # pins transformers 4.57.3 and has its own runtime deps.
-  #   OMV_BACKEND=qwen3tts tools/voice.sh
+  #   OMV_BACKEND=qwen3tts ./voice.sh
   tts-qwen:
     build:
       context: ./tools

@@ -241,7 +241,7 @@ The output uses the plugin miss-event shape (`Result="miss"`, `Id`,
 `Speaker` is `npc_key`.
 
 **A speaker-scoped worklist needs merge when added to an existing pack.**
-A bare generator run writes only the rows it planned; `tools/voice.sh` always
+A bare generator run writes only the rows it planned; `./voice.sh` always
 merges, and a direct run can pass `--merge`. Merge carries existing lines and
 metadata, and refuses mismatched pack settings or a manifest that would lose
 lines. The existing generator consumes the JSONL directly:

@@ -4,6 +4,10 @@ name: oh-my-voice
 # amdgpu driver, /dev/kfd, /dev/dri, and Docker; Python/ROCm/torch live in the
 # image. Runtime data is consolidated under ./data (gitignored).
 #
+# Prefer the speaker-scoped wrapper:
+#   ./voice.sh alphinaud
+#
+# A direct compose run needs an exported events file and sanitizer pin:
 #   mkdir -p data/{models,cache,xvectors,out}
 #   export OMV_EVENTS="$HOME/.xlcore/pluginConfigs/OhMyVoice/events.jsonl"
 #   export OMV_SANITIZER_PIN="v1:..."
@@ -37,6 +41,8 @@ services:
       MIOPEN_FIND_MODE: "FAST"
       MIOPEN_LOG_LEVEL: "3"
       OMV_QWEN_MODEL_DIR: /models/qwen3-tts/Qwen3-TTS-12Hz-1.7B-Base
+      OMV_MERGE: "${OMV_MERGE:-0}"
+      OMV_FORCE: "${OMV_FORCE:-0}"
       PIP_NO_CACHE_DIR: "1"
     command:
       - --events
