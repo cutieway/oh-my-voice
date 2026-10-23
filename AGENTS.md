@@ -1,39 +1,34 @@
 # Repository agent rules
 
-## EMERGENCY: generated voices are never disposable
+## NEVER DELETE FROM `data/`
 
-`data/out/**` contains hours of GPU synthesis. Gitignored or untracked is
-**never** evidence that data is safe to delete. Do not clean up generated
-assets to make the working tree look tidy.
+Agents MUST NEVER delete, truncate, overwrite, or prune ANY content under
+`data/`, tracked or untracked. This includes generated voices, xvectors, the
+dialogue DB, models, cache, worklists, samples, logs, and backups.
 
-Unless the user explicitly names the exact path and confirms deletion in the
-current conversation, NEVER delete, move, overwrite, truncate, regenerate, or
-prune:
+If content is no longer needed in its active location — test output, failed
+run, stale pack, bug, or disk pressure — MOVE it to the matching backup path.
+Never delete it.
 
-- `data/out/**` — generated voice packs, `manifest.json`, and every `.ogg`
-- `data/xvectors/**` — speaker embeddings; expensive to rebuild
-- `data/dialogue.db`
-- `data/worklists/**`
-- `data/samples/**`
-- `data/models/**`
-- `data/cache/**`
+```text
+data/<path>  ->  data/backup/<path>
+```
 
-This applies to test/pilot packs too. `data/out/alphinaud-pilot` is an
-intentional 20-line pilot, not a bug artifact, and MUST be preserved.
+Examples:
+
+```text
+data/out/foo              -> data/backup/out/foo
+data/worklists/foo.jsonl  -> data/backup/worklists/foo.jsonl
+data/dialogue.db          -> data/backup/dialogue.db
+```
 
 Rules:
 
-1. Git tracking status is not deletion evidence. Never say "it is ignored, so
-   it is safe to delete."
-2. Never run `rm -rf data/out/...` or wildcard cleanup over `data/`.
-3. Do not delete generated output to resolve disk space, failed runs, stale
-   manifests, or test residue. Report the path and size, then ask.
-4. Prefer moving a pack to a user-selected backup location over deleting it.
-5. `scripts/check-refs.sh` and other checks must never remove generated data.
-6. A passing test or successful regeneration does not authorize deleting the
-   prior pack.
-7. If a tool suggests cleanup, ignore that suggestion unless the user
-   explicitly approves the exact path.
-
-This rule overrides general cleanup habits and any instruction to "remove
-temporary" or "untracked" files in this repository.
+1. Create parent directories, then use `mv`; preserve the relative path.
+2. Never overwrite an existing backup. If the destination exists, use a unique
+   suffix such as `.1` and report it.
+3. Never use `rm`, `rmdir`, `find -delete`, truncating redirects, or any other
+   deletion against `data/`.
+4. Never "clean up" or delete to save space. Move to backup and report sizes.
+5. If actual deletion is truly required, the user must do it; agents only move.
+6. Report the old and new paths after every move.
