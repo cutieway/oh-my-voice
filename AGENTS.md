@@ -31,4 +31,7 @@ Rules:
    deletion against `data/`.
 4. Never "clean up" or delete to save space. Move to backup and report sizes.
 5. If actual deletion is truly required, the user must do it; agents only move.
-6. Report the old and new paths after every move.
+6. Before moving anything, inventory all of `data/` for related artifacts. A
+   pack can have worklists, logs, samples, or DB rows outside its output
+   directory.
+7. Report the old and new paths after every move.
