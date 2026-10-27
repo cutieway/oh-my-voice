@@ -1,0 +1,26 @@
+.vs/
+obj/
+bin/
+*.user
+docs/advisor.md
+vendors/
+
+# oh-my-voice: voice-audio guard (Q6).
+# Raw game audio and derived embeddings must NEVER be committed. They live
+# under data/ (gitignored) or ~/oh-my-voice-refs/ for isolated tests.
+# CI (scripts/check-refs.sh) rejects audio/embedding blobs and references/ paths.
+references/
+*.wav
+*.ogg
+*.flac
+*.mp3
+!Data/**/*.ogg
+
+# TTS batch runtime: weights, caches, references, and generated packs stay
+# under one gitignored root.
+data/
+__pycache__/
+*.pyc
+
+# Local agent instructions; keep out of the public repository.
+/AGENTS.md

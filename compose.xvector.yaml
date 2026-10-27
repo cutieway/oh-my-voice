@@ -1,0 +1,36 @@
+name: oh-my-voice-xvector
+
+# Average speaker x-vectors from extracted game audio. No speech generation.
+# Kept separate from compose.yaml so it needs no plugin miss-log/sanitizer env.
+#
+#   dotnet run --project tools/xivdata -- --out data/game-voices --extract --by-token
+#   docker compose -f compose.xvector.yaml build
+#   docker compose -f compose.xvector.yaml run --rm xvector
+#   docker compose -f compose.xvector.yaml run --rm xvector --speaker sphene --force
+services:
+  xvector:
+    build:
+      context: ./tools/qwen
+    image: oh-my-voice/tts-qwen:0.1.0
+    user: "${OMV_UID:-1000}:${OMV_GID:-1000}"
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    entrypoint: ["/tools/xvector/run.sh"]
+    working_dir: /data
+    volumes:
+      - ./data:/data
+      - ./tools/xvector:/tools/xvector:ro
+      - ./data/models:/models
+      - ./data/cache:/cache
+    environment:
+      HOME: /cache/home
+      HF_HOME: /cache/hf
+      TORCH_HOME: /cache/torch
+      PYTHONUNBUFFERED: "1"
+      HIP_VISIBLE_DEVICES: "0"
+      MIOPEN_FIND_MODE: "FAST"
+      OMV_QWEN_MODEL_DIR: /models/qwen3-tts/Qwen3-TTS-12Hz-1.7B-Base
+      OMV_AUDIO_ROOT: /data/game-voices/wav
+      OMV_XVECTOR_OUT: /data/xvectors
+    stop_grace_period: 30s

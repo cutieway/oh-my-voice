@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="OhMyVoice/OhMyVoice.csproj">
+    <Platform Project="x64" />
+  </Project>
+  <Project Path="OhMyVoice.Common/OhMyVoice.Common.csproj" />
+</Solution>
