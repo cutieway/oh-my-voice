@@ -53,9 +53,8 @@ and Dalamud handles installs and updates.
 3. Paste the Oh My Voice repository URL:
 
    ```text
-   https://example.com/oh-my-voice/repo.json
+   https://repos.codetrunk.eu/cutieway/oh-my-voice/raw/branch/main/repo.json
    ```
-   <!-- TODO: replace with the hosted Dalamud repository URL. -->
 
 4. Click the **+** button, then **Save and Close**.
 

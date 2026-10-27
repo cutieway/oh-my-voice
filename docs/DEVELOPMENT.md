@@ -16,7 +16,7 @@ dotnet build -c Release
 Use your SDK's absolute path if `dotnet` is not on `PATH`.
 
 Dalamud dev DLLs resolve from `~/.xlcore/dalamud/Hooks/dev`; `DALAMUD_HOME`
-overrides that. CI downloads the latest Dalamud build into the same layout.
+overrides that. Download the latest Dalamud build into that layout if needed.
 
 The plugin assembly lands at
 `OhMyVoice/bin/x64/Release/OhMyVoice.dll`; the Dalamud SDK also writes the
@@ -55,7 +55,7 @@ compose.xvector.yaml       # average x-vectors: xvector
 voice.sh                   # generate/resume one or more speakers' queued lines
 scripts/
   sample.sh                # one-off prompt sample into data/samples/
-  check-refs.sh            # CI guard: no voice audio/embeddings in git
+  check-refs.sh            # repo guard: no voice audio/embeddings in git
 tools/
   qwen/                    # Qwen3-TTS generator, linker, pronoun-pack migrator
   voice-map.json           # NPC -> xvector name
@@ -94,21 +94,19 @@ runtime artifact is no longer needed in place, move it under the matching
 `archive/` is source-only and is never built or composed. `vendors/` holds
 reference checkouts and is not part of any build.
 
-## CI
+## Local checks
 
-`.github/workflows/build.yml` runs on every push/PR to `main`:
-
-1. `scripts/check-refs.sh` — rejects tracked reference paths, audio/embedding
-   blobs, and any tracked file over 2 MiB.
-2. `dotnet build --configuration Release`, with Dalamud downloaded into the
-   dev-hooks layout.
-3. Uploads `OhMyVoice` as a 7-day build artifact.
-
-There is no .NET test project. The generator scripts have Python unit tests:
+CodeTrunk does not currently provide hosted runners, so this repository has no
+automatic CI workflow. Run the checks locally:
 
 ```bash
-python3 -m unittest discover tools/qwen
+bash scripts/check-refs.sh
+python3 -m unittest discover -s tools/qwen
+dotnet build --configuration Release
 ```
+
+`check-refs.sh` rejects tracked reference paths, audio/embedding blobs, and any
+tracked file over 2 MiB. There is no .NET test project.
 
 Verify plugin changes with the playtest above; verify script and compose
 changes with the affected service or test module.
@@ -117,9 +115,34 @@ changes with the affected service or test module.
 
 Raw game audio (`data/game-voices/`) and derived x-vectors (`data/xvectors/`)
 stay local and gitignored. No single-reference/ICL transcript path is used for
-packs. CI rejects `references/` paths, audio blobs, and files over 2 MiB.
+packs. `scripts/check-refs.sh` rejects `references/` paths, audio blobs, and
+files over 2 MiB.
 Distributed packs use game-derived or consented voices only. `voiceId` in the
 line ID makes clean packs a distinct namespace by construction.
+
+## Publishing a Dalamud custom repository
+
+`repo.json` at the repository root is the custom repository index. The URL users
+add in Dalamud is the raw file:
+
+```text
+https://repos.codetrunk.eu/cutieway/oh-my-voice/raw/branch/main/repo.json
+```
+
+For each release:
+
+1. Bump `<Version>` in `OhMyVoice/OhMyVoice.csproj`.
+2. Run `dotnet build --configuration Release`.
+3. Create a CodeTrunk release tagged `v<version>`.
+4. Upload `OhMyVoice/bin/x64/Release/OhMyVoice/latest.zip` as
+   `OhMyVoice.zip`. Keep the ZIP flat: `OhMyVoice.dll`, `OhMyVoice.json`, and
+   dependencies must be at its root.
+5. Update `AssemblyVersion`, `LastUpdate`, and the download links in
+   `repo.json`, then commit and push it.
+
+`DownloadLinkInstall` and `DownloadLinkUpdate` may use the same versioned
+release asset URL. `InternalName` must remain `OhMyVoice`. Do not commit release
+ZIPs; keep them as CodeTrunk release assets.
 
 ## Removed backends
 

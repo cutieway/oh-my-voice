@@ -32,6 +32,8 @@ done < <(git ls-files)
 
 # 3. Size cap: any tracked file over 2 MiB needs justification.
 while IFS= read -r f; do
+  # Deleted-but-unstaged paths still appear in the index and cannot be sized.
+  [ -f "$f" ] || continue
   size=$(wc -c < "$f")
   if [ "$size" -gt 2097152 ]; then
     echo "ERROR: tracked file over 2 MiB: $f (${size} bytes)" >&2

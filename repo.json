@@ -1,0 +1,30 @@
+[
+  {
+    "Author": "cutieway",
+    "Name": "Oh My Voice",
+    "InternalName": "OhMyVoice",
+    "AssemblyVersion": "0.1.0.0",
+    "Description": "Pre-generated Qwen3-TTS voice packs that voice unvoiced NPC dialogue and cutscenes. ARR MSQ, EN only in P1. Silent on cache miss, never doubles real voice-over.",
+    "Punchline": "Cloned voices for unvoiced FFXIV dialogue.",
+    "ApplicableVersion": "any",
+    "RepoUrl": "https://repos.codetrunk.eu/cutieway/oh-my-voice",
+    "Tags": [
+      "tts",
+      "voice",
+      "dialogue",
+      "cutscene"
+    ],
+    "DalamudApiLevel": 15,
+    "LoadRequiredState": 0,
+    "LoadSync": false,
+    "CanUnloadAsync": false,
+    "LoadPriority": 0,
+    "AcceptsFeedback": true,
+    "IsHide": false,
+    "IsTestingExclusive": false,
+    "DownloadCount": 0,
+    "LastUpdate": 1793121853,
+    "DownloadLinkInstall": "https://repos.codetrunk.eu/cutieway/oh-my-voice/releases/download/v0.1.0.0/OhMyVoice.zip",
+    "DownloadLinkUpdate": "https://repos.codetrunk.eu/cutieway/oh-my-voice/releases/download/v0.1.0.0/OhMyVoice.zip"
+  }
+]
