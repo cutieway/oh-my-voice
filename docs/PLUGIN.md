@@ -78,22 +78,21 @@ pack line, and it stops an already-playing pack line when real VO begins
 
 ## Pack layout
 
-The plugin reads its pack from the Dalamud config directory:
-
-| Platform | Path |
-| --- | --- |
-| Windows | `%APPDATA%\XIVLauncher\pluginConfigs\OhMyVoice\` |
-| XIV on Linux / Wine | `~/.xlcore/pluginConfigs/OhMyVoice/` |
+The plugin reads its pack from the directory selected in settings. The path is
+entered manually and must already exist when confirmed; there is no default pack
+location.
 
 ```text
-OhMyVoice/
+<selected directory>/
   manifest.json
   voicelines/{id}.ogg          # they/them root
   voicelines/{id}.she.ogg      # optional she/her variant
   voicelines/{id}.he.ogg       # optional he/him variant
   voicelines_override/{id}.ogg # hand-made audio wins
-  events.jsonl                 # hit/miss log
 ```
+
+`events.jsonl` remains in the Dalamud config directory, not the selected pack
+directory.
 
 Resolution order for one line:
 
@@ -148,6 +147,8 @@ made.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
+| `TermsAccepted` | off | Must be explicitly accepted on first run before runtime hooks start |
+| `PackDirectory` | empty | User-selected existing folder containing the pack |
 | `Enabled` | on | Master switch; off captures and plays nothing |
 | `Volume` | 100 | Pack playback volume, 1–200% |
 | `PlayerPronouns` | Auto | Auto uses character sex; or force They/them, She/her, He/him |
@@ -157,4 +158,7 @@ made.
 | `SubtitleDedupeSeconds` | 1.0 | Repeat window for the same line ID; config-file only |
 
 The status window (`/omv`) shows enabled/playing state and has **Reload pack**
-and **Settings** buttons. Settings save immediately.
+and **Settings** buttons. Settings save immediately. On first run, a mandatory
+usage agreement is shown before either window can open; plugin capture and
+playback remain disabled until it is accepted. The pack download button is a
+disabled placeholder until a distribution URL is available.

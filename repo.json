@@ -12,7 +12,8 @@
       "tts",
       "voice",
       "dialogue",
-      "cutscene"
+      "cutscene",
+      "accessibility"
     ],
     "DalamudApiLevel": 15,
     "LoadRequiredState": 0,

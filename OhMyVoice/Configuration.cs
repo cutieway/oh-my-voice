@@ -10,6 +10,12 @@ public class Configuration : IPluginConfiguration
     /// <summary>Master switch. Off = capture nothing, play nothing.</summary>
     public bool Enabled { get; set; } = true;
 
+    /// <summary>Explicit acceptance of the third-party/modding usage notice.</summary>
+    public bool TermsAccepted { get; set; } = false;
+
+    /// <summary>User-selected directory containing manifest.json and voicelines/.</summary>
+    public string PackDirectory { get; set; } = string.Empty;
+
     /// <summary>Debug log flag. OFF by default to avoid /xllog spam (Q13).</summary>
     public bool DebugLogging { get; set; } = false;
 

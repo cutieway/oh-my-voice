@@ -81,10 +81,12 @@ docker compose -f compose.xvector.yaml run --rm xvector
 ```
 
 The output is `data/out/<voice>/`. Copy `manifest.json` and `voicelines/` into
-the plugin's config folder, or write straight there on Linux/Wine:
+an existing directory you choose, then select that same directory in the
+plugin's settings. To generate directly into it on Linux/Wine:
 
 ```bash
-OMV_OUT="$HOME/.xlcore/pluginConfigs/OhMyVoice" ./voice.sh alphinaud
+mkdir -p "$HOME/OhMyVoice/alphinaud"
+OMV_OUT="$HOME/OhMyVoice/alphinaud" ./voice.sh alphinaud
 ```
 
 Start small with `OMV_LIMIT=5 ./voice.sh alphinaud`, and use

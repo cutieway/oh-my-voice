@@ -32,6 +32,7 @@ public sealed class Plugin : IDalamudPlugin
     public readonly WindowSystem WindowSystem = new("OhMyVoice");
     private ConfigWindow ConfigWindow { get; init; }
     private MainWindow MainWindow { get; init; }
+    private ConsentWindow ConsentWindow { get; init; }
 
     private readonly GameInterop game;
     private readonly PackStore pack;
@@ -41,6 +42,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly Dispatcher dispatcher;
     private readonly VoSuppression suppression;
     private readonly TalkCapture capture;
+    private bool runtimeEnabled;
 
     public Plugin()
     {
@@ -53,7 +55,7 @@ public sealed class Plugin : IDalamudPlugin
         ClientState.Login += OnLogin;
         ClientState.Logout += OnLogout;
 
-        pack = new PackStore(PluginInterface, Log, Configuration);
+        pack = new PackStore(Log, Configuration);
         playback = new Playback(Log, Configuration);
         events = new VoiceLog(PluginInterface, Log);
         npcMetadata = new NpcMetadataService(DataManager, Log);
@@ -61,15 +63,18 @@ public sealed class Plugin : IDalamudPlugin
         dispatcher = new Dispatcher(Log, Configuration, game, pack, playback, events, npcMetadata, suppression);
         capture = new TalkCapture(Framework, GameGui, AddonLifecycle, Log, Configuration, game, dispatcher);
 
-        pack.Load();
-        suppression.Enable();
-        capture.Enable();
-
         ConfigWindow = new ConfigWindow(this);
         MainWindow = new MainWindow(this);
+        ConsentWindow = new ConsentWindow(this);
 
         WindowSystem.AddWindow(ConfigWindow);
         WindowSystem.AddWindow(MainWindow);
+        WindowSystem.AddWindow(ConsentWindow);
+
+        if (Configuration.TermsAccepted)
+            EnableRuntime();
+        else
+            ConsentWindow.Present();
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
@@ -80,7 +85,7 @@ public sealed class Plugin : IDalamudPlugin
         PluginInterface.UiBuilder.OpenConfigUi += ToggleConfigUi;
         PluginInterface.UiBuilder.OpenMainUi += ToggleMainUi;
 
-        Log.Information($"OhMyVoice loaded. Pack={(pack.PackEnabled ? "on" : "off")} Sanitizer={Sanitizer.Pin} Events={events.Path}");
+        Log.Information($"OhMyVoice loaded. Terms={(Configuration.TermsAccepted ? "accepted" : "pending")} Pack={(pack.PackEnabled ? "on" : "off")} Sanitizer={Sanitizer.Pin} Events={events.Path}");
     }
 
     private static unsafe void RefreshGameVersion()
@@ -97,7 +102,31 @@ public sealed class Plugin : IDalamudPlugin
     {
         RefreshGameVersion();
         game.RefreshPlayerName();
+        if (Configuration.TermsAccepted)
+            pack.Load();
+    }
+
+    private void EnableRuntime()
+    {
+        if (runtimeEnabled) return;
         pack.Load();
+        suppression.Enable();
+        capture.Enable();
+        runtimeEnabled = true;
+    }
+
+    internal void AcceptTerms()
+    {
+        if (!Configuration.TermsAccepted)
+        {
+            Configuration.TermsAccepted = true;
+            Configuration.Save();
+        }
+
+        ConsentWindow.IsOpen = false;
+        EnableRuntime();
+        ConfigWindow.IsOpen = true;
+        ConfigWindow.BringToFront();
     }
 
     private void OnLogout(int type, int code)
@@ -119,6 +148,7 @@ public sealed class Plugin : IDalamudPlugin
         WindowSystem.RemoveAllWindows();
         ConfigWindow.Dispose();
         MainWindow.Dispose();
+        ConsentWindow.Dispose();
         CommandManager.RemoveHandler(CommandName);
 
         capture.Dispose();
@@ -126,11 +156,34 @@ public sealed class Plugin : IDalamudPlugin
         playback.Dispose();
     }
 
-    internal void ReloadPack() => pack.Load();
+    internal void ReloadPack()
+    {
+        if (runtimeEnabled) pack.Load();
+    }
+
     internal bool IsPlaying => playback.IsPlaying;
     internal string? PlayingId => playback.PlayingId;
+    internal bool IsPackLoaded => pack.PackEnabled;
 
-    private void OnCommand(string command, string args) => MainWindow.Toggle();
-    public void ToggleConfigUi() => ConfigWindow.Toggle();
-    public void ToggleMainUi() => MainWindow.Toggle();
+    private void OnCommand(string command, string args) => ToggleMainUi();
+
+    public void ToggleConfigUi()
+    {
+        if (!Configuration.TermsAccepted)
+        {
+            ConsentWindow.Present();
+            return;
+        }
+        ConfigWindow.Toggle();
+    }
+
+    public void ToggleMainUi()
+    {
+        if (!Configuration.TermsAccepted)
+        {
+            ConsentWindow.Present();
+            return;
+        }
+        MainWindow.Toggle();
+    }
 }

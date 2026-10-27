@@ -1,21 +1,29 @@
-using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
+using Dalamud.Utility;
 
 namespace OhMyVoice.Windows;
 
 public class ConfigWindow : Window, IDisposable
 {
+    // TODO: Replace with the public voice-pack distribution URL when available.
+    private const string VoicePackDownloadUrl = "";
+
+    private readonly Plugin plugin;
     private readonly Configuration configuration;
+    private string packDirectoryInput;
+    private string packDirectoryMessage = string.Empty;
+    private bool packDirectoryError;
 
     public ConfigWindow(Plugin plugin)
         : base("Oh My Voice Settings###omv-config")
     {
-        Flags = ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoScrollbar |
-                ImGuiWindowFlags.NoScrollWithMouse;
-        Size = new Vector2(360, 300);
+        Flags = ImGuiWindowFlags.NoCollapse;
+        Size = new Vector2(520, 540);
         SizeCondition = ImGuiCond.Always;
+        this.plugin = plugin;
         configuration = plugin.Configuration;
+        packDirectoryInput = configuration.PackDirectory;
     }
 
     public void Dispose() { }
@@ -72,6 +80,76 @@ public class ConfigWindow : Window, IDisposable
         }
 
         ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+        ImGui.Text("Voice pack directory");
+        ImGui.TextWrapped("Enter an existing directory containing manifest.json and voicelines/.");
+        ImGui.SetNextItemWidth(-1);
+        ImGui.InputText("##omv-pack-directory", ref packDirectoryInput, 4096);
+        if (ImGui.Button("Confirm directory"))
+            ConfirmPackDirectory();
+
+        if (packDirectoryMessage.Length > 0)
+        {
+            var color = packDirectoryError
+                ? new Vector4(0.95f, 0.35f, 0.35f, 1f)
+                : new Vector4(0.95f, 0.75f, 0.3f, 1f);
+            ImGui.TextColored(color, packDirectoryMessage);
+        }
+
+        if (VoicePackDownloadUrl.Length == 0)
+        {
+            ImGui.BeginDisabled();
+            ImGui.Button("Download voice packs (coming soon)");
+            ImGui.EndDisabled();
+            ImGui.TextDisabled("Voice-pack distribution link is not available yet.");
+        }
+        else if (ImGui.Button("Download voice packs"))
+        {
+            Util.OpenLink(VoicePackDownloadUrl);
+        }
+
+        ImGui.Spacing();
         ImGui.TextDisabled($"Sanitizer: {Sanitizer.Pin}");
+    }
+
+    private void ConfirmPackDirectory()
+    {
+        string candidate = packDirectoryInput.Trim().Trim('"');
+        if (candidate.Length == 0)
+        {
+            packDirectoryError = true;
+            packDirectoryMessage = "Enter an existing directory.";
+            return;
+        }
+
+        string fullPath;
+        try
+        {
+            fullPath = Path.GetFullPath(candidate);
+        }
+        catch (Exception ex)
+        {
+            packDirectoryError = true;
+            packDirectoryMessage = $"Invalid directory: {ex.Message}";
+            return;
+        }
+
+        if (!Directory.Exists(fullPath))
+        {
+            packDirectoryError = true;
+            packDirectoryMessage = "That directory does not exist.";
+            return;
+        }
+
+        configuration.PackDirectory = fullPath;
+        configuration.Save();
+        packDirectoryInput = fullPath;
+        plugin.ReloadPack();
+
+        packDirectoryError = false;
+        packDirectoryMessage = plugin.IsPackLoaded
+            ? "Directory saved. Voice pack loaded."
+            : "Directory saved, but no valid manifest.json was found. Pack remains disabled.";
     }
 }

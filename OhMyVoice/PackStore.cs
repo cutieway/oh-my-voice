@@ -1,4 +1,3 @@
-using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 
 namespace OhMyVoice;
@@ -10,7 +9,6 @@ namespace OhMyVoice;
 /// </summary>
 public sealed class PackStore
 {
-    private readonly IDalamudPluginInterface pluginInterface;
     private readonly IPluginLog log;
     private readonly Configuration config;
 
@@ -18,26 +16,42 @@ public sealed class PackStore
     public bool PackEnabled { get; private set; }
     public string SanitizerPin => Sanitizer.Pin;
 
-    public PackStore(IDalamudPluginInterface pluginInterface, IPluginLog log, Configuration config)
+    public PackStore(IPluginLog log, Configuration config)
     {
-        this.pluginInterface = pluginInterface;
         this.log = log;
         this.config = config;
     }
 
-    public string PackDir =>
-        Path.Combine(pluginInterface.ConfigDirectory.FullName, "voicelines");
+    public string PackDirectory => config.PackDirectory.Trim();
 
-    public string OverrideDir =>
-        Path.Combine(pluginInterface.ConfigDirectory.FullName, "voicelines_override");
+    public string PackDir => string.IsNullOrWhiteSpace(PackDirectory)
+        ? string.Empty
+        : Path.Combine(PackDirectory, "voicelines");
 
-    public string ManifestPath =>
-        Path.Combine(pluginInterface.ConfigDirectory.FullName, "manifest.json");
+    public string OverrideDir => string.IsNullOrWhiteSpace(PackDirectory)
+        ? string.Empty
+        : Path.Combine(PackDirectory, "voicelines_override");
+
+    public string ManifestPath => string.IsNullOrWhiteSpace(PackDirectory)
+        ? string.Empty
+        : Path.Combine(PackDirectory, "manifest.json");
 
     public void Load()
     {
         PackEnabled = false;
         Manifest = null;
+
+        if (string.IsNullOrWhiteSpace(PackDirectory))
+        {
+            if (config.DebugLogging) log.Debug("No pack directory configured; pack disabled.");
+            return;
+        }
+        if (!Directory.Exists(PackDirectory))
+        {
+            log.Warning($"Pack directory does not exist: {PackDirectory}; pack disabled.");
+            return;
+        }
+
         try
         {
             Directory.CreateDirectory(PackDir);

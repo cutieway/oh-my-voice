@@ -8,7 +8,7 @@
     <Punchline>Cloned voices for unvoiced FFXIV dialogue.</Punchline>
     <Description>Pre-generated Qwen3-TTS voice packs that voice unvoiced NPC dialogue and cutscenes. ARR MSQ, EN only in P1. Silent on cache miss, never doubles real voice-over.</Description>
     <RepoUrl>https://repos.codetrunk.eu/cutieway/oh-my-voice</RepoUrl>
-    <Tags>tts;voice;dialogue;cutscene</Tags>
+    <Tags>tts;voice;dialogue;cutscene;accessibility</Tags>
   </PropertyGroup>
 
   <ItemGroup>

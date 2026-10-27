@@ -66,20 +66,24 @@ and Dalamud handles installs and updates.
 
 Building from source or playtesting? See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
-### 3 — Add a voice pack
+### 3 — Accept the usage notice
 
-Voice packs are distributed separately from this repo. Put a pack you
-downloaded into the plugin's config folder:
+On first load, Oh My Voice shows its third-party usage notice. Read the
+[official statement on mod usage and culture](https://eu.finalfantasyxiv.com/lodestone/topics/detail/1e4a8b0e8b84ea8dac61ae07af02e0c425de74aa),
+tick **I understand and agree**, then click **Continue**. The plugin remains
+disabled until this is accepted.
 
-| Platform | Folder |
-| --- | --- |
-| Windows | `%APPDATA%\XIVLauncher\pluginConfigs\OhMyVoice\` |
-| XIV on Linux / Wine | `~/.xlcore/pluginConfigs/OhMyVoice/` |
+### 4 — Add a voice pack
 
-It should look like this:
+Voice packs are distributed separately from this repo. The download link is not
+available yet; it will appear in the plugin settings when distribution is ready.
+
+Open `/omv` → **Settings**, enter the **existing** directory where your pack is
+stored, and click **Confirm directory**. The directory must contain
+`manifest.json` and `voicelines/`:
 
 ```text
-OhMyVoice/
+<selected directory>/
   manifest.json
   voicelines/{id}.ogg
 ```
@@ -100,6 +104,7 @@ plugin stays quietly out of the way.
 | Setting | What it does |
 | --- | --- |
 | Enabled | Turns the whole plugin on or off |
+| Voice pack directory | Existing folder containing `manifest.json` and `voicelines/` |
 | Volume | Pack audio level, 1–200% |
 | Player pronouns | Auto follows your character's sex; or pick They/them, She/her, or He/him |
 | Real-VO wait | How long to wait for a real voice actor before starting (ms) |
@@ -126,8 +131,9 @@ the pack.
 ## Privacy
 
 No analytics, no crash reporting, and no network requests: the plugin reads the
-game and local files only. Your pack, `events.jsonl`, and settings stay in the
-plugin's config folder and never leave your machine.
+game and local files only. Your pack stays in the directory you selected;
+`events.jsonl` and settings stay in the plugin's config folder. Nothing leaves
+your machine.
 
 Pack audio is generated from game audio; use and share it thoughtfully.
 

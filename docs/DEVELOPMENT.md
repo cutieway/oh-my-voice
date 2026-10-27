@@ -39,7 +39,7 @@ packaged plugin (DLLs, `OhMyVoice.json`, `latest.zip`) into
 OhMyVoice.slnx
 OhMyVoice/                 # Dalamud plugin (net10.0-windows)
   Plugin.cs                # entrypoint, service wiring, /omv
-  Configuration.cs         # Enabled/Volume/VoWaitMs/StopOnVo/DebugLogging/PlayerPronouns
+  Configuration.cs         # TermsAccepted/PackDirectory and playback/settings flags
   GameInterop.cs           # SeString/text readers, zone, player state
   TalkCapture.cs           # AddonTalk poll + TalkSubtitle PostDraw
   VoSuppression.cs         # SoundManager hooks, real-VO detection
