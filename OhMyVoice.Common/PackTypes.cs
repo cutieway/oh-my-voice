@@ -70,7 +70,7 @@ public sealed class PackManifestJson
     /// <summary>Sanitizer pin, e.g. "v1:&lt;sha256(golden-vectors)&gt;".</summary>
     public string Sanitizer { get; set; } = "";
 
-    /// <summary>Generator backend that produced this pack, e.g. "indextts2".</summary>
+    /// <summary>Generator backend that produced this pack, e.g. "qwen3tts".</summary>
     public string Backend { get; set; } = "";
 
     public EncoderSettings Encoder { get; set; } = new();

@@ -306,10 +306,8 @@ single-reference measurements on the RX 9060 XT (16 GB) put warm RTF at
 model load. Use those only as decode bounds; do not revive the retired
 prompt setup.
 
-For historical comparison, IndexTTS fp32 was RTF ~3.35 warm; IndexTTS FP16
-~2.2. IndexTTS is archived; see
-[the report](archive/indextts-performance.md). Qwen3-TTS has no diffusion
-steps/CFG knobs; its cost is autoregressive token generation.
+Qwen3-TTS has no diffusion steps or CFG knobs; its cost is autoregressive
+token generation.
 
 ### MIOpen FAST find is required
 

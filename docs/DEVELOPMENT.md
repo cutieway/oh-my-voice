@@ -64,7 +64,6 @@ tools/
   xivdata/                 # offline dialogue DB + cutscene SCD extractor
   xvector/                 # average speaker embedding builder
 data/                      # gitignored runtime root (see below)
-archive/tts-backends/      # XTTS/IndexTTS code, reference only, never built
 docs/
   PLUGIN.md                # runtime pipeline and pack format
   DEVELOPMENT.md           # this file
@@ -72,7 +71,6 @@ docs/
   VOICES.md                # voice roster: counts, metadata, caveats
   voices.csv               # one row per speaker label, metadata only
   assets/                  # README logo and diagrams
-  archive/                 # superseded reports
 vendors/                   # gitignored reference checkouts, never built
 ```
 
@@ -93,8 +91,7 @@ Everything under `data/` is local and gitignored; back it up separately. If a
 runtime artifact is no longer needed in place, move it under the matching
 `data/backup/<path>` instead of deleting it.
 
-`archive/` is source-only and is never built or composed. `vendors/` holds
-reference checkouts and is not part of any build.
+`vendors/` holds reference checkouts and is not part of any build.
 
 ## Local checks
 
@@ -145,13 +142,3 @@ For each release:
 `DownloadLinkInstall` and `DownloadLinkUpdate` may use the same versioned
 release asset URL. `InternalName` must remain `OhMyVoice`. Do not commit release
 ZIPs; keep them as CodeTrunk release assets.
-
-## Removed backends
-
-XTTS-v2 and IndexTTS-2.5 are archived under
-[`../archive/tts-backends/`](../archive/tts-backends/README.md) for reference.
-Their Docker images, model weights, and caches were removed. They are not
-services, not CI targets, and not part of the active generator.
-
-The IndexTTS performance report is preserved at
-[`archive/indextts-performance.md`](archive/indextts-performance.md).
