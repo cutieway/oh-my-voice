@@ -29,8 +29,10 @@ packaged plugin (DLLs, `OhMyVoice.json`, `latest.zip`) into
    `Z:\home\<user>\Projects\oh-my-voice\OhMyVoice\bin\x64\Release\OhMyVoice.dll`
 2. `/xlplugins` → enable **Oh My Voice**. `/omv` opens the status window; logs
    go to `/xllog`.
-3. Acceptance run with debug logging on: an unvoiced `Talk` NPC is audible, a
-   voiced ARR line is suppressed, subtitle duplication does not double-play,
+3. Set the pack root to `Z:\home\<user>\Projects\oh-my-voice\data\out`
+   and confirm the status window reports the expected voice and line counts.
+4. Acceptance run with debug logging on: an unvoiced `Talk` NPC is audible, a
+   voiced line is suppressed, subtitle duplication does not double-play,
    and both stop behaviors (new line, real VO) work.
 
 ## Layout
@@ -45,7 +47,7 @@ OhMyVoice/                 # Dalamud plugin (net10.0-windows)
   VoSuppression.cs         # SoundManager hooks, real-VO detection
   Dispatcher.cs            # ID, VO wait, dedupe, hit/miss logging, play
   Playback.cs              # Concentus decode + NAudio WaveOut
-  PackStore.cs             # manifest, override resolution, sanitizer gate
+  PackStore.cs             # multi-manifest catalog, overrides, sanitizer gate
   NpcMetadataService.cs    # live ENpcResident/ENpcBase metadata for logs
   VoiceLog.cs              # events.jsonl, compaction, legacy migration
   Windows/                 # /omv status + settings UI
@@ -82,7 +84,7 @@ data/cache/         HF/Torch/MIOpen caches
 data/game-voices/   xivdata output: scd/ + wav/ per speaker_token
 data/dialogue.db    xivdata dialogue/worklist DB (SQLite, WAL)
 data/xvectors/      one .npy + .json per speaker_token, manifest.json
-data/out/           generated packs
+data/out/           generated multi-voice pack root (one folder per voice)
 data/samples/       one-off prompt samples
 data/backup/        retired packs, logs, and artifacts moved here, never deleted
 ```

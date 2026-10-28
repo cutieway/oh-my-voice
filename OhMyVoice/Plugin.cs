@@ -85,7 +85,10 @@ public sealed class Plugin : IDalamudPlugin
         PluginInterface.UiBuilder.OpenConfigUi += ToggleConfigUi;
         PluginInterface.UiBuilder.OpenMainUi += ToggleMainUi;
 
-        Log.Information($"OhMyVoice loaded. Terms={(Configuration.TermsAccepted ? "accepted" : "pending")} Pack={(pack.PackEnabled ? "on" : "off")} Sanitizer={Sanitizer.Pin} Events={events.Path}");
+        Log.Information(
+            $"OhMyVoice loaded. Terms={(Configuration.TermsAccepted ? "accepted" : "pending")} " +
+            $"Pack={(pack.PackEnabled ? $"on ({pack.VoiceCount} voices, {pack.VoicelineCount} lines)" : "off")} " +
+            $"Sanitizer={Sanitizer.Pin} Events={events.Path}");
     }
 
     private static unsafe void RefreshGameVersion()
@@ -164,6 +167,10 @@ public sealed class Plugin : IDalamudPlugin
     internal bool IsPlaying => playback.IsPlaying;
     internal string? PlayingId => playback.PlayingId;
     internal bool IsPackLoaded => pack.PackEnabled;
+    internal int LoadedPackCount => pack.PackCount;
+    internal int LoadedVoiceCount => pack.VoiceCount;
+    internal int LoadedVoicelineCount => pack.VoicelineCount;
+    internal int InvalidManifestCount => pack.InvalidManifestCount;
 
     private void OnCommand(string command, string args) => ToggleMainUi();
 

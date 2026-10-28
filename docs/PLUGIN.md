@@ -21,8 +21,8 @@ A line is dispatched once per visible change. The subtitle frame-guard resets
 when the subtitle addon hides, so a later byte-identical line still dispatches;
 the dispatcher's time-window dedupe removes true duplicates.
 
-Phase 1 is EN only and targets ARR MSQ dialogue. No other capture providers are
-wired in, and there is no dead feature flag for them.
+Capture is EN only and covers dialogue across FFXIV's expansions. No other
+capture providers are wired in, and there is no dead feature flag for them.
 
 ## Line identity
 
@@ -38,9 +38,9 @@ id = md5(lang:voiceId:npcId:sentence)
 `npcId = speaker` and `voiceId = Unknown`, which normally produces a silent
 miss.
 
-The pack manifest records a sanitizer pin (`v1:<sha256>`). On load, a pin
-mismatch or a failed sanitizer self-check disables the pack with a warning
-instead of silently missing every line.
+Each pack manifest records a sanitizer pin (`v1:<sha256>`). On load, a manifest
+with a mismatch is skipped with a warning instead of silently missing every
+line. A failed runtime sanitizer self-check disables the whole catalog.
 
 ## Dispatch pipeline
 
@@ -78,35 +78,50 @@ pack line, and it stops an already-playing pack line when real VO begins
 
 ## Pack layout
 
-The plugin reads its pack from the directory selected in settings. The path is
-entered manually and must already exist when confirmed; there is no default pack
-location.
+The plugin reads its pack root from the directory selected in settings. The
+path is entered manually and must already exist when confirmed; there is no
+default pack location.
+
+The required layout is a multi-voice catalog with one immediate child folder per
+voice:
 
 ```text
-<selected directory>/
-  manifest.json
-  voicelines/{id}.ogg          # they/them root
-  voicelines/{id}.she.ogg      # optional she/her variant
-  voicelines/{id}.he.ogg       # optional he/him variant
-  voicelines_override/{id}.ogg # hand-made audio wins
+<selected pack root>/
+  alphinaud/
+    manifest.json
+    voicelines/{id}.ogg
+    voicelines_override/{id}.ogg # optional, wins for this voice
+  thancred/
+    manifest.json
+    voicelines/{id}.ogg
 ```
 
-`events.jsonl` remains in the Dalamud config directory, not the selected pack
-directory.
+The plugin scans immediate child folders only. A `manifest.json` directly in
+the selected root is ignored, so users must select the parent folder containing
+the voice folders. Every valid child manifest with schema 2 and the current
+sanitizer pin is loaded; invalid manifests are skipped with a warning while
+valid voices remain available. The merged catalog combines `Npcs` for speaker
+lookup and `Voicelines` for audio lookup, while each line retains the folder
+that owns its OGG files. Duplicate line IDs keep the first manifest in
+deterministic path order and emit a warning.
+
+Each voice may use `{id}.she.ogg` and `{id}.he.ogg` for third-person references
+to your character; the plain `{id}.ogg` is neutral. `events.jsonl` remains in
+the Dalamud config directory, not the selected pack root.
 
 Resolution order for one line:
 
-1. The matching `voicelines_override/{id}.{pronoun}.ogg` for a she/he line.
-2. The matching `voicelines/{id}.{pronoun}.ogg` variant.
-3. `voicelines_override/{id}.ogg`, then `voicelines/{id}.ogg` as the
-   they/them rendering.
+1. The voice's `voicelines_override/{id}.{pronoun}.ogg` for a she/he line.
+2. The owning voice's `voicelines/{id}.{pronoun}.ogg` variant.
+3. The voice's `voicelines_override/{id}.ogg`, then its `voicelines/{id}.ogg`
+   as the they/them rendering.
 
 A she/he request whose variant is missing falls back to the neutral root, never
 to the other gender. Lines without player-name pronouns have one root file and
 ignore the selected pronoun.
 
-The plugin requires manifest schema 2. Older manifests are disabled with a
-warning instead of guessing which file is neutral.
+The plugin requires manifest schema 2. An older or malformed manifest is
+skipped with a warning instead of guessing which file is neutral.
 
 A file must match the manifest's recorded byte size unless the manifest has no
 size. Missing audio is a silent miss, never an error popup.
@@ -129,7 +144,8 @@ corrupt pack.
 
 ## Event log
 
-`events.jsonl` sits beside the manifest. One JSON row per result and line ID:
+`events.jsonl` sits in the Dalamud plugin config directory. One JSON row per
+result and line ID:
 
 - `hit` proves the line is covered.
 - `miss` is the generation worklist and includes the sanitized sentence,
@@ -148,7 +164,7 @@ made.
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `TermsAccepted` | off | Must be explicitly accepted on first run before runtime hooks start |
-| `PackDirectory` | empty | User-selected existing folder containing the pack |
+| `PackDirectory` | empty | User-selected pack root containing one or more voice manifests |
 | `Enabled` | on | Master switch; off captures and plays nothing |
 | `Volume` | 100 | Pack playback volume, 1–200% |
 | `PlayerPronouns` | Auto | Auto uses character sex; or force They/them, She/her, He/him |
@@ -157,8 +173,8 @@ made.
 | `DebugLogging` | off | Verbose `/xllog` output |
 | `SubtitleDedupeSeconds` | 1.0 | Repeat window for the same line ID; config-file only |
 
-The status window (`/omv`) shows enabled/playing state and has **Reload pack**
-and **Settings** buttons. Settings save immediately. On first run, a mandatory
+The status window (`/omv`) shows enabled/playing state, loaded voice/line
+counts, and has **Reload pack** and **Settings** buttons. Settings save immediately. On first run, a mandatory
 usage agreement is shown before either window can open; plugin capture and
 playback remain disabled until it is accepted. The pack download button is a
 disabled placeholder until a distribution URL is available.

@@ -64,38 +64,23 @@ and Dalamud handles installs and updates.
 2. Search for **Oh My Voice**, then click **Install** and **Enable**.
 3. `/omv` opens the status window whenever you want to check it.
 
-Building from source or playtesting? See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+### 3 — Add voice packs
 
-### 3 — Accept the usage notice
-
-On first load, Oh My Voice shows its third-party usage notice. Read the
-[official statement on mod usage and culture](https://eu.finalfantasyxiv.com/lodestone/topics/detail/1e4a8b0e8b84ea8dac61ae07af02e0c425de74aa),
-tick **I understand and agree**, then click **Continue**. The plugin remains
-disabled until this is accepted.
-
-### 4 — Add a voice pack
-
-Voice packs are distributed separately from this repo. The download link is not
-available yet; it will appear in the plugin settings when distribution is ready.
-
-Open `/omv` → **Settings**, enter the **existing** directory where your pack is
-stored, and click **Confirm directory**. The directory must contain
-`manifest.json` and `voicelines/`:
+Open `/omv` → **Settings**, enter the **existing pack root**, and click
+**Confirm directory**. The root must contain one folder per voice:
 
 ```text
-<selected directory>/
-  manifest.json
-  voicelines/{id}.ogg
+<selected pack root>/
+  alphinaud/
+  thancred/
+  urianger/
 ```
 
-Some lines also ship `{id}.she.ogg` and `{id}.he.ogg` for third-person
-references to your character; the plain `{id}.ogg` stays neutral.
+Select the parent folder containing the voice folders, not an individual voice
+folder.
 
 Then open `/omv` and press **Reload pack**. Until a pack is installed, the
 plugin stays quietly out of the way.
-
-> **Want to make your own pack?** Packs are generated from your own game
-> install — details in [Making a pack](docs/QWEN3-TTS.md#making-a-pack).
 
 ## In game
 
@@ -104,7 +89,7 @@ plugin stays quietly out of the way.
 | Setting | What it does |
 | --- | --- |
 | Enabled | Turns the whole plugin on or off |
-| Voice pack directory | Existing folder containing `manifest.json` and `voicelines/` |
+| Voice pack directory | Pack root containing one folder per voice |
 | Volume | Pack audio level, 1–200% |
 | Player pronouns | Auto follows your character's sex; or pick They/them, She/her, or He/him |
 | Real-VO wait | How long to wait for a real voice actor before starting (ms) |
@@ -114,8 +99,8 @@ plugin stays quietly out of the way.
 A missing line is never an error: it is simply silent and recorded for later.
 Lines that mention the player in third person have separate she/he recordings;
 the plain root is the neutral they/them version and the fallback if a matching
-clip is missing. A hand-made `voicelines_override/{id}.ogg` always wins over
-the pack.
+clip is missing. A hand-made `voicelines_override/{id}.ogg` inside a voice
+folder always wins over that voice's generated audio.
 
 ## Documentation
 

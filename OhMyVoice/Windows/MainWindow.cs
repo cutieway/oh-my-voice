@@ -26,6 +26,10 @@ public class MainWindow : Window, IDisposable
         var config = plugin.Configuration;
         ImGui.Text($"Enabled: {config.Enabled}");
         ImGui.Text($"Playing: {(plugin.IsPlaying ? plugin.PlayingId ?? "yes" : "no")}");
+        ImGui.Text(plugin.IsPackLoaded
+            ? $"Pack: {plugin.LoadedVoiceCount} voices, {plugin.LoadedVoicelineCount} lines "
+              + $"({plugin.LoadedPackCount} manifests)"
+            : "Pack: not loaded");
         ImGui.Spacing();
         if (ImGui.Button("Reload pack"))
             plugin.ReloadPack();

@@ -83,7 +83,9 @@ public class ConfigWindow : Window, IDisposable
         ImGui.Separator();
         ImGui.Spacing();
         ImGui.Text("Voice pack directory");
-        ImGui.TextWrapped("Enter an existing directory containing manifest.json and voicelines/.");
+        ImGui.TextWrapped(
+            "Enter an existing pack root containing one folder per voice. " +
+            "Each voice folder must contain manifest.json and voicelines/.");
         ImGui.SetNextItemWidth(-1);
         ImGui.InputText("##omv-pack-directory", ref packDirectoryInput, 4096);
         if (ImGui.Button("Confirm directory"))
@@ -95,6 +97,21 @@ public class ConfigWindow : Window, IDisposable
                 ? new Vector4(0.95f, 0.35f, 0.35f, 1f)
                 : new Vector4(0.95f, 0.75f, 0.3f, 1f);
             ImGui.TextColored(color, packDirectoryMessage);
+        }
+
+        if (plugin.IsPackLoaded)
+        {
+            ImGui.TextDisabled(
+                $"Loaded {plugin.LoadedVoiceCount} voices, " +
+                $"{plugin.LoadedVoicelineCount} lines from " +
+                $"{plugin.LoadedPackCount} manifest(s).");
+            if (plugin.InvalidManifestCount > 0)
+                ImGui.TextDisabled(
+                    $"Skipped {plugin.InvalidManifestCount} invalid manifest(s); see /xllog.");
+        }
+        else if (configuration.PackDirectory.Length > 0)
+        {
+            ImGui.TextDisabled("No valid voice packs loaded.");
         }
 
         if (VoicePackDownloadUrl.Length == 0)
@@ -148,8 +165,21 @@ public class ConfigWindow : Window, IDisposable
         plugin.ReloadPack();
 
         packDirectoryError = false;
-        packDirectoryMessage = plugin.IsPackLoaded
-            ? "Directory saved. Voice pack loaded."
-            : "Directory saved, but no valid manifest.json was found. Pack remains disabled.";
+        if (plugin.IsPackLoaded)
+        {
+            packDirectoryMessage =
+                $"Directory saved. Loaded {plugin.LoadedVoiceCount} voices, " +
+                $"{plugin.LoadedVoicelineCount} lines from " +
+                $"{plugin.LoadedPackCount} manifest(s).";
+            if (plugin.InvalidManifestCount > 0)
+                packDirectoryMessage += $" Skipped {plugin.InvalidManifestCount} invalid manifest(s).";
+        }
+        else
+        {
+            packDirectoryMessage =
+                "Directory saved, but no valid voice folders were found. Select the " +
+                "parent folder that directly contains folders such as thancred/ " +
+                "and urianger/. Pack remains disabled.";
+        }
     }
 }

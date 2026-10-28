@@ -80,14 +80,21 @@ docker compose -f compose.xvector.yaml run --rm xvector
 ./voice.sh alphinaud
 ```
 
-The output is `data/out/<voice>/`. Copy `manifest.json` and `voicelines/` into
-an existing directory you choose, then select that same directory in the
-plugin's settings. To generate directly into it on Linux/Wine:
+The default `data/out/` directory is the multi-voice pack root: each run writes
+`data/out/<voice>/manifest.json` and `data/out/<voice>/voicelines/`. Select that
+root once in the plugin settings; newly generated voices are picked up after
+**Reload pack**, without copying files around.
+
+To build the same layout somewhere else, set `OMV_OUT` to a per-voice
+subdirectory:
 
 ```bash
-mkdir -p "$HOME/OhMyVoice/alphinaud"
+mkdir -p "$HOME/OhMyVoice/alphinaud" "$HOME/OhMyVoice/urianger"
 OMV_OUT="$HOME/OhMyVoice/alphinaud" ./voice.sh alphinaud
+OMV_OUT="$HOME/OhMyVoice/urianger" ./voice.sh urianger
 ```
+
+Then select the parent `$HOME/OhMyVoice` as the pack root.
 
 Start small with `OMV_LIMIT=5 ./voice.sh alphinaud`, and use
 `./voice.sh -pause` / `-start` / `-stop` while a run is attached. Harvesting
@@ -101,7 +108,7 @@ Compose and `./voice.sh` read these overrides:
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `OMV_EVENTS` | required | The plugin's `events.jsonl` |
-| `OMV_OUT` | `./data/out` | Output pack directory |
+| `OMV_OUT` | `./data/out/<voice>` | Output directory for one voice pack |
 | `OMV_LANG` | `en` | Pack language |
 | `OMV_VOICE_MAP` | `tools/voice-map.json` | NPC -> x-vector map |
 | `OMV_XVECTORS` | `./data/xvectors` | Voice embeddings |

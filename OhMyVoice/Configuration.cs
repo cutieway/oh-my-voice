@@ -13,7 +13,7 @@ public class Configuration : IPluginConfiguration
     /// <summary>Explicit acceptance of the third-party/modding usage notice.</summary>
     public bool TermsAccepted { get; set; } = false;
 
-    /// <summary>User-selected directory containing manifest.json and voicelines/.</summary>
+    /// <summary>User-selected pack root containing one or more voice manifests.</summary>
     public string PackDirectory { get; set; } = string.Empty;
 
     /// <summary>Debug log flag. OFF by default to avoid /xllog spam (Q13).</summary>
