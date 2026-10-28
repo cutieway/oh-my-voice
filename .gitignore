@@ -24,3 +24,6 @@ __pycache__/
 
 # Local agent instructions; keep out of the public repository.
 /AGENTS.md
+
+# Local scratch notes.
+/todo.md
