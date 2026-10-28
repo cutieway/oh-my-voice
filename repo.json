@@ -26,6 +26,7 @@
     "DownloadCount": 0,
     "LastUpdate": 1793121853,
     "DownloadLinkInstall": "https://repos.codetrunk.eu/cutieway/oh-my-voice/releases/download/v0.1.0.0/OhMyVoice.zip",
-    "DownloadLinkUpdate": "https://repos.codetrunk.eu/cutieway/oh-my-voice/releases/download/v0.1.0.0/OhMyVoice.zip"
+    "DownloadLinkUpdate": "https://repos.codetrunk.eu/cutieway/oh-my-voice/releases/download/v0.1.0.0/OhMyVoice.zip",
+    "IconUrl": "https://repos.codetrunk.eu/cutieway/oh-my-voice/raw/branch/main/docs/assets/plugin-icon.png"
   }
 ]

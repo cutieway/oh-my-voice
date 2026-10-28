@@ -8,8 +8,16 @@
     <Punchline>Voices for unvoiced FFXIV dialogue.</Punchline>
     <Description>Pre-generated Qwen3-TTS voice packs that voice unvoiced NPC dialogue and cutscenes across FFXIV's expansions. English. Silent on cache miss, never doubles real voice-over.</Description>
     <RepoUrl>https://repos.codetrunk.eu/cutieway/oh-my-voice</RepoUrl>
+    <IconUrl>https://repos.codetrunk.eu/cutieway/oh-my-voice/raw/branch/main/docs/assets/plugin-icon.png</IconUrl>
     <Tags>tts;voice;dialogue;cutscene;accessibility</Tags>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="..\docs\assets\plugin-icon.png">
+      <TargetPath>images\icon.png</TargetPath>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\OhMyVoice.Common\OhMyVoice.Common.csproj" />
