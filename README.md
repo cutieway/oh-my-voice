@@ -94,6 +94,8 @@ plugin stays quietly out of the way.
 | Player pronouns | Auto follows your character's sex; or pick They/them, She/her, or He/him |
 | Real-VO wait | How long to wait for a real voice actor before starting (ms) |
 | Stop on real VO | Cuts your pack line if an actor starts talking |
+| Queue lines | Keep every line: skips are queued and play in order, up to 8 behind |
+| Silence between lines | Gap after a line ends before the next one starts (ms) |
 | Debug logging | Extra detail in `/xllog` |
 
 A missing line is never an error: it is simply silent and recorded for later.

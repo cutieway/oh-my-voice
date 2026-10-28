@@ -1,3 +1,4 @@
+using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.Command;
 using Dalamud.Interface.Windowing;
 using Dalamud.IoC;
@@ -53,11 +54,13 @@ public sealed class Plugin : IDalamudPlugin
         game.RefreshPlayerName();
         ClientState.Login += OnLogin;
         ClientState.Logout += OnLogout;
+        Condition.ConditionChange += OnConditionChange;
 
         pack = new PackStore(Log, Configuration);
         playback = new Playback(Log, Configuration);
         events = new VoiceLog(PluginInterface, Log);
         npcMetadata = new NpcMetadataService(DataManager, Log);
+        npcMetadata.WarmIndex();
         suppression = new VoSuppression(GameInteropProvider, Log, Configuration, OnRealVo);
         dispatcher = new Dispatcher(Log, Configuration, game, pack, playback, events, npcMetadata, suppression);
         capture = new TalkCapture(Framework, GameGui, AddonLifecycle, Log, Configuration, game, dispatcher);
@@ -133,15 +136,44 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnLogout(int type, int code)
     {
+        dispatcher.ClearQueue();
         playback.Stop();
     }
 
     private void OnRealVo() => dispatcher.OnRealVoStarted();
 
+    /// <summary>
+    /// A cutscene ending - finished or skipped from the "Skip cutscene?" prompt -
+    /// stops the pack line and drops the queue: the player wants out, so nothing
+    /// from that scene keeps talking. Stopping is immediate: the cutscene flags
+    /// are checked again on the spot, so a transition that only clears one of
+    /// them leaves playback alone.
+    /// </summary>
+    private void OnConditionChange(ConditionFlag flag, bool value)
+    {
+        if (value) return;
+        if (flag is not (ConditionFlag.OccupiedInCutSceneEvent
+            or ConditionFlag.WatchingCutscene
+            or ConditionFlag.WatchingCutscene78)) return;
+        if (game.IsInCutscene()) return; // another cutscene flag is still set
+
+        int queued = dispatcher.QueuedCount;
+        bool playing = playback.IsPlaying;
+        dispatcher.ClearQueue();
+        playback.Stop();
+        if (Configuration.DebugLogging && (queued > 0 || playing))
+        {
+            Log.Information(
+                $"Cutscene ended: cleared {queued} queued line(s), " +
+                $"playback {(playing ? "stopped" : "idle")}");
+        }
+    }
+
     public void Dispose()
     {
         ClientState.Login -= OnLogin;
         ClientState.Logout -= OnLogout;
+        Condition.ConditionChange -= OnConditionChange;
 
         PluginInterface.UiBuilder.Draw -= WindowSystem.Draw;
         PluginInterface.UiBuilder.OpenConfigUi -= ToggleConfigUi;

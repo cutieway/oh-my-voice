@@ -28,6 +28,15 @@ public class Configuration : IPluginConfiguration
     /// <summary>Stop an already-playing pack line when real VO starts (Q4b).</summary>
     public bool StopOnVo { get; set; } = true;
 
+    /// <summary>
+    /// Let a playing line finish instead of cutting it when the next line
+    /// arrives. Off by default: the next line cuts the current one.
+    /// </summary>
+    public bool QueueLines { get; set; } = false;
+
+    /// <summary>Silence between the end of one line and the start of the next, in ms.</summary>
+    public int LineGapMs { get; set; } = 1000;
+
     /// <summary>Subtitle dedupe window in seconds: same final ID within this window is skipped (Q13).</summary>
     public double SubtitleDedupeSeconds { get; set; } = 1.0;
 

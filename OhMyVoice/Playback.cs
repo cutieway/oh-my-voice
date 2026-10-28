@@ -21,8 +21,8 @@ public sealed class Playback : IDisposable
     private WaveOut? device;
     private RawSourceWaveStream? activePcm;
     private string? playingId;
-
-    public event EventHandler<string>? LineStopped;
+    private long lastEndTicks;
+    private TaskCompletionSource<bool>? idleSignal;
 
     public Playback(IPluginLog log, Configuration config)
     {
@@ -38,6 +38,52 @@ public sealed class Playback : IDisposable
     public string? PlayingId
     {
         get { lock (gate) return playingId; }
+    }
+
+    /// <summary>
+    /// Completes when no line is playing. Queue mode uses this so a superseded
+    /// line still finishes instead of being cut mid-word.
+    /// </summary>
+    public Task WaitForIdleAsync(CancellationToken cancellationToken)
+    {
+        Task idle;
+        lock (gate)
+        {
+            if (device == null) return Task.CompletedTask;
+            idleSignal ??= new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            idle = idleSignal.Task;
+        }
+        return idle.WaitAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Waits out the silence between lines. The gap is measured from the end of
+    /// the previous line, not from the moment this is called, so a line that
+    /// already ended a while ago starts immediately and a line that was just cut
+    /// gets the full gap.
+    /// </summary>
+    public Task WaitGapAsync(int gapMs, CancellationToken cancellationToken)
+    {
+        int gap = Math.Clamp(gapMs, 0, 10_000);
+        if (gap == 0) return Task.CompletedTask;
+
+        long lastEnd;
+        lock (gate) lastEnd = lastEndTicks;
+        if (lastEnd == 0) return Task.CompletedTask;
+
+        long remaining = gap - (Environment.TickCount64 - lastEnd);
+        return remaining <= 0
+            ? Task.CompletedTask
+            : Task.Delay((int)remaining, cancellationToken);
+    }
+
+    /// <summary>Marks the line as ended and releases <see cref="WaitForIdleAsync"/> waiters.</summary>
+    private void SignalIdle()
+    {
+        lastEndTicks = Environment.TickCount64;
+        idleSignal?.TrySetResult(true);
+        idleSignal = null;
     }
 
     /// <summary>Decode Ogg-Opus file to 48k mono float PCM. Port of XivVoices DecodeOggOpusToPCM.</summary>
@@ -89,7 +135,7 @@ public sealed class Playback : IDisposable
                 playingId = id;
             }
             player.Play();
-            if (config.DebugLogging) log.Debug($"Playing {id}");
+            if (config.DebugLogging) log.Information($"Playing {id}");
         }
         catch (Exception ex)
         {
@@ -115,7 +161,7 @@ public sealed class Playback : IDisposable
                 playingId = null;
             }
         }
-        if (notify) LineStopped?.Invoke(this, id);
+        if (notify) SignalIdle();
     }
 
     public void Stop()
@@ -146,11 +192,8 @@ public sealed class Playback : IDisposable
             try { old.Stop(); } catch { }
             try { old.Dispose(); } catch { }
             try { oldPcm?.Dispose(); } catch { }
-            if (oldId != null)
-            {
-                if (config.DebugLogging) log.Debug($"Stopped {oldId}");
-                LineStopped?.Invoke(this, oldId);
-            }
+            if (oldId != null && config.DebugLogging) log.Information($"Stopped {oldId}");
+            SignalIdle();
         }
         else
         {

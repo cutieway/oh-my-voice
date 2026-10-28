@@ -28,16 +28,33 @@ public sealed class NpcMetadataService
 
     private readonly IDataManager dataManager;
     private readonly IPluginLog log;
+    private readonly object gate = new();
     private Dictionary<string, List<uint>>? names;
     private ExcelSheet<ENpcResident>? residents;
     private ExcelSheet<ENpcBase>? bases;
     private ExcelSheet<TerritoryType>? territories;
-    private bool indexFailed;
+    private bool indexStarted;
 
     public NpcMetadataService(IDataManager dataManager, IPluginLog log)
     {
         this.dataManager = dataManager;
         this.log = log;
+    }
+
+    /// <summary>
+    /// Build the name index on a background thread at plugin load. The build
+    /// scans ~10k rows and takes ~50 ms, which would otherwise stall the
+    /// framework tick on the first line of a session. Until it finishes,
+    /// <see cref="Resolve"/> returns name/expansion only instead of blocking.
+    /// </summary>
+    public void WarmIndex()
+    {
+        lock (gate)
+        {
+            if (indexStarted || names != null) return;
+            indexStarted = true;
+        }
+        _ = Task.Run(BuildIndex);
     }
 
     public NpcMetadata Resolve(string npcKey, string displayName, uint territoryType)
@@ -96,35 +113,60 @@ public sealed class NpcMetadataService
         return meta;
     }
 
+    /// <summary>
+    /// True only when the index is published. Never blocks: a warm-up in
+    /// flight makes this return false so the framework thread is not stalled.
+    /// </summary>
     private bool EnsureIndex()
     {
-        if (names != null) return true;
-        if (indexFailed) return false;
+        lock (gate)
+        {
+            if (names != null) return true;
+            if (indexStarted) return false;
+            indexStarted = true;
+        }
+        return BuildIndex();
+    }
+
+    private bool BuildIndex()
+    {
+        Dictionary<string, List<uint>> built;
+        ExcelSheet<ENpcResident> sheetResidents;
+        ExcelSheet<ENpcBase> sheetBases;
+        ExcelSheet<TerritoryType> sheetTerritories;
         try
         {
-            residents = dataManager.GetExcelSheet<ENpcResident>();
-            bases = dataManager.GetExcelSheet<ENpcBase>();
-            names = new Dictionary<string, List<uint>>(StringComparer.Ordinal);
-            foreach (var row in residents)
+            sheetResidents = dataManager.GetExcelSheet<ENpcResident>();
+            sheetBases = dataManager.GetExcelSheet<ENpcBase>();
+            sheetTerritories = dataManager.GetExcelSheet<TerritoryType>();
+            built = new Dictionary<string, List<uint>>(StringComparer.Ordinal);
+            foreach (var row in sheetResidents)
             {
                 string name = row.Singular.ToString().Trim();
                 if (name.Length == 0) continue;
                 string key = Normalize(name);
                 if (key.Length == 0) continue;
-                if (!names.TryGetValue(key, out var ids))
-                    names[key] = ids = [];
+                if (!built.TryGetValue(key, out var ids))
+                    built[key] = ids = [];
                 ids.Add(row.RowId);
             }
-            foreach (var ids in names.Values) ids.Sort();
-            log.Information($"NpcMetadata: indexed {names.Count} normalized names.");
-            return true;
+            foreach (var ids in built.Values) ids.Sort();
         }
         catch (Exception ex)
         {
-            indexFailed = true;
             log.Warning($"NpcMetadata index failed: {ex.Message}");
             return false;
         }
+
+        lock (gate)
+        {
+            residents = sheetResidents;
+            bases = sheetBases;
+            territories = sheetTerritories;
+            names = built; // published last; readers gate on this
+        }
+        log.Information($"NpcMetadata: indexed {built.Count} normalized names.");
+        return true;
     }
 
     /// <summary>
@@ -146,7 +188,9 @@ public sealed class NpcMetadataService
     {
         try
         {
-            var sheet = territories ??= dataManager.GetExcelSheet<TerritoryType>();
+            ExcelSheet<TerritoryType>? sheet;
+            lock (gate) sheet = territories;
+            sheet ??= dataManager.GetExcelSheet<TerritoryType>();
             if (!sheet.TryGetRow(territoryType, out var territory)) return;
             uint id = territory.ExVersion.RowId;
             meta.ExpansionId = id;

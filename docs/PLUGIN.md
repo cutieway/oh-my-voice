@@ -54,13 +54,29 @@ line. A failed runtime sanitizer self-check disables the whole catalog.
 2. Read the live player forename/surname and clean the speaker/sentence.
 3. Resolve the NPC entry and compute the line ID.
 4. Drop a repeat of the same ID inside `SubtitleDedupeSeconds` (default 1 s).
-5. Cancel any older pending line, wait `VoWaitMs` (default 100 ms) for real VO.
+5. Cancel any older pending line (cut mode), wait `VoWaitMs` (default 100 ms)
+   for real VO.
 6. If real VO was detected within the last second, stay silent.
 7. Resolve the pack file (see below). No file → record a `miss`; file →
-   record a `hit`, stop the previous line, and play.
+   record a `hit`, then start it after the gap described below.
 
-Only one line is ever in flight. A newly dispatched line supersedes a pending
-wait; a hit stops the previous line before playing.
+Two lines never overlap:
+
+- **Cut (default)** — a new line supersedes any pending wait and stops the
+  playing line mid-audio.
+- **Queue** (`QueueLines`) — every accepted line keeps its place and plays in
+  dialog order, so a player can click through five lines and walk away while
+  all five still play. Ordering is by arrival, not by how fast a file lookup
+  finishes. At most 8 lines are held; beyond that the oldest pending line is
+  dropped, since the player has moved past it.
+
+Either way a line starts only after `LineGapMs` (default 1000 ms) of silence,
+measured from the end of the previous line, not from the arrival of the new
+one. A line that ended long ago therefore starts immediately, and the first
+line of a conversation has no gap at all.
+
+Real VO starting (`StopOnVo`) and logging out clear the queued backlog; the
+line already playing is stopped by the same rule that stops it in cut mode.
 
 ## Real-VO suppression
 
@@ -80,7 +96,13 @@ pack line, and it stops an already-playing pack line when real VO begins
   with the plugin.
 - The whole line is decoded to memory before playback starts.
 - Volume is clamped to 0.01–2.0 (1–200% in the UI).
-- The active line is stopped on logout and when a new line plays.
+- The active line is stopped on logout and when a new line cuts it. In queue
+  mode the playing line is allowed to finish instead; the idle wait is released
+  by the line's own stop, natural or forced.
+- A cutscene ending stops the line and drops the queue. Skipping from the
+  "Skip cutscene?" prompt ends the cutscene, so the rest of the scene goes
+  silent on the spot. One of the three cutscene condition flags clearing is not
+  enough: playback only stops when none of them is set.
 
 ## Pack layout
 
@@ -162,6 +184,11 @@ Rows are deduped by `Result + Id` across sessions. On load, the log is
 compacted into a temp file and swapped in atomically; unreadable rows are
 dropped. A legacy `misses.jsonl` is migrated to `events.jsonl` once.
 
+The NPC name index (~10k rows, ~50 ms) is built on a background thread at
+plugin load so it never stalls a frame. A line captured before that finishes
+still logs its sentence, speaker, and expansion, but with `NpcId` unset and
+`Match: "none"`.
+
 Misses are only logged. Nothing is synthesized live and no network request is
 made.
 
@@ -176,6 +203,8 @@ made.
 | `PlayerPronouns` | Auto | Auto uses character sex; or force They/them, She/her, He/him |
 | `VoWaitMs` | 100 | Delay before starting, to let real VO win (0–500 ms) |
 | `StopOnVo` | on | Stop a playing pack line when real VO starts |
+| `QueueLines` | off | Off: a new line cuts the playing one. On: every line keeps its place and plays in order (8 max) |
+| `LineGapMs` | 1000 | Silence between the end of one line and the start of the next (0–3000 ms) |
 | `DebugLogging` | off | Verbose `/xllog` output |
 | `SubtitleDedupeSeconds` | 1.0 | Repeat window for the same line ID; config-file only |
 

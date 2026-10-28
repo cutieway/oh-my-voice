@@ -77,6 +77,24 @@ public class ConfigWindow : Window, IDisposable
             configuration.Save();
         }
 
+        var queueLines = configuration.QueueLines;
+        if (ImGui.Checkbox("Queue lines (finish current line first)", ref queueLines))
+        {
+            configuration.QueueLines = queueLines;
+            configuration.Save();
+        }
+        ImGui.TextDisabled(
+            configuration.QueueLines
+                ? "The playing line finishes, then the next one starts."
+                : "A new line cuts the playing line mid-audio.");
+
+        var lineGap = configuration.LineGapMs;
+        if (ImGui.SliderInt("Silence between lines (ms)", ref lineGap, 0, 3000))
+        {
+            configuration.LineGapMs = lineGap;
+            configuration.Save();
+        }
+
         var debug = configuration.DebugLogging;
         if (ImGui.Checkbox("Debug logging (/xllog)", ref debug))
         {
