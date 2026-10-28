@@ -9,11 +9,17 @@ public class ConfigWindow : Window, IDisposable
     // TODO: Replace with the public voice-pack distribution URL when available.
     private const string VoicePackDownloadUrl = "";
 
+    private static readonly string[] PronounLabels =
+    [
+        "Auto (character sex)", "They/them", "She/her", "He/him",
+    ];
+
     private readonly Plugin plugin;
     private readonly Configuration configuration;
     private string packDirectoryInput;
     private string packDirectoryMessage = string.Empty;
     private bool packDirectoryError;
+    private Task? packLoad;
 
     public ConfigWindow(Plugin plugin)
         : base("Oh My Voice Settings###omv-config")
@@ -30,6 +36,9 @@ public class ConfigWindow : Window, IDisposable
 
     public override void Draw()
     {
+        if (packLoad is { IsCompleted: true })
+            ReportPackLoad();
+
         var enabled = configuration.Enabled;
         if (ImGui.Checkbox("Enabled", ref enabled))
         {
@@ -46,12 +55,8 @@ public class ConfigWindow : Window, IDisposable
 
         ImGui.Spacing();
         var pronounChoice = (int)configuration.PlayerPronouns;
-        string[] pronounLabels =
-        [
-            "Auto (character sex)", "They/them", "She/her", "He/him",
-        ];
         if (ImGui.Combo("Player pronouns", ref pronounChoice,
-                        pronounLabels, pronounLabels.Length))
+                        PronounLabels, PronounLabels.Length))
         {
             configuration.PlayerPronouns = (PronounChoice)pronounChoice;
             configuration.Save();
@@ -91,7 +96,11 @@ public class ConfigWindow : Window, IDisposable
         if (ImGui.Button("Confirm directory"))
             ConfirmPackDirectory();
 
-        if (packDirectoryMessage.Length > 0)
+        if (packLoad is not null)
+        {
+            ImGui.TextDisabled("Loading voice packs…");
+        }
+        else if (packDirectoryMessage.Length > 0)
         {
             var color = packDirectoryError
                 ? new Vector4(0.95f, 0.35f, 0.35f, 1f)
@@ -99,7 +108,7 @@ public class ConfigWindow : Window, IDisposable
             ImGui.TextColored(color, packDirectoryMessage);
         }
 
-        if (plugin.IsPackLoaded)
+        if (plugin.IsPackLoaded && packLoad is null)
         {
             ImGui.TextDisabled(
                 $"Loaded {plugin.LoadedVoiceCount} voices, " +
@@ -162,7 +171,28 @@ public class ConfigWindow : Window, IDisposable
         configuration.PackDirectory = fullPath;
         configuration.Save();
         packDirectoryInput = fullPath;
-        plugin.ReloadPack();
+
+        packDirectoryError = false;
+        packDirectoryMessage = string.Empty;
+        packLoad = plugin.ReloadPackAsync();
+    }
+
+    /// <summary>
+    /// Turns the finished background load into the status line. Runs inside
+    /// <see cref="Draw"/>, so no cross-thread marshalling is needed.
+    /// </summary>
+    private void ReportPackLoad()
+    {
+        Task load = packLoad!;
+        packLoad = null;
+
+        if (load.IsFaulted)
+        {
+            packDirectoryError = true;
+            packDirectoryMessage =
+                $"Pack load failed: {load.Exception?.GetBaseException().Message}";
+            return;
+        }
 
         packDirectoryError = false;
         if (plugin.IsPackLoaded)

@@ -11,6 +11,7 @@ public sealed class PackStore
 {
     private readonly IPluginLog log;
     private readonly Configuration config;
+    private readonly object loadGate = new();
     private Catalog catalog = Catalog.Empty;
 
     public bool PackEnabled => Volatile.Read(ref catalog).Packs.Count > 0;
@@ -28,7 +29,22 @@ public sealed class PackStore
 
     public string PackDirectory => config.PackDirectory.Trim();
 
-    public void Load()
+    /// <summary>
+    /// Reads and publishes the catalog on the thread pool. Callers on the UI
+    /// thread (window draws) must never call <see cref="Load"/> directly: one
+    /// manifest set is several megabytes of JSON, which is a visible hitch
+    /// inside a frame. Loads are serialized, so a burst of reload requests
+    /// cannot interleave their catalog publications.
+    /// </summary>
+    public Task LoadAsync() => Task.Run(() =>
+    {
+        lock (loadGate)
+        {
+            Load();
+        }
+    });
+
+    private void Load()
     {
         string root = PackDirectory;
         if (string.IsNullOrWhiteSpace(root))

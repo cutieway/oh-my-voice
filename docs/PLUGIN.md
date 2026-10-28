@@ -17,6 +17,12 @@ Two providers, both read-only:
 | `Talk` | Polled every framework update; change-detected on speaker + sentence | The speaker text node, or `Narrator` when empty |
 | `TalkSubtitle` | `PostDraw` on the cutscene subtitle addon | `Narrator` |
 
+Both providers compare the native `Utf8String` bytes against a cached copy
+first; the SeString decode plus whitespace regex only runs when the game
+actually rewrote the text, so a line that is merely displayed costs a memcmp
+per frame. The `Talk` poll also skips the `TalkSubtitle` lookup while no
+subtitle text is remembered.
+
 A line is dispatched once per visible change. The subtitle frame-guard resets
 when the subtitle addon hides, so a later byte-identical line still dispatches;
 the dispatcher's time-window dedupe removes true duplicates.
@@ -178,3 +184,9 @@ counts, and has **Reload pack** and **Settings** buttons. Settings save immediat
 usage agreement is shown before either window can open; plugin capture and
 playback remain disabled until it is accepted. The pack download button is a
 disabled placeholder until a distribution URL is available.
+
+Manifests are read on a worker thread, never inside a frame: a manifest set is
+several megabytes of JSON, so a synchronous load would stall the UI thread for
+over 100 ms (Dalamud logs that as a `[HITCH]`). Confirming a directory shows
+`Loading voice packs…` until the catalog swap completes; `/omv` keeps the
+previous counts until then. Lines spoken during that window log as misses.

@@ -3,7 +3,6 @@ using Dalamud.Interface.Windowing;
 using Dalamud.IoC;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
-using FFXIVClientStructs.FFXIV.Client.System.Framework;
 using OhMyVoice.Windows;
 
 namespace OhMyVoice;
@@ -87,7 +86,7 @@ public sealed class Plugin : IDalamudPlugin
 
         Log.Information(
             $"OhMyVoice loaded. Terms={(Configuration.TermsAccepted ? "accepted" : "pending")} " +
-            $"Pack={(pack.PackEnabled ? $"on ({pack.VoiceCount} voices, {pack.VoicelineCount} lines)" : "off")} " +
+            $"PackDirectory={(pack.PackDirectory.Length > 0 ? pack.PackDirectory : "(none)")} " +
             $"Sanitizer={Sanitizer.Pin} Events={events.Path}");
     }
 
@@ -106,16 +105,16 @@ public sealed class Plugin : IDalamudPlugin
         RefreshGameVersion();
         game.RefreshPlayerName();
         if (Configuration.TermsAccepted)
-            pack.Load();
+            _ = ReloadPackAsync();
     }
 
     private void EnableRuntime()
     {
         if (runtimeEnabled) return;
-        pack.Load();
+        runtimeEnabled = true;
+        _ = ReloadPackAsync();
         suppression.Enable();
         capture.Enable();
-        runtimeEnabled = true;
     }
 
     internal void AcceptTerms()
@@ -159,9 +158,22 @@ public sealed class Plugin : IDalamudPlugin
         playback.Dispose();
     }
 
-    internal void ReloadPack()
+    /// <summary>
+    /// Reloads the pack catalog off the UI thread. Faults are logged here so
+    /// fire-and-forget callers cannot swallow them.
+    /// </summary>
+    internal Task ReloadPackAsync()
     {
-        if (runtimeEnabled) pack.Load();
+        if (!runtimeEnabled) return Task.CompletedTask;
+
+        Task task = pack.LoadAsync();
+        _ = task.ContinueWith(
+            static (faulted, state) => ((IPluginLog)state!).Error(faulted.Exception!, "Pack reload failed."),
+            Log,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+        return task;
     }
 
     internal bool IsPlaying => playback.IsPlaying;

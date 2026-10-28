@@ -32,7 +32,7 @@ public class MainWindow : Window, IDisposable
             : "Pack: not loaded");
         ImGui.Spacing();
         if (ImGui.Button("Reload pack"))
-            plugin.ReloadPack();
+            _ = plugin.ReloadPackAsync();
         ImGui.SameLine();
         if (ImGui.Button("Settings"))
             plugin.ToggleConfigUi();
