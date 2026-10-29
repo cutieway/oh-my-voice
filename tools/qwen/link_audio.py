@@ -1,10 +1,20 @@
 #!/usr/bin/env python3
-"""Link generated OGG files into dialogue.db's audio_variants table.
+"""Link generated OGG files into dialogue.db and record what is done.
 
 The generator writes the truth (manifest + files); this host-side script only
-mirrors it into SQLite. It never changes dialogs.audio_status and never deletes
-rows. Re-run it after a batch; existing (voice_line_id, pronoun) rows are
-replaced with the current manifest values.
+mirrors it into SQLite. It never deletes rows. Re-run it after a batch;
+existing (voice_line_id, pronoun) rows are replaced with the current manifest
+values.
+
+Two tables are updated:
+
+- ``audio_variants``: one row per rendered file.
+- ``dialogs``: a line whose root file exists *and* whose stored text still
+  matches the manifest sentence becomes ``audio_status='generated'`` with
+  ``audio_stale=0``. That is what drains ``v_generation_queue``, so a later run
+  (including after a patch adds lines) only exports what is still missing.
+  A line whose text changed keeps its old status; the harvest sets
+  ``audio_stale=1``, which keeps it queued until it is rendered again.
 
 The root (they/them) rendering is stored under ``they`` and the third-person
 variants under ``she`` and ``he``. Manifests with any other schema are skipped.
@@ -108,6 +118,83 @@ def migrate_audio_variants(connection: sqlite3.Connection) -> bool:
     return True
 
 
+def mark_generated(connection: sqlite3.Connection, roots: dict, now: str):
+    """Record root renderings as generated lines in ``dialogs``.
+
+    ``roots`` maps voice_line_id -> (lang, sentence, audio_path, duration_ms,
+    generation_profile). A row flips to ``generated`` only when its stored text
+    equals the manifest sentence, so a line whose game text changed keeps its
+    old status and stays queued through ``audio_stale``. Returns
+    (marked, changed, excluded, unknown): markable rows whose text differs,
+    rows the view would never mark (covered, skipped, non-dialogue), and ids
+    the DB does not have at all.
+    """
+    if not _table_columns(connection, "dialogs"):
+        return (0, 0, 0, 0)
+    update = """
+        UPDATE dialogs SET
+          audio_status = 'generated',
+          audio_stale = 0,
+          audio_path = ?,
+          duration_ms = ?,
+          generation_profile = ?,
+          updated_at = ?
+        WHERE lang = ?
+          AND voice_line_id = ?
+          AND has_scd = 0
+          AND speaker_id IS NOT NULL
+          AND text_kind IN ('dialogue','narration')
+          AND text_clean = ?
+    """
+    marked = changed = excluded = unknown = 0
+    for line_id, (lang, sentence, path, duration, profile) in roots.items():
+        cursor = connection.execute(
+            update, (path, duration, profile, now, lang, line_id, sentence))
+        if cursor.rowcount:
+            marked += 1
+            continue
+        row = connection.execute(
+            "SELECT text_clean FROM dialogs WHERE lang = ? AND voice_line_id = ? "
+            "AND has_scd = 0 AND speaker_id IS NOT NULL "
+            "AND text_kind IN ('dialogue','narration') LIMIT 1",
+            (lang, line_id)).fetchone()
+        if row is not None:
+            changed += 1
+            continue
+        exists = connection.execute(
+            "SELECT 1 FROM dialogs WHERE lang = ? AND voice_line_id = ? LIMIT 1",
+            (lang, line_id)).fetchone()
+        if exists is not None:
+            excluded += 1
+        else:
+            unknown += 1
+    return (marked, changed, excluded, unknown)
+
+
+def refresh_generated_counts(connection: sqlite3.Connection, now: str) -> int:
+    """Recompute ``speakers.generated_lines`` from the dialogs statuses."""
+    if not _table_columns(connection, "speakers"):
+        return 0
+    cursor = connection.execute(
+        """
+        UPDATE speakers SET
+          generated_lines = (
+            SELECT COUNT(*) FROM dialogs d
+            WHERE d.speaker_id = speakers.voice_id
+              AND d.audio_status = 'generated'
+          ),
+          updated_at = ?
+        WHERE generated_lines <> (
+            SELECT COUNT(*) FROM dialogs d
+            WHERE d.speaker_id = speakers.voice_id
+              AND d.audio_status = 'generated'
+          )
+        """,
+        (now,),
+    )
+    return cursor.rowcount
+
+
 def line_rows(manifest_path: Path, repo_root: Path):
     pack_dir = manifest_path.parent
     manifest = json.loads(manifest_path.read_text())
@@ -118,19 +205,21 @@ def line_rows(manifest_path: Path, repo_root: Path):
     if schema != 2:
         raise ValueError(f"unsupported manifest schema {schema!r} (expected 2)")
 
+    lang = manifest.get("Language") or "en"
+
     for line_id, entry in lines.items():
         if not isinstance(entry, dict):
             continue
         variants = entry.get("Variants")
         if not isinstance(variants, dict) or not variants:
             audio_path = pack_dir / "voicelines" / f"{line_id}.ogg"
-            yield (line_id, "none", audio_path, entry, repo_root,
+            yield (line_id, "none", audio_path, entry, lang,
                    entry.get("GenerationFingerprint"))
             continue
 
         yield (line_id, "they",
                pack_dir / "voicelines" / f"{line_id}.ogg",
-               entry, repo_root, entry.get("GenerationFingerprint"))
+               entry, lang, entry.get("GenerationFingerprint"))
         for key, pronoun in (("she", "she"), ("he", "he")):
             variant = variants.get(key)
             if not isinstance(variant, dict):
@@ -141,7 +230,7 @@ def line_rows(manifest_path: Path, repo_root: Path):
                       file=sys.stderr)
                 continue
             audio_path = pack_dir / "voicelines" / file_name
-            yield (line_id, pronoun, audio_path, variant, repo_root,
+            yield (line_id, pronoun, audio_path, variant, lang,
                    variant.get("GenerationFingerprint",
                                entry.get("GenerationFingerprint")))
 
@@ -156,6 +245,8 @@ def main() -> int:
     parser.add_argument("--voice", help="only this pack directory name")
     parser.add_argument("--repo-root", default=".",
                         help="paths are stored relative to this directory when possible")
+    parser.add_argument("--no-status", action="store_true",
+                        help="only fill audio_variants; leave dialogs.audio_status alone")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -167,10 +258,11 @@ def main() -> int:
 
     now = datetime.now(timezone.utc).isoformat()
     rows = []
+    roots = {}
     missing = 0
     for manifest_path in paths:
         try:
-            for line_id, pronoun, audio_path, meta, _, profile in line_rows(
+            for line_id, pronoun, audio_path, meta, lang, profile in line_rows(
                     manifest_path, repo_root):
                 if not audio_path.is_file():
                     print(f"missing audio: {audio_path}", file=sys.stderr)
@@ -182,10 +274,15 @@ def main() -> int:
                     print(f"size mismatch: {audio_path} manifest={declared} disk={size}",
                           file=sys.stderr)
                 duration = float(meta.get("DurationSeconds") or 0)
+                path = relative(audio_path, repo_root)
                 rows.append((
-                    line_id, pronoun, relative(audio_path, repo_root), size,
+                    line_id, pronoun, path, size,
                     int(round(duration * 1000)), profile, now,
                 ))
+                sentence = meta.get("Sentence")
+                if pronoun in ("none", "they") and isinstance(sentence, str) and sentence:
+                    roots[line_id] = (lang, sentence, path,
+                                      int(round(duration * 1000)), profile)
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             print(f"skip {manifest_path}: {exc}", file=sys.stderr)
 
@@ -215,10 +312,20 @@ def main() -> int:
             """,
             rows,
         )
+        marked = changed = excluded = unknown = refreshed = 0
+        if not args.no_status:
+            marked, changed, excluded, unknown = mark_generated(
+                connection, roots, now)
+            refreshed = refresh_generated_counts(connection, now)
         connection.commit()
     finally:
         connection.close()
     print(f"linked {len(rows)} row(s) into {args.db}")
+    if not args.no_status:
+        print(f"marked {marked} line(s) generated, {changed} kept pending "
+              f"(text changed), {excluded} not markable (covered/skipped/"
+              f"non-dialogue), {unknown} not in the DB; "
+              f"refreshed {refreshed} speaker count(s)")
     return 0
 
 

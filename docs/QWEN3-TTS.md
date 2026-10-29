@@ -49,10 +49,34 @@ repo's AGPL-3.0 covers the integration code only.
 
 ```bash
 docker compose -f compose.xvector.yaml run --rm xvector  # build/refresh vectors
+./voice.sh                  # resume every speaker with queued lines, most first
+./voice.sh -plan            # show that order without starting anything
 ./voice.sh alphinaud        # export, generate missing lines, resume later
 ./voice.sh alphinaud yshtola alisaie  # same, one speaker after another
 OMV_FORCE=1 ./voice.sh alphinaud  # regenerate every planned line
+OMV_RECHECK=1 ./voice.sh alphinaud  # rebuild only changed generation profiles
 ```
+
+With no speaker, `./voice.sh` reads `dialogue.db` and runs the speakers that
+still have queued lines, largest queue first, resuming each. If a run is
+already active it resumes only that speaker, and the next `./voice.sh`
+continues with the rest. Every exit path - normal finish, `-stop`, Ctrl+C, or
+a container crash - links the manifest back, so progress is never lost. Progress is a
+database column, not a file: `tools/qwen/link_audio.py` marks a line
+`audio_status='generated'` once its root audio exists and still matches the
+stored text, so `v_generation_queue` only lists what is missing. A patch that
+adds lines therefore needs only a re-harvest plus `./voice.sh`; a line whose
+text changed keeps `audio_stale=1` and is regenerated. `OMV_FORCE=1` exports
+`v_generation_candidates` (`export --all`) so a finished pack can be rebuilt,
+and `xivdata migrate` re-applies the views and speaker counts without a
+harvest. `python3 tools/roster.py table --out docs/workload.csv` refreshes the
+informational workload table.
+
+A model, encoder, or sanitizer change does not queue anything by itself (the
+fingerprint, not the text, moved). Use `OMV_RECHECK=1 ./voice.sh <speaker>`:
+it exports every planned line too, but the generator rebuilds only lines whose
+`GenerationFingerprint` no longer matches, which is much cheaper than
+`OMV_FORCE=1` on a whole pack.
 
 `./voice.sh` reads the sanitizer pin from `xivdata pin` and merges into
 `data/out/<voice_id>`. Use `OMV_OUT=...` to target another pack. First run

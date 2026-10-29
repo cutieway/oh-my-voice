@@ -1,0 +1,668 @@
+voice_id,npc_id,name,voiced,unvoiced,total,generated,remaining,xvector
+cid,1003855,Cid,92,1364,1456,0,1331,yes
+tataru,1003785,Tataru,174,1133,1307,0,1110,yes
+ryne,1027137,Ryne,239,1078,1317,0,1049,yes
+yugiri,1007097,Yugiri,196,571,767,0,519,yes
+kanesenna,1003027,Kan-E-Senna,102,469,571,0,459,yes
+merlwyb,1002441,Merlwyb,138,460,598,0,440,yes
+themis,1038064,Themis,26,402,428,0,400,yes
+nero,1003834,Nero tol Scaeva,32,388,420,0,375,yes
+wedge,1003837,Wedge,16,387,403,0,364,yes
+biggs,1003836,Biggs,17,382,399,0,358,yes
+mysteryvoice,,MYSTERYVOICE,601,358,959,0,355,yes
+gaia,1029523,Gaia,16,357,373,0,353,yes
+varshahn,1038053,Varshahn,149,346,495,0,337,yes
+originalsphene,,ORIGINALSPHENE,218,330,548,0,326,yes
+koana,1046617,Koana,190,333,523,0,325,yes
+shadowhunter,,SHADOWHUNTER,86,324,410,0,324,yes
+cahciua,1047855,Cahciua,123,306,429,0,305,yes
+lahabrea,1003792,Lahabrea,24,306,330,0,304,yes
+hancock,1019084,Hancock,58,293,351,0,289,yes
+fourchenault,1034125,Fourchenault,170,288,458,0,287,yes
+ketenramm,1039720,Ketenramm,39,287,326,0,287,yes
+lucia,1008193,Lucia,193,293,486,0,285,yes
+shale,1048161,Shale,118,278,396,0,277,yes
+emmanellain,1011894,Emmanellain,48,279,327,0,276,yes
+prishe,1051492,Prishe,2,268,270,0,267,yes
+nanamoulnamo,1002440,Nanamo Ul Namo,176,263,439,0,263,yes
+jullus,1038047,Jullus,178,269,447,0,262,yes
+papalymo,1002276,Papalymo,62,276,338,0,262,yes
+hilda,1011895,Hilda,16,267,283,0,262,yes
+arenvald,1005020,Arenvald,63,260,323,0,251,yes
+guloolja,1047311,Gulool Ja,80,259,339,0,247,yes
+artoirel,1011893,Artoirel,19,249,268,0,245,yes
+chainuzz,1028120,Chai-Nuzz,91,242,333,0,235,yes
+bakooljaja,1047305,Bakool Ja Ja,208,238,446,0,234,yes
+gosetsu,1018057,Gosetsu,176,253,429,0,233,yes
+yda,1002275,Yda,66,241,307,0,231,yes
+soroban,1019085,Soroban,55,216,271,0,213,yes
+matsya,1038608,Matsya,35,220,255,0,211,yes
+metem,1049788,Metem,18,211,229,0,211,yes
+mnaago,1018318,M'naago,26,219,245,0,209,yes
+lyna,1028109,Lyna,103,207,310,0,206,yes
+meteion,1038058,Meteion,199,207,406,0,201,yes
+alxaal,1051851,Alxaal,3,199,202,0,199,yes
+livingway,1036857,Livingway,142,197,339,0,190,yes
+cirina,1018978,Cirina,45,192,237,0,189,yes
+beqlugg,1029471,Beq Lugg,97,186,283,0,186,yes
+moren,1027226,Moren,8,192,200,0,174,yes
+mablu,1046558,Mablu,14,174,188,0,173,yes
+haurchefant,1006384,Haurchefant,71,179,250,0,170,yes
+ilberd,1008190,Ilberd,67,179,246,0,163,yes
+venas,,VENAS,241,167,408,0,162,yes
+growingway,1038926,Growingway,8,166,174,0,159,yes
+gilgamesh,1005543,Gilgamesh,2,151,153,0,148,yes
+hermes,1038060,Hermes,216,147,363,0,147,yes
+pipin,1010170,Pipin,33,151,184,0,142,yes
+runar,1028142,Runar,50,142,192,0,139,yes
+nidhana,1036523,Nidhana,123,138,261,0,137,yes
+feoul,1028110,Feo Ul,74,133,207,0,131,yes
+kaishirr,1028121,Kai-Shirr,22,129,151,0,128,yes
+sareelja,1046908,Sareel Ja,36,126,162,0,126,yes
+almet,1028139,Almet,16,124,140,0,122,yes
+ameliance,1039126,Ameliance,34,121,155,0,121,yes
+iceheart,,ICEHEART,119,120,239,0,117,yes
+maxima,1024628,Maxima,52,119,171,0,117,yes
+damielliot,1017811,Damielliot,2,116,118,0,115,yes
+geode,1047452,Geode,24,114,138,0,113,yes
+carvallain,1000915,Carvallain,8,112,120,0,112,yes
+vidofnir,1011935,Vidofnir,24,111,135,0,111,yes
+hoaryboulder,1007734,Hoary Boulder,18,113,131,0,110,yes
+katliss,1027232,Katliss,5,110,115,0,110,yes
+magnai,1018979,Magnai,37,110,147,0,109,yes
+edmont,,EDMONT,120,106,226,0,105,yes
+watcherofmoon,,WATCHEROFMOON,73,110,183,0,105,yes
+wawlika,1046986,Wawlika,27,107,134,0,105,yes
+meffrid,1000332,Meffrid,5,107,112,0,105,yes
+aruhnsenna,1004629,A-Ruhn-Senna,21,103,124,0,103,yes
+eynzahrslafyrsyn,1004717,Eynzahr Slafyrsyn,13,105,118,0,103,yes
+byakko,1044691,Byakko,2,103,105,0,103,yes
+conrad,1019082,Conrad,48,98,146,0,94,yes
+otis,1047899,Otis,56,91,147,0,91,yes
+sicard,1035073,Sicard,39,92,131,0,91,yes
+suzaku,1044692,Suzaku,2,90,92,0,90,yes
+seiryu,1044693,Seiryu,2,89,91,0,89,yes
+bunchin,1019178,Bunchin,14,89,103,0,88,yes
+raganfrid,1020841,Raganfrid,6,85,91,0,85,yes
+zekowa,1046971,Zekowa,27,84,111,0,83,yes
+fordola,1019098,Fordola,112,80,192,0,80,yes
+varshahnbig,,VARSHAHNBIG,148,81,229,0,77,yes
+rasho,1018975,Rasho,20,74,94,0,74,yes
+matoya,1011902,Matoya,76,72,148,0,72,yes
+magnus,1028147,Magnus,17,74,91,0,71,yes
+wukevu,1046741,Wuk Evu,42,71,113,0,70,yes
+sadu,1018980,Sadu,41,70,111,0,70,yes
+hunmurruk,1047566,Hunmu Rruk,35,69,104,0,69,yes
+honoroit,1012327,Honoroit,13,71,84,0,69,yes
+miilalja,1047607,Miilal Ja,9,70,79,0,68,yes
+singingway,1038957,Singingway,5,73,78,0,67,yes
+nitowikwe,1046985,Nitowikwe,8,66,74,0,66,yes
+gyodo,1019548,Gyodo,5,66,71,0,65,yes
+tansui,1018976,Tansui,37,66,103,0,64,yes
+isse,1018977,Isse,28,65,93,0,64,yes
+tesleen,1028126,Tesleen,24,64,88,0,64,yes
+midgardsormr,1010826,Midgardsormr,63,60,123,0,60,yes
+thaffe,1028146,Thaffe,15,63,78,0,60,yes
+mitron,1035053,Mitron,3,59,62,0,59,yes
+duliachai,1028119,Dulia-Chai,50,68,118,0,57,yes
+montichaigne,1038067,Montichaigne,54,56,110,0,56,yes
+cassard,1027854,Cassard,14,56,70,0,56,yes
+menphina,1044304,Menphina,2,56,58,0,55,yes
+athena,1043513,Athena,1,56,57,0,55,yes
+linuhanu,1046725,Linuhanu,20,55,75,0,54,yes
+bremondt,1003004,Bremondt,10,53,63,0,53,yes
+shantotto,1005539,Shantotto,1,53,54,0,53,yes
+glynard,1027322,Glynard,4,51,55,0,51,yes
+soldier03608,,SOLDIER03608,15,50,65,0,50,yes
+puddingway,1038958,Puddingway,5,51,56,0,49,yes
+fyrgeiss,1007204,Fyrgeiss,1,49,50,0,49,yes
+nostalgia,1047453,Nostalgia,28,49,77,0,48,yes
+imperialsoldier,1005068,imperial soldier,1,54,55,0,48,yes
+tobli,1046571,Tobli,20,48,68,0,47,yes
+laurentius,1006199,Laurentius,3,54,57,0,47,yes
+gabu,1016815,Ga Bu,12,46,58,0,45,yes
+brukevu,1046521,Br'uk Evu,1,46,47,0,45,yes
+seto,1027690,Seto,36,44,80,0,44,yes
+mihleel,1037318,Mihleel,2,45,47,0,43,yes
+nahbdeen,1037646,Nahbdeen,31,41,72,0,41,yes
+yuyuhase,1009147,Yuyuhase,1,41,42,0,41,yes
+asahi,1024637,Asahi,120,40,160,0,40,yes
+zereelja,1047693,Zereel Ja,36,40,76,0,40,yes
+bloewyda,1039195,Bloewyda,17,42,59,0,39,yes
+colleaguesoldier,,COLLEAGUESOLDIER,4,39,43,0,39,yes
+lumull,1054227,Lumull,61,38,99,0,38,yes
+wrenden,1029472,Wrenden,12,40,52,0,37,yes
+uimet,1028140,Uimet,11,39,50,0,37,yes
+cymet,1028141,Cymet,8,40,48,0,37,yes
+bragi,1027224,Bragi,4,37,41,0,37,yes
+hhwato,1046988,Hhwato,4,38,42,0,37,yes
+blackknight,,BLACKKNIGHT,153,37,190,0,36,yes
+guthjon,1028148,Guthjon,9,36,45,0,36,yes
+elidibus,1017303,Elidibus,194,35,229,0,35,yes
+kokkoldankkol,1039194,Kokkol Dankkol,33,35,68,0,34,yes
+shenza,1046983,Shenza,22,36,58,0,34,yes
+wihuwte,1046974,Wihuwte,27,33,60,0,33,yes
+wilfsunn,1039196,Wilfsunn,12,34,46,0,32,yes
+mehryde,1037381,Mehryde,9,32,41,0,32,yes
+suluin,1027654,Sul Uin,14,31,45,0,31,yes
+kemakka,1047075,Kemakka,21,30,51,0,30,yes
+temulun,1019083,Temulun,10,30,40,0,30,yes
+kytte,1037288,Kytte,7,30,37,0,30,yes
+vritra,,VRITRA,155,30,185,0,29,yes
+maelie,1012168,Maelie,3,29,32,0,29,yes
+stormofficer,1003846,storm officer,3,40,43,0,29,yes
+tiamat,1036296,Tiamat,42,28,70,0,28,yes
+mahuwsa,1047405,Mahuwsa,9,28,37,0,28,yes
+nophica,1044324,Nophica,1,28,29,0,28,yes
+visna,1058085,Visna,87,27,114,0,27,yes
+garuda,1003856,Garuda,3,27,30,0,27,yes
+moenbryda,1009780,Moenbryda,81,28,109,0,26,yes
+malachite,1053602,Malachite,17,26,43,0,26,yes
+bravesoldier,,BRAVESOLDIER,13,24,37,0,24,yes
+irvithe,1027288,Irvithe,8,24,32,0,24,yes
+taapu,1048099,Taapu,2,24,26,0,24,yes
+hephaestus,,HEPHAESTUS,1,24,25,0,24,yes
+eyaney,1054228,Eyaney,35,23,58,0,23,yes
+robeman,,ROBEMAN,29,23,52,0,23,yes
+wayakkwe,1047443,Wayakkwe,11,24,35,0,23,yes
+zenos,1018053,Zenos yae Galvus,240,22,262,0,22,yes
+baggamonan,,BAGGAMONAN,3,22,25,0,22,yes
+formerminionvoidsent,,FORMERMINIONVOIDSENT,3,22,25,0,22,yes
+pippin,,PIPPIN,12,21,33,0,21,yes
+gossan,1051787,Gossan,39,20,59,0,20,yes
+oulsigun,1027656,Oul Sigun,15,20,35,0,20,yes
+ghengen,1027872,Ghen Gen,8,20,28,0,20,yes
+mehrahd,1039580,Mehrahd,7,20,27,0,20,yes
+zawpya,1046984,Zawpya,5,21,26,0,20,yes
+journeysheadnurse,,JOURNEYSHEADNURSE,2,20,22,0,20,yes
+ranjit,1028129,Ran'jit,59,20,79,0,19,yes
+namikka,1046963,Namikka,22,19,41,0,19,yes
+genolt,1048084,Genolt,5,19,24,0,19,yes
+imperialcenturion,1005165,imperial centurion,4,19,23,0,19,yes
+zoraalja,1046906,Zoraal Ja,139,19,158,0,18,yes
+m017,1039140,M-017,28,18,46,0,18,yes
+solutionnfighter,,SOLUTIONNFIGHTER,24,19,43,0,18,yes
+zurmurwur,1047737,Zurmurwur,12,19,31,0,18,yes
+waitress02236,,WAITRESS02236,20,17,37,0,17,yes
+bismarck,1028360,Bismarck,10,17,27,0,17,yes
+azami,1019546,Azami,4,17,21,0,17,yes
+theva,1027313,Theva,3,16,19,0,16,yes
+mappingway,1038907,Mappingway,29,15,44,0,15,yes
+windmonolith,,WINDMONOLITH,26,15,41,0,15,yes
+clownofred,,CLOWNOFRED,6,15,21,0,15,yes
+ikaruga,1019154,Ikaruga,2,15,17,0,15,yes
+yotsuyu,1019099,Yotsuyu,120,15,135,0,14,yes
+lolorito,1007153,Lolorito,56,14,70,0,14,yes
+firemonolith,,FIREMONOLITH,42,14,56,0,14,yes
+zada,,ZADA,17,14,31,0,14,yes
+thetwelve,,THETWELVE,8,14,22,0,14,yes
+yokhuyenemya,,YOKHUYENEMYA,1,14,15,0,14,yes
+varis,1009803,Varis zos Galvus,83,13,96,0,13,yes
+watermonolith,,WATERMONOLITH,14,13,27,0,13,yes
+zasshal,1042163,Zasshal,13,13,26,0,13,yes
+mettius,1045172,Mettius,5,13,18,0,13,yes
+hannishboyb,,HANNISHBOYB,3,13,16,0,13,yes
+isadora,1048069,Isadora,7,12,19,0,12,yes
+naldthal,1042240,Nald'thal,4,12,16,0,12,yes
+awaheen,,AWAHEEN,52,11,63,0,11,yes
+grynewaht,1018376,Grynewaht,26,11,37,0,11,yes
+zanuhali,1047345,Zanuhali,26,11,37,0,11,yes
+ysiala,1027655,Ys Iala,14,11,25,0,11,yes
+clownofblue,,CLOWNOFBLUE,5,11,16,0,11,yes
+hraesvelgr,1012108,Hraesvelgr,84,10,94,0,10,yes
+teledjiadeledji,1008617,Teledji Adeledji,42,18,60,0,10,yes
+earthmonolith,,EARTHMONOLITH,26,10,36,0,10,yes
+ketill,1058625,Ketill,9,10,19,0,10,yes
+alamhigandelegation,,ALAMHIGANDELEGATION,4,10,14,0,10,yes
+grithil,1027441,Grithil,6,9,15,0,9,yes
+bodyguard01623,,BODYGUARD01623,3,11,14,0,9,yes
+honu,,HONU,3,9,12,0,9,yes
+louisoix,1006797,Louisoix,57,8,65,0,8,yes
+alayla,1047936,Alayla,28,8,36,0,8,yes
+dewlala,1012841,Dewlala,19,8,27,0,8,yes
+hoobigobakooljajaminionsa,,HOOBIGOBAKOOLJAJAMINIONSA,8,8,16,0,8,yes
+krakensdeckhand,,KRAKENSDECKHAND,2,9,11,0,8,yes
+anantasoldier,,ANANTASOLDIER,1,9,10,0,8,yes
+pepoane,1049683,Pepoane,22,7,29,0,7,yes
+hyllfyr,1001039,Hyllfyr,14,7,21,0,7,yes
+bolnoq,1046579,Bol Noq',9,7,16,0,7,yes
+bossoffuath,,BOSSOFFUATH,6,7,13,0,7,yes
+hyperboreiastaff,,HYPERBOREIASTAFF,6,7,13,0,7,yes
+nanamo,1002440,Nanamo Ul Namo,6,7,13,0,7,yes
+xande,1009370,Xande,3,7,10,0,7,yes
+delia,1049242,Delia,2,7,9,0,7,yes
+garleanleaderdoma,,GARLEANLEADERDOMA,17,6,23,0,6,yes
+sleepingway,1039125,Sleepingway,6,6,12,0,6,yes
+amaurotadministrator,,AMAUROTADMINISTRATOR,2,6,8,0,6,yes
+peshiwa,1046931,Peshiwa,2,6,8,0,6,yes
+gulooljaja,1049591,Gulool Ja Ja,163,5,168,0,5,yes
+robor,1047935,Robor,33,5,38,0,5,yes
+milos,1048070,Milos,12,6,18,0,5,yes
+qalyanapatriarch,,QALYANAPATRIARCH,9,5,14,0,5,yes
+teshitapirate,,TESHITAPIRATE,1,5,6,0,5,yes
+barnier,1039162,Barnier,39,4,43,0,4,yes
+alchemistofthegreatworka,,ALCHEMISTOFTHEGREATWORKA,6,4,10,0,4,yes
+sailorsunburned,,SAILORSUNBURNED,6,4,10,0,4,yes
+revolutionary1,1036275,Revolutionary commander,5,4,9,0,4,yes
+memoriamastera04661,,MEMORIAMASTERA04661,4,4,8,0,4,yes
+mysteriouscooperator,,MYSTERIOUSCOOPERATOR,4,4,8,0,4,yes
+solutionresident73,,SOLUTIONRESIDENT73,4,5,9,0,4,yes
+gurfurlur,1046643,Gurfurlur,27,4,31,0,3,yes
+ironmask,,IRONMASK,26,3,29,0,3,yes
+gatetownmiddleage,,GATETOWNMIDDLEAGE,5,3,8,0,3,yes
+hoobigobakooljajaminionsb,,HOOBIGOBAKOOLJAJAMINIONSB,5,3,8,0,3,yes
+alchemistofthegreatworkb,,ALCHEMISTOFTHEGREATWORKB,4,3,7,0,3,yes
+katanasoldier,,KATANASOLDIER,4,3,7,0,3,yes
+oldtitania,,OLDTITANIA,4,3,7,0,3,yes
+oronirman,,ORONIRMAN,4,3,7,0,3,yes
+soldierb,,SOLDIERB,3,3,6,0,3,yes
+halric,1028127,Halric,2,4,6,0,3,yes
+oschon,1045943,Oschon,2,3,5,0,3,yes
+resistancewarrior,,RESISTANCEWARRIOR,2,3,5,0,3,yes
+crystariumgardpicket,,CRYSTARIUMGARDPICKET,1,3,4,0,3,yes
+dotharlwoman,,DOTHARLWOMAN,1,3,4,0,3,yes
+garleanleaderd,,GARLEANLEADERD,1,3,4,0,3,yes
+garleansoldier10320,,GARLEANSOLDIER10320,1,3,4,0,3,yes
+quintus,1038048,Quintus,42,2,44,0,2,yes
+vorporlor,1046860,Vorporlor,40,2,42,0,2,yes
+dummyardbert,,DUMMYARDBERT,21,2,23,0,2,yes
+azdaja,1043638,Azdaja,20,2,22,0,2,yes
+virasoldier,,VIRASOLDIER,15,2,17,0,2,yes
+citizena02240,,CITIZENA02240,4,2,6,0,2,yes
+citizenb02240,,CITIZENB02240,4,2,6,0,2,yes
+maelstromofficer,1010220,Maelstrom officer,4,2,6,0,2,yes
+dirtyman,,DIRTYMAN,3,2,5,0,2,yes
+revolutionary2,1036275,Revolutionary commander,3,2,5,0,2,yes
+crystalbrave02400,1001881,Crystal Brave,2,2,4,0,2,yes
+eulmoremanb,,EULMOREMANB,2,2,4,0,2,yes
+soldiera,,SOLDIERA,2,2,4,0,2,yes
+biggswedge,,BIGGSWEDGE,1,2,3,0,2,yes
+grinnaux,1011898,Grinnaux,1,2,3,0,2,yes
+ysayle,1011637,Ysayle,1,2,3,0,2,yes
+urianger,1003784,Urianger,639,1612,2251,1610,1,yes
+thancred,1003781,Thancred,638,1555,2193,1553,1,yes
+estinien,1007115,Estinien,535,808,1343,806,1,yes
+grahatia,1005517,G'raha Tia,518,1545,2063,1544,1,yes
+raubahn,1003786,Raubahn,333,550,883,549,1,yes
+aymeric,1008194,Aymeric,320,485,805,484,1,yes
+fandaniel,1033586,Fandaniel,86,1,87,0,1,yes
+soluszosgalvus,1026218,Solus zos Galvus,42,1,43,0,1,yes
+endsinger,,ENDSINGER,20,1,21,0,1,yes
+puppeteervoidcent,,PUPPETEERVOIDCENT,15,1,16,0,1,yes
+peddlerofnorvrandt,,PEDDLEROFNORVRANDT,11,1,12,0,1,yes
+charibert,1011899,Charibert,9,1,10,0,1,yes
+sekishintaisoldier,,SEKISHINTAISOLDIER,7,1,8,0,1,yes
+alchemistofthegreatworkc,,ALCHEMISTOFTHEGREATWORKC,5,1,6,0,1,yes
+ancientshadowa,,ANCIENTSHADOWA,5,1,6,0,1,yes
+housefortempssteward,1012377,House Fortemps steward,5,1,6,0,1,yes
+all,1043978,All Saints' Wake crier,3,1,4,0,1,yes
+gnathpriest,1012649,Gnath priest,3,1,4,0,1,yes
+hannishman04735b,,HANNISHMAN04735B,3,1,4,0,1,yes
+eulmoremana,,EULMOREMANA,2,1,3,0,1,yes
+haambortman,,HAAMBORTMAN,2,1,3,0,1,yes
+hannishman04735a,,HANNISHMAN04735A,2,1,3,0,1,yes
+resistancefighter,1021654,Resistance fighter,1,1,2,0,1,yes
+spyvoidsent,,SPYVOIDSENT,1,1,2,0,1,yes
+templeknight02400,1013467,Temple Knight,1,1,2,0,1,yes
+wickedthunder,1049763,Wicked Thunder,1,1,2,0,1,yes
+alphinaud,1003053,Alphinaud,1616,4323,5939,4317,0,yes
+yshtola,1003782,Y'shtola,1240,2094,3334,2089,0,yes
+alisaie,1003054,Alisaie,1150,2727,3877,2722,0,yes
+wuklamat,1046501,Wuk Lamat,1068,2079,3147,2068,0,yes
+krile,1012813,Krile,773,2043,2816,2043,0,yes
+emetselch,1028112,Emet-Selch,533,213,746,213,0,yes
+mysteriousperson,1030939,mysterious person,459,403,862,402,0,yes
+erenville,1036997,Erenville,375,836,1211,835,0,yes
+lyse,1018327,Lyse,347,814,1161,813,0,yes
+hien,1019544,Hien,326,663,989,663,0,yes
+warriorofdarkness,1013810,Warrior of Darkness,288,49,337,49,0,yes
+minfilia,1003783,Minfilia,259,824,1083,823,0,yes
+sphene,1047396,Sphene,255,165,420,165,0,yes
+hythlodaeus,1029257,Hythlodaeus,246,162,408,162,0,yes
+calyx,1052412,Calyx,171,0,171,0,0,yes
+amon,1040679,Amon,144,0,144,0,0,yes
+hydaelyn,1003070,Hydaelyn,137,0,137,0,0,yes
+vauthry,1028122,Vauthry,81,0,81,0,0,yes
+thordan,,THORDAN,73,0,73,0,0,yes
+halmarut,1054229,Halmarut,68,0,68,0,0,yes
+miayli,1054226,Miayli,62,0,62,0,0,yes
+newsphene,,NEWSPHENE,44,0,44,0,0,yes
+nabriales,1004763,Nabriales,37,0,37,0,0,yes
+teeshalja,1051780,Teeshal Ja,33,0,33,0,0,yes
+lysenarration,,LYSENARRATION,28,0,28,0,0,yes
+zodiark,1038057,Zodiark,24,0,24,0,0,yes
+durante,1045149,Durante,23,0,23,0,0,yes
+nidhogg,1012105,Nidhogg,23,0,23,0,0,yes
+ramuh,1005162,Ramuh,22,1,23,0,0,yes
+eulmoreadjutant,,EULMOREADJUTANT,19,0,19,0,0,yes
+immigrationcontrolstaff,,IMMIGRATIONCONTROLSTAFF,19,0,19,0,0,yes
+regula,1011863,Regula van Hydrus,18,0,18,0,0,yes
+announcer,,ANNOUNCER,17,0,17,0,0,yes
+eaa,,EAA,17,0,17,0,0,yes
+igeyohrm,,IGEYOHRM,16,0,16,0,0,yes
+galene,1039480,Galene,15,0,15,0,0,yes
+hhetsarroman,,HHETSARROMAN,15,0,15,0,0,yes
+masterstigmaone,,MASTERSTIGMAONE,15,0,15,0,0,yes
+ravana,1012902,Ravana,15,0,15,0,0,yes
+zephirin,1011892,Zephirin,15,0,15,0,0,yes
+eab,,EAB,13,0,13,0,0,yes
+tireddragon,,TIREDDRAGON,13,0,13,0,0,yes
+wuur,,WUUR,13,0,13,0,0,yes
+jifuya,1024651,Jifuya,12,0,12,0,0,yes
+susano,,SUSANO,12,0,12,0,0,yes
+botanistman,,BOTANISTMAN,11,0,11,0,0,yes
+asahifather,,ASAHIFATHER,10,0,10,0,0,yes
+irritation05306,,IRRITATION05306,10,0,10,0,0,yes
+sylvetrel,1013211,Sylvetrel de Dzemael,10,0,10,0,0,yes
+alamhigancitizena,,ALAMHIGANCITIZENA,9,0,9,0,0,yes
+galuf,1026520,Galuf Baldesion,9,0,9,0,0,yes
+koujintaicho,,KOUJINTAICHO,9,0,9,0,0,yes
+ladyinwaiting2,1004706,lady-in-waiting,9,0,9,0,0,yes
+preservationwoman73,,PRESERVATIONWOMAN73,9,0,9,0,0,yes
+readerofondo,,READEROFONDO,9,0,9,0,0,yes
+yesterlandtroupe,,YESTERLANDTROUPE,9,0,9,0,0,yes
+alexandriaboy71,,ALEXANDRIABOY71,8,0,8,0,0,yes
+curtis,1019693,Curtis,8,0,8,0,0,yes
+haldrath,1011864,Haldrath,8,0,8,0,0,yes
+hannisholdwomana,,HANNISHOLDWOMANA,8,0,8,0,0,yes
+lakshmi,1019563,Lakshmi,8,0,8,0,0,yes
+naahe,1050389,Naahe,8,0,8,0,0,yes
+amaljaachieftain,,AMALJAACHIEFTAIN,7,0,7,0,0,yes
+garleanleadera,,GARLEANLEADERA,7,0,7,0,0,yes
+garleanofficer,,GARLEANOFFICER,7,0,7,0,0,yes
+oldeulmoremayor,,OLDEULMOREMAYOR,7,0,7,0,0,yes
+oldwoman02236,,OLDWOMAN02236,7,0,7,0,0,yes
+palakaswomanb,,PALAKASWOMANB,7,0,7,0,0,yes
+tonawaatauqmaleauda,,TONAWAATAUQMALEAUDA,7,0,7,0,0,yes
+trialofficiant,,TRIALOFFICIANT,7,0,7,0,0,yes
+alamhigancitizen1,,ALAMHIGANCITIZEN1,6,0,6,0,0,yes
+alexandriaman71a,,ALEXANDRIAMAN71A,6,0,6,0,0,yes
+ancientsa,,ANCIENTSA,6,0,6,0,0,yes
+bewilderment05306,,BEWILDERMENT05306,6,0,6,0,0,yes
+calmness05306,,CALMNESS05306,6,0,6,0,0,yes
+cefca,,CEFCA,6,0,6,0,0,yes
+drusus,1018231,Drusus mal Soranus,6,0,6,0,0,yes
+fordolamother,,FORDOLAMOTHER,6,0,6,0,0,yes
+g3f1imperialcenturion,,G3F1IMPERIALCENTURION,6,0,6,0,0,yes
+hoobigomalesoldier,,HOOBIGOMALESOLDIER,6,0,6,0,0,yes
+mesoterminal,,MESOTERMINAL,6,0,6,0,0,yes
+mysteriousvoice,,MYSTERIOUSVOICE,6,0,6,0,0,yes
+palakasman,,PALAKASMAN,6,0,6,0,0,yes
+palakaswomana,,PALAKASWOMANA,6,0,6,0,0,yes
+requestedlegislator,,REQUESTEDLEGISLATOR,6,0,6,0,0,yes
+sahaginpriest,1007095,Sahagin priest,6,0,6,0,0,yes
+skullsoldiera,,SKULLSOLDIERA,6,0,6,0,0,yes
+zeromus,1045151,Zeromus,6,0,6,0,0,yes
+alexandriamother71,,ALEXANDRIAMOTHER71,5,0,5,0,0,yes
+asahimother,,ASAHIMOTHER,5,0,5,0,0,yes
+crystariumgardyoung,,CRYSTARIUMGARDYOUNG,5,0,5,0,0,yes
+enuo,1058622,Enuo,5,0,5,0,0,yes
+eulmoresoldiera,,EULMORESOLDIERA,5,0,5,0,0,yes
+fordolafather,,FORDOLAFATHER,5,0,5,0,0,yes
+garleanleaderb,,GARLEANLEADERB,5,0,5,0,0,yes
+hannishboya,,HANNISHBOYA,5,0,5,0,0,yes
+kairos,,KAIROS,5,0,5,0,0,yes
+palakasoldman,,PALAKASOLDMAN,5,0,5,0,0,yes
+panicfisherman10720,,PANICFISHERMAN10720,5,0,5,0,0,yes
+peopleofnighta,,PEOPLEOFNIGHTA,5,0,5,0,0,yes
+resistance,1020573,Resistance guard,5,0,5,0,0,yes
+woundedoldman,,WOUNDEDOLDMAN,5,0,5,0,0,yes
+xbalaalmalevillager,,XBALAALMALEVILLAGER,5,0,5,0,0,yes
+alamhigancitizenb,,ALAMHIGANCITIZENB,4,0,4,0,0,yes
+ancientmemoryb,,ANCIENTMEMORYB,4,0,4,0,0,yes
+ancientsb,,ANCIENTSB,4,0,4,0,0,yes
+ancientshadowc,,ANCIENTSHADOWC,4,0,4,0,0,yes
+bardofdarkness,,BARDOFDARKNESS,4,0,4,0,0,yes
+blackregulator73,,BLACKREGULATOR73,4,0,4,0,0,yes
+bloodyexecutionera,,BLOODYEXECUTIONERA,4,0,4,0,0,yes
+brassblade02400,1002952,Brass Blade,4,0,4,0,0,yes
+doprobakooljajaminions,,DOPROBAKOOLJAJAMINIONS,4,0,4,0,0,yes
+e3f1villager,,E3F1VILLAGER,4,0,4,0,0,yes
+e3f2garleansoldier,,E3F2GARLEANSOLDIER,4,0,4,0,0,yes
+e3f2villagerb,,E3F2VILLAGERB,4,0,4,0,0,yes
+e3f2villagerc,,E3F2VILLAGERC,4,0,4,0,0,yes
+e3f2villagerd,,E3F2VILLAGERD,4,0,4,0,0,yes
+eulmoresoldierb,,EULMORESOLDIERB,4,0,4,0,0,yes
+everlastingdarkness,,EVERLASTINGDARKNESS,4,0,4,0,0,yes
+flavien,1013212,Flavien de Fortemps,4,0,4,0,0,yes
+g3f2villager,,G3F2VILLAGER,4,0,4,0,0,yes
+hannishmanb,,HANNISHMANB,4,0,4,0,0,yes
+hanuhanumaleauda,,HANUHANUMALEAUDA,4,0,4,0,0,yes
+hoobigomalevillager,,HOOBIGOMALEVILLAGER,4,0,4,0,0,yes
+ixalichieftain,1004700,Ixali chieftain,4,0,4,0,0,yes
+kanilokka,1051781,Kanilokka,4,0,4,0,0,yes
+lastwoman71,,LASTWOMAN71,4,0,4,0,0,yes
+messenger02341,1013358,messenger knight,4,0,4,0,0,yes
+pelupelumaleauda,,PELUPELUMALEAUDA,4,0,4,0,0,yes
+referee,,REFEREE,4,0,4,0,0,yes
+residenttrea,,RESIDENTTREA,4,0,4,0,0,yes
+roegadyngladiator,1024003,Roegadyn gladiator,4,0,4,0,0,yes
+soldiera02354,,SOLDIERA02354,4,0,4,0,0,yes
+soldierc02354,,SOLDIERC02354,4,0,4,0,0,yes
+templerknight10810,,TEMPLERKNIGHT10810,4,0,4,0,0,yes
+tsukuyomi,1025203,Tsukuyomi,4,0,4,0,0,yes
+ultima,,ULTIMA,4,0,4,0,0,yes
+xbalaalmaleauda,,XBALAALMALEAUDA,4,0,4,0,0,yes
+yesterlandgirl,,YESTERLANDGIRL,4,0,4,0,0,yes
+alamhigancitizen2,,ALAMHIGANCITIZEN2,3,0,3,0,0,yes
+alexandriaman71b,,ALEXANDRIAMAN71B,3,0,3,0,0,yes
+alexandriasoldier,,ALEXANDRIASOLDIER,3,0,3,0,0,yes
+alexandriawoman71b,,ALEXANDRIAWOMAN71B,3,0,3,0,0,yes
+algus,,ALGUS,3,0,3,0,0,yes
+allagman,,ALLAGMAN,3,0,3,0,0,yes
+amaljaawarrior,1004610,Amalj'aa warrior,3,0,3,0,0,yes
+ancientmemorya,,ANCIENTMEMORYA,3,0,3,0,0,yes
+ancientshadowb,,ANCIENTSHADOWB,3,0,3,0,0,yes
+ancientshadowd,,ANCIENTSHADOWD,3,0,3,0,0,yes
+ascianprime,1012893,Ascian prime,3,0,3,0,0,yes
+bloodyexecutionerb,,BLOODYEXECUTIONERB,3,0,3,0,0,yes
+bloodyexecutionerc,,BLOODYEXECUTIONERC,3,0,3,0,0,yes
+citizenc02240,,CITIZENC02240,3,0,3,0,0,yes
+confusion05306,,CONFUSION05306,3,0,3,0,0,yes
+crystariumman,1028162,Crystarium man,3,0,3,0,0,yes
+dotharlman,,DOTHARLMAN,3,0,3,0,0,yes
+e3f2garleanmessenger,,E3F2GARLEANMESSENGER,3,0,3,0,0,yes
+e3f2villagera,,E3F2VILLAGERA,3,0,3,0,0,yes
+ecaate,1050390,Ecaate,3,0,3,0,0,yes
+eden3boss4,,EDEN3BOSS4,3,0,3,0,0,yes
+employeewoman,,EMPLOYEEWOMAN,3,0,3,0,0,yes
+eulmorepeopled,,EULMOREPEOPLED,3,0,3,0,0,yes
+eulmoresoldierc,,EULMORESOLDIERC,3,0,3,0,0,yes
+facilitatormale,,FACILITATORMALE,3,0,3,0,0,yes
+fakegodbeast,,FAKEGODBEAST,3,0,3,0,0,yes
+flamessoldier,,FLAMESSOLDIER,3,0,3,0,0,yes
+garleanleaderc,,GARLEANLEADERC,3,0,3,0,0,yes
+giantcolibri,1045160,giant colibri,3,0,3,0,0,yes
+hannishmana,,HANNISHMANA,3,0,3,0,0,yes
+hannisholdwomanb,,HANNISHOLDWOMANB,3,0,3,0,0,yes
+hhusatahwimalea,,HHUSATAHWIMALEA,3,0,3,0,0,yes
+hoobigofemaleaud,,HOOBIGOFEMALEAUD,3,0,3,0,0,yes
+imperialengineer,,IMPERIALENGINEER,3,0,3,0,0,yes
+ironworksengineer04500,1013080,Ironworks engineer,3,0,3,0,0,yes
+ishgardianpriest,1012386,Ishgardian priest,3,0,3,0,0,yes
+memoriamastera10430,,MEMORIAMASTERA10430,3,0,3,0,0,yes
+memoriamasterb10430,,MEMORIAMASTERB10430,3,0,3,0,0,yes
+mysteriouslady,,MYSTERIOUSLADY,3,0,3,0,0,yes
+nextheroboy,,NEXTHEROBOY,3,0,3,0,0,yes
+paladinofdarkness,,PALADINOFDARKNESS,3,0,3,0,0,yes
+panickedfighter,,PANICKEDFIGHTER,3,0,3,0,0,yes
+passer02356,,PASSER02356,3,0,3,0,0,yes
+preservationman73,,PRESERVATIONMAN73,3,0,3,0,0,yes
+propylaionstaff,,PROPYLAIONSTAFF,3,0,3,0,0,yes
+refugeeman,,REFUGEEMAN,3,0,3,0,0,yes
+residentboy05300,,RESIDENTBOY05300,3,0,3,0,0,yes
+salvagecrewa,,SALVAGECREWA,3,0,3,0,0,yes
+shetonafemaleaud,,SHETONAFEMALEAUD,3,0,3,0,0,yes
+someoneoffuatha,,SOMEONEOFFUATHA,3,0,3,0,0,yes
+someoneoffuathb,,SOMEONEOFFUATHB,3,0,3,0,0,yes
+someoneoffuathc,,SOMEONEOFFUATHC,3,0,3,0,0,yes
+trainsystem,,TRAINSYSTEM,3,0,3,0,0,yes
+traitorb02236,,TRAITORB02236,3,0,3,0,0,yes
+tuliyollalsoldierc,,TULIYOLLALSOLDIERC,3,0,3,0,0,yes
+voiceguide,,VOICEGUIDE,3,0,3,0,0,yes
+voidsent04735,,VOIDSENT04735,3,0,3,0,0,yes
+voidsent10410,,VOIDSENT10410,3,0,3,0,0,yes
+whitemageofdarkness,,WHITEMAGEOFDARKNESS,3,0,3,0,0,yes
+xbalaalmaleaudb,,XBALAALMALEAUDB,3,0,3,0,0,yes
+xbalaalmalesoldier,,XBALAALMALESOLDIER,3,0,3,0,0,yes
+yesterlandboy,,YESTERLANDBOY,3,0,3,0,0,yes
+zelenia,,ZELENIA,3,0,3,0,0,yes
+abel,,ABEL,2,0,2,0,0,yes
+alamhigancitizen3,,ALAMHIGANCITIZEN3,2,0,2,0,0,yes
+alamhigogarleanofficer,,ALAMHIGOGARLEANOFFICER,2,0,2,0,0,yes
+alexandriawoman71a,,ALEXANDRIAWOMAN71A,2,0,2,0,0,yes
+ancientshadowe,,ANCIENTSHADOWE,2,0,2,0,0,yes
+bazaarmoba,,BAZAARMOBA,2,0,2,0,0,yes
+blackmageofdarkness,,BLACKMAGEOFDARKNESS,2,0,2,0,0,yes
+boonewafemaleaud,,BOONEWAFEMALEAUD,2,0,2,0,0,yes
+boy05426,1041390,boy thief,2,0,2,0,0,yes
+brawnyknight,1013210,brawny knight,2,0,2,0,0,yes
+canaltowngirl,,CANALTOWNGIRL,2,0,2,0,0,yes
+cavalry02400,1005797,cavalry drake,2,0,2,0,0,yes
+cavalry02236,1005797,cavalry drake,2,0,2,0,0,yes
+crystariumwoman,1028163,Crystarium woman,2,0,2,0,0,yes
+crystariumcitizenc,,CRYSTARIUMCITIZENC,2,0,2,0,0,yes
+crystariumcitizend,,CRYSTARIUMCITIZEND,2,0,2,0,0,yes
+crystariumgardold,,CRYSTARIUMGARDOLD,2,0,2,0,0,yes
+crystariumgatekeeper,,CRYSTARIUMGATEKEEPER,2,0,2,0,0,yes
+crystariumoldman,,CRYSTARIUMOLDMAN,2,0,2,0,0,yes
+domanmaid,,DOMANMAID,2,0,2,0,0,yes
+e3f2villagere,,E3F2VILLAGERE,2,0,2,0,0,yes
+e3f2villagerf,,E3F2VILLAGERF,2,0,2,0,0,yes
+employeeman,,EMPLOYEEMAN,2,0,2,0,0,yes
+eulmorepeopleb,,EULMOREPEOPLEB,2,0,2,0,0,yes
+eulmorepeoplec,,EULMOREPEOPLEC,2,0,2,0,0,yes
+femaleheretic,,FEMALEHERETIC,2,0,2,0,0,yes
+followerofteledji,,FOLLOWEROFTELEDJI,2,0,2,0,0,yes
+garleangeneral,,GARLEANGENERAL,2,0,2,0,0,yes
+garleanharpooner,,GARLEANHARPOONER,2,0,2,0,0,yes
+garleansoldier10410,,GARLEANSOLDIER10410,2,0,2,0,0,yes
+gatetownman,,GATETOWNMAN,2,0,2,0,0,yes
+gatetownwoman,,GATETOWNWOMAN,2,0,2,0,0,yes
+hannishwomana,,HANNISHWOMANA,2,0,2,0,0,yes
+hhusatahwiauda,,HHUSATAHWIAUDA,2,0,2,0,0,yes
+hhusatahwiaudsb,,HHUSATAHWIAUDSB,2,0,2,0,0,yes
+hhusatahwimaleb,,HHUSATAHWIMALEB,2,0,2,0,0,yes
+igeyorhm,1004762,Igeyorhm,2,0,2,0,0,yes
+imperialsoldier04505,1005068,imperial soldier,2,0,2,0,0,yes
+legislatora,,LEGISLATORA,2,0,2,0,0,yes
+linercrew,,LINERCREW,2,0,2,0,0,yes
+maleheretic,,MALEHERETIC,2,0,2,0,0,yes
+mordmerchanta,,MORDMERCHANTA,2,0,2,0,0,yes
+mordmerchantb,,MORDMERCHANTB,2,0,2,0,0,yes
+mordmerchantc,,MORDMERCHANTC,2,0,2,0,0,yes
+nanamosteward,,NANAMOSTEWARD,2,0,2,0,0,yes
+nokken,,NOKKEN,2,0,2,0,0,yes
+officeclerk,,OFFICECLERK,2,0,2,0,0,yes
+pandaemonium,,PANDAEMONIUM,2,0,2,0,0,yes
+queenactor,,QUEENACTOR,2,0,2,0,0,yes
+residentman05300,,RESIDENTMAN05300,2,0,2,0,0,yes
+resistancehealer,1026216,Resistance healer,2,0,2,0,0,yes
+rhetkympf,1003540,Rhetkympf,2,0,2,0,0,yes
+sailorpanicvoicea,,SAILORPANICVOICEA,2,0,2,0,0,yes
+sailorpanicvoicec,,SAILORPANICVOICEC,2,0,2,0,0,yes
+salvagecrewb,,SALVAGECREWB,2,0,2,0,0,yes
+sharlayancitizena,,SHARLAYANCITIZENA,2,0,2,0,0,yes
+skullsoldierc,,SKULLSOLDIERC,2,0,2,0,0,yes
+soldierb02354,,SOLDIERB02354,2,0,2,0,0,yes
+someoneoffuathd,,SOMEONEOFFUATHD,2,0,2,0,0,yes
+timid05306,1029405,timid townsdwarf,2,0,2,0,0,yes
+traitorc02236,,TRAITORC02236,2,0,2,0,0,yes
+trepidation05306,,TREPIDATION05306,2,0,2,0,0,yes
+tuliyollalsoldierd,,TULIYOLLALSOLDIERD,2,0,2,0,0,yes
+turmoil05306,,TURMOIL05306,2,0,2,0,0,yes
+uldahndelegation,,ULDAHNDELEGATION,2,0,2,0,0,yes
+unsettledresearcher,,UNSETTLEDRESEARCHER,2,0,2,0,0,yes
+valigarmanda,1049670,Valigarmanda,2,0,2,0,0,yes
+vigilantemalea,,VIGILANTEMALEA,2,0,2,0,0,yes
+villagevoidsentb,,VILLAGEVOIDSENTB,2,0,2,0,0,yes
+villagevoidsentc,,VILLAGEVOIDSENTC,2,0,2,0,0,yes
+villagevoidsentd,,VILLAGEVOIDSENTD,2,0,2,0,0,yes
+voidperson04735,,VOIDPERSON04735,2,0,2,0,0,yes
+warrioroflightavatars,,WARRIOROFLIGHTAVATARS,2,0,2,0,0,yes
+alamhigancitizenc,,ALAMHIGANCITIZENC,1,0,1,0,0,yes
+alamhiganliberatora,,ALAMHIGANLIBERATORA,1,0,1,0,0,yes
+alamhiganliberatorb,,ALAMHIGANLIBERATORB,1,0,1,0,0,yes
+alphinaudandalisaie,,ALPHINAUDANDALISAIE,1,0,1,0,0,yes
+anxiety05306,,ANXIETY05306,1,0,1,0,0,yes
+ascian,1007019,Ascian of the Twelfth Staff,1,0,1,0,0,yes
+bazaarmobb,,BAZAARMOBB,1,0,1,0,0,yes
+bazaarmobc,,BAZAARMOBC,1,0,1,0,0,yes
+canaltownmale,,CANALTOWNMALE,1,0,1,0,0,yes
+crystariumcitizena,,CRYSTARIUMCITIZENA,1,0,1,0,0,yes
+crystariumcitizenb,,CRYSTARIUMCITIZENB,1,0,1,0,0,yes
+crystariumgirl,,CRYSTARIUMGIRL,1,0,1,0,0,yes
+darknokken,,DARKNOKKEN,1,0,1,0,0,yes
+dopromalecustomer,,DOPROMALECUSTOMER,1,0,1,0,0,yes
+e3f1garleansoldier,,E3F1GARLEANSOLDIER,1,0,1,0,0,yes
+ealdnarche,,EALDNARCHE,1,0,1,0,0,yes
+eden3boss3,,EDEN3BOSS3,1,0,1,0,0,yes
+eden3boss5,,EDEN3BOSS5,1,0,1,0,0,yes
+eulmoransoldier,1028355,Eulmoran soldier,1,0,1,0,0,yes
+eulmorepeoplea,,EULMOREPEOPLEA,1,0,1,0,0,yes
+fearfulcitizen,1032564,fearful citizen,1,0,1,0,0,yes
+fearfulcitizena,,FEARFULCITIZENA,1,0,1,0,0,yes
+fearfulcitizenb,,FEARFULCITIZENB,1,0,1,0,0,yes
+girl05426,1038845,girl in green,1,0,1,0,0,yes
+gridaniandelegation,,GRIDANIANDELEGATION,1,0,1,0,0,yes
+guard02500,1031145,guard quartermaster,1,0,1,0,0,yes
+hanuhanubearera,,HANUHANUBEARERA,1,0,1,0,0,yes
+hanuhanubearerb,,HANUHANUBEARERB,1,0,1,0,0,yes
+hanuhanubearerc,,HANUHANUBEARERC,1,0,1,0,0,yes
+hanuhanubearerd,,HANUHANUBEARERD,1,0,1,0,0,yes
+hhusatahwifemalea,,HHUSATAHWIFEMALEA,1,0,1,0,0,yes
+hhusatahwifemaleb,,HHUSATAHWIFEMALEB,1,0,1,0,0,yes
+highlandergladiator,1024002,Highlander gladiator,1,0,1,0,0,yes
+hungarygarlean10320,,HUNGARYGARLEAN10320,1,0,1,0,0,yes
+imperialdoctor,,IMPERIALDOCTOR,1,0,1,0,0,yes
+journeysheadpatient,,JOURNEYSHEADPATIENT,1,0,1,0,0,yes
+ketonye,1049687,Ketonye,1,0,1,0,0,yes
+kidnappedpirate,,KIDNAPPEDPIRATE,1,0,1,0,0,yes
+kojinsoldier,,KOJINSOLDIER,1,0,1,0,0,yes
+legislatorb,,LEGISLATORB,1,0,1,0,0,yes
+mehvan,1039051,Mehvan,1,0,1,0,0,yes
+memory,,MEMORY,1,0,1,0,0,yes
+nabaatharengpeoplea,,NABAATHARENGPEOPLEA,1,0,1,0,0,yes
+nabaatharengpeopleb,,NABAATHARENGPEOPLEB,1,0,1,0,0,yes
+nabaatharengpeoplec,,NABAATHARENGPEOPLEC,1,0,1,0,0,yes
+nabaatharengpeopled,,NABAATHARENGPEOPLED,1,0,1,0,0,yes
+oblivionwoman73,,OBLIVIONWOMAN73,1,0,1,0,0,yes
+outskirtscaregivera,,OUTSKIRTSCAREGIVERA,1,0,1,0,0,yes
+outskirtscaregiverb,,OUTSKIRTSCAREGIVERB,1,0,1,0,0,yes
+outskirtsfarmera,,OUTSKIRTSFARMERA,1,0,1,0,0,yes
+outskirtsfarmerb,,OUTSKIRTSFARMERB,1,0,1,0,0,yes
+pakwene,1049684,Pakwene,1,0,1,0,0,yes
+peopleofnightb,,PEOPLEOFNIGHTB,1,0,1,0,0,yes
+puppetman,,PUPPETMAN,1,0,1,0,0,yes
+raubahnmerlwybkanesenna,,RAUBAHNMERLWYBKANESENNA,1,0,1,0,0,yes
+residenttreb,,RESIDENTTREB,1,0,1,0,0,yes
+residenttrec,,RESIDENTTREC,1,0,1,0,0,yes
+resolutesoldier,,RESOLUTESOLDIER,1,0,1,0,0,yes
+restlessgarlean10320,,RESTLESSGARLEAN10320,1,0,1,0,0,yes
+sailorpanicvoiceb,,SAILORPANICVOICEB,1,0,1,0,0,yes
+serpentssoldier,,SERPENTSSOLDIER,1,0,1,0,0,yes
+shaaloanipassenger,,SHAALOANIPASSENGER,1,0,1,0,0,yes
+shadowlord,,SHADOWLORD,1,0,1,0,0,yes
+sharlayancitizenb,,SHARLAYANCITIZENB,1,0,1,0,0,yes
+shetonamaleaud,,SHETONAMALEAUD,1,0,1,0,0,yes
+shiva,1011901,Shiva,1,0,1,0,0,yes
+skullsoldierb,,SKULLSOLDIERB,1,0,1,0,0,yes
+someoneofnumoua,,SOMEONEOFNUMOUA,1,0,1,0,0,yes
+someoneofnumoub,,SOMEONEOFNUMOUB,1,0,1,0,0,yes
+souleater,,SOULEATER,1,1,2,0,0,yes
+templeknight2,1013467,Temple Knight,1,0,1,0,0,yes
+tonawaatauqmaleaudb,,TONAWAATAUQMALEAUDB,1,0,1,0,0,yes
+tuliyollalchild,,TULIYOLLALCHILD,1,0,1,0,0,yes
+tuliyollalfemale,,TULIYOLLALFEMALE,1,0,1,0,0,yes
+tuliyollalmale,,TULIYOLLALMALE,1,0,1,0,0,yes
+tuliyollalsoldiera,,TULIYOLLALSOLDIERA,1,0,1,0,0,yes
+tuliyollalsoldierb,,TULIYOLLALSOLDIERB,1,0,1,0,0,yes
+villagevoidsenta,,VILLAGEVOIDSENTA,1,0,1,0,0,yes
+voidsenta,,VOIDSENTA,1,0,1,0,0,yes
+voidsentb,,VOIDSENTB,1,0,1,0,0,yes
+voidsentc,,VOIDSENTC,1,0,1,0,0,yes
+voidsentd,,VOIDSENTD,1,0,1,0,0,yes
+waiterofthelaststand,,WAITEROFTHELASTSTAND,1,0,1,0,0,yes
+woundedimperial,1022026,wounded imperial,1,0,1,0,0,yes
+xbalaalmalecustomer,,XBALAALMALECUSTOMER,1,0,1,0,0,yes
+youngtempleknight,,YOUNGTEMPLEKNIGHT,1,0,1,0,0,yes

@@ -60,6 +60,9 @@ internal static class Program
         if (args.Length > 0 && args[0].Equals("export", StringComparison.OrdinalIgnoreCase))
             return ExportCommand.Run(args[1..]);
 
+        if (args.Length > 0 && args[0].Equals("migrate", StringComparison.OrdinalIgnoreCase))
+            return MigrateCommand.Run(args[1..]);
+
         if (args.Length > 0 && args[0].Equals("pin", StringComparison.OrdinalIgnoreCase))
         {
             Console.WriteLine(Sanitizer.Pin);
@@ -310,9 +313,11 @@ internal static class Program
               --extract writes SCD/WAV for cutscene rows that have game audio.
               The DB is the source of truth; dialogue.csv is cutscene-only.
 
+            Commands: harvest (default), export, migrate, pin
             Tables/views:
               dialogs, dialog_speakers, speakers, harvest_runs
-              v_generation_queue, v_speaker_workload, v_pack_npcs, v_integrity
+              v_generation_queue, v_generation_candidates, v_speaker_workload,
+              v_pack_npcs, v_integrity
 
             Useful next-step query:
               SELECT * FROM v_generation_queue

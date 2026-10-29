@@ -54,12 +54,13 @@ OhMyVoice/                 # Dalamud plugin (net10.0-windows)
 OhMyVoice.Common/          # net10.0 shared: Sanitizer v1, VoiceId, PackTypes
 compose.yaml               # batch generator: tts-qwen
 compose.xvector.yaml       # average x-vectors: xvector
-voice.sh                   # generate/resume one or more speakers' queued lines
+voice.sh                   # generate/resume speakers, queue-driven (no args = all)
 scripts/
   sample.sh                # one-off prompt sample into data/samples/
   check-refs.sh            # repo guard: no voice audio/embeddings in git
 tools/
   qwen/                    # Qwen3-TTS generator, linker, pronoun-pack migrator
+  roster.py                # per-speaker workload from dialogue.db (run order, CSV)
   voice-map.json           # NPC -> xvector name
   xivdata/                 # offline dialogue DB + cutscene SCD extractor
   xvector/                 # average speaker embedding builder
@@ -70,6 +71,7 @@ docs/
   QWEN3-TTS.md             # Qwen integration, quality, measurements
   VOICES.md                # voice roster: counts, metadata, caveats
   voices.csv               # one row per speaker label, metadata only
+  workload.csv             # generation progress per speaker (from dialogue.db)
   assets/                  # README logo and diagrams
 vendors/                   # gitignored reference checkouts, never built
 ```
@@ -101,11 +103,14 @@ automatic CI workflow. Run the checks locally:
 ```bash
 bash scripts/check-refs.sh
 python3 -m unittest discover -s tools/qwen
+python3 -m unittest tools/test_roster.py   # queue views; skipped without dotnet
 dotnet build --configuration Release
 ```
 
 `check-refs.sh` rejects tracked reference paths, audio/embedding blobs, and any
-tracked file over 2 MiB. There is no .NET test project.
+tracked file over 2 MiB. There is no .NET test project; `test_roster.py` runs
+`xivdata migrate` against a throwaway DB so the resume views are tested from
+the real SQL.
 
 Verify plugin changes with the playtest above; verify script and compose
 changes with the affected service or test module.

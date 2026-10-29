@@ -180,3 +180,34 @@ aliases (`thordan`, `iceheart`) and generic labels (`mysteryvoice`, 602 lines).
 
 Regenerate the source scan with `tools/xivdata` (see its README); this roster
 is derived from `dialogue.csv` and goes stale when the game updates.
+
+## Generation workload
+
+`voices.csv` answers "how much did the game voice". [`workload.csv`](workload.csv)
+answers "how much is left to generate", read from `data/dialogue.db`:
+
+| Column | Meaning |
+|---|---|
+| `voiced` | Game-voiced cutscene lines for this voice |
+| `unvoiced` | Unvoiced dialogue rows (the casting target) |
+| `total` | `voiced + unvoiced` |
+| `generated` | Lines with a rendered root in the pack (`audio_status='generated'`) |
+| `remaining` | Distinct lines still queued (`v_generation_queue`) |
+| `xvector` | Whether `data/xvectors/<voice_id>.npy` exists |
+
+Rows are the 667 labels that have game audio, most remaining lines first.
+The file is a snapshot of the database, not live state; regenerate it with the
+command below after a batch.
+`voiced` and `unvoiced` count `dialogue.db` rows; `remaining` counts distinct
+line IDs, so the two differ slightly where a line repeats across sheets.
+
+Progress is not a file. `tools/qwen/link_audio.py` marks each finished line
+`generated` after a run, which drains `v_generation_queue`; a line whose text
+changed stays `audio_stale` and is regenerated. Re-harvesting a patch therefore
+adds new `pending` rows that `./voice.sh` (no arguments) picks up, most lines
+first, without touching what is already voiced.
+
+```bash
+python3 tools/roster.py table --out docs/workload.csv  # refresh this table
+./voice.sh -plan                                       # run order, no work
+```

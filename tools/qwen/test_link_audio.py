@@ -35,10 +35,10 @@ class LinkAudioTests(unittest.TestCase):
                         encoding="utf-8")
         return path
 
-    def run_linker(self, manifest):
+    def run_linker(self, manifest, extra=()):
         argv = [
             "link_audio.py", "--db", str(self.db), "--manifest", str(manifest),
-            "--repo-root", str(self.root),
+            "--repo-root", str(self.root), *extra,
         ]
         with mock.patch.object(sys, "argv", argv):
             self.assertEqual(self.linker.main(), 0)
@@ -142,6 +142,116 @@ class LinkAudioTests(unittest.TestCase):
         })
 
         self.assertEqual(self.run_linker(manifest), [])
+
+    def create_dialogs(self, rows):
+        connection = sqlite3.connect(self.db)
+        connection.executescript(
+            """
+            CREATE TABLE dialogs (
+              lang TEXT, voice_line_id TEXT, has_scd INTEGER, speaker_id TEXT,
+              text_kind TEXT, audio_status TEXT, audio_stale INTEGER,
+              audio_path TEXT, duration_ms INTEGER, generation_profile TEXT,
+              text_clean TEXT, updated_at TEXT
+            );
+            CREATE TABLE speakers (
+              voice_id TEXT PRIMARY KEY, generated_lines INTEGER, updated_at TEXT
+            );
+            INSERT INTO speakers VALUES ('voice', 0, 'old');
+            """)
+        connection.executemany(
+            "INSERT INTO dialogs VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, 'old')",
+            rows)
+        connection.commit()
+        connection.close()
+
+    def dialogs(self):
+        connection = sqlite3.connect(self.db)
+        try:
+            return connection.execute(
+                "SELECT voice_line_id, audio_status, audio_stale, audio_path, "
+                "duration_ms, generation_profile FROM dialogs "
+                "ORDER BY voice_line_id").fetchall()
+        finally:
+            connection.close()
+
+    def test_matching_text_is_marked_generated(self):
+        self.create_dialogs([
+            ("en", "same", 0, "voice", "dialogue", "pending", 0, "the line"),
+            ("en", "changed", 0, "voice", "dialogue", "pending", 0, "old words"),
+        ])
+        (self.pack / "same.ogg").write_bytes(b"audio")
+        (self.pack / "changed.ogg").write_bytes(b"audio")
+        manifest = self.write_manifest({
+            "same": {"Sentence": "the line", "Bytes": 5, "DurationSeconds": 2.0,
+                     "GenerationFingerprint": "fp"},
+            "changed": {"Sentence": "new words", "Bytes": 5, "DurationSeconds": 2.0,
+                        "GenerationFingerprint": "fp"},
+            "absent": {"Sentence": "not harvested", "Bytes": 5,
+                       "DurationSeconds": 2.0, "GenerationFingerprint": "fp"},
+        })
+        (self.pack / "absent.ogg").write_bytes(b"audio")
+
+        self.run_linker(manifest)
+
+        rows = self.dialogs()
+        self.assertEqual(rows[0][:4], ("changed", "pending", 0, None))
+        self.assertEqual(rows[1][:4], ("same", "generated", 0, "voicelines/same.ogg"))
+        self.assertEqual(rows[1][4:], (2000, "fp"))
+        connection = sqlite3.connect(self.db)
+        try:
+            counts = connection.execute(
+                "SELECT generated_lines FROM speakers").fetchall()
+        finally:
+            connection.close()
+        self.assertEqual(counts, [(1,)])
+
+    def test_stale_line_is_cleared_once_regenerated(self):
+        self.create_dialogs([
+            ("en", "line", 0, "voice", "dialogue", "pending", 1, "the line"),
+        ])
+        (self.pack / "line.ogg").write_bytes(b"audio")
+        manifest = self.write_manifest({
+            "line": {"Sentence": "the line", "Bytes": 5, "DurationSeconds": 2.0,
+                     "GenerationFingerprint": "fp"},
+        })
+
+        self.run_linker(manifest)
+
+        self.assertEqual(self.dialogs()[0][1:3], ("generated", 0))
+
+    def test_no_status_keeps_pending(self):
+        self.create_dialogs([
+            ("en", "line", 0, "voice", "dialogue", "pending", 0, "the line"),
+        ])
+        (self.pack / "line.ogg").write_bytes(b"audio")
+        manifest = self.write_manifest({
+            "line": {"Sentence": "the line", "Bytes": 5, "DurationSeconds": 2.0,
+                     "GenerationFingerprint": "fp"},
+        })
+
+        self.run_linker(manifest, extra=["--no-status"])
+
+        self.assertEqual(self.dialogs()[0][1], "pending")
+
+    def test_covered_and_non_dialogue_rows_are_never_marked(self):
+        self.create_dialogs([
+            ("en", "voiced", 1, "voice", "dialogue", "covered", 0, "the line"),
+            ("en", "choice", 0, "voice", "choice", "unassigned", 0, "the line"),
+        ])
+        for line_id in ("voiced", "choice"):
+            (self.pack / f"{line_id}.ogg").write_bytes(b"audio")
+        manifest = self.write_manifest({
+            "voiced": {"Sentence": "the line", "Bytes": 5, "DurationSeconds": 2.0,
+                       "GenerationFingerprint": "fp"},
+            "choice": {"Sentence": "the line", "Bytes": 5, "DurationSeconds": 2.0,
+                       "GenerationFingerprint": "fp"},
+        })
+
+        self.run_linker(manifest)
+
+        self.assertEqual([row[1] for row in self.dialogs()],
+                         ["unassigned", "covered"])
+        self.assertEqual(self.dialogs()[0][3], None)
 
 
 if __name__ == "__main__":

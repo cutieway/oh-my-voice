@@ -1,18 +1,28 @@
 #!/usr/bin/env bash
 # Generate every missing line for one or more speakers, in order, and resume safely.
 #
+#   ./voice.sh                            # resume every speaker that still has
+#                                         # queued lines, most lines first;
+#                                         # if a run is already active, resume
+#                                         # only that speaker and rerun after
+#   ./voice.sh -plan                      # show that order without starting
 #   ./voice.sh alphinaud                  # start or resume all queued lines
 #   ./voice.sh alphinaud yshtola alisaie  # generate each speaker in order
 #   ./voice.sh -pause alphinaud           # pause the running GPU process
 #   ./voice.sh -start alphinaud           # unpause, or start/resume after a stop
 #   ./voice.sh -stop alphinaud            # stop (same as Ctrl+C)
 #
+# Progress lives in dialogue.db: tools/qwen/link_audio.py marks each finished
+# line as generated after every run, so the queue view only lists what is
+# still missing - including lines a later patch adds.
+#
 # While ./voice.sh <speaker> is attached, you can also type -pause, -start,
 # and -stop in its console.
 #
 # Output defaults to data/out/<voice_id>. Set OMV_OUT to merge into another
 # pack, OMV_SANITIZER_PIN to skip the pin lookup, OMV_LIMIT=N to export only
-# the first N queued lines, or OMV_FORCE=1 to rebuild every planned line.
+# the first N queued lines, OMV_FORCE=1 to rebuild every planned line, or
+# OMV_RECHECK=1 to rebuild only lines whose generation profile changed.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -27,6 +37,8 @@ WORKLIST_DIR="$ROOT/data/worklists"
 usage() {
   cat >&2 <<'EOF'
 usage:
+  ./voice.sh                       resume every queued speaker, most lines first
+  ./voice.sh -plan                 show that order without starting anything
   ./voice.sh <speaker>...          start or resume each speaker in order
   ./voice.sh -pause <speaker>      pause the running container
   ./voice.sh -start <speaker>      unpause, or resume after a stop
@@ -49,10 +61,12 @@ command -v python3 >/dev/null 2>&1 || die "python3 not found"
 [[ -f "$DB" ]] || die "dialogue DB not found: $DB (run tools/xivdata first)"
 
 CMD=run
+PLAN_ONLY=0
 POS=()
 for arg in "$@"; do
   case "$arg" in
     -h|--help) usage; exit 0 ;;
+    -plan|--plan) PLAN_ONLY=1 ;;
     -pause|pause) CMD=pause ;;
     -start|start) CMD=start ;;
     -stop|stop) CMD=stop ;;
@@ -60,12 +74,52 @@ for arg in "$@"; do
     *) POS+=("$arg") ;;
   esac
 done
-[[ ${#POS[@]} -ge 1 ]] || { usage; exit 2; }
 if [[ "$CMD" != "run" && ${#POS[@]} -ne 1 ]]; then
   echo "error: -pause, -start, and -stop take exactly one speaker" >&2
   usage
   exit 2
 fi
+if [[ "$PLAN_ONLY" == "1" && ${#POS[@]} -gt 0 ]]; then
+  die "-plan takes no speaker; it lists every speaker that still has queued lines"
+fi
+if [[ ${#POS[@]} -eq 0 && "$CMD" == "run" ]]; then
+  running="$(docker ps --filter "name=^omv-" --format '{{.Names}}' 2>/dev/null || true)"
+  running="${running%%$'\n'*}"
+  if [[ -n "$running" ]]; then
+    speaker="${running#omv-}"
+    remaining="$(python3 "$ROOT/tools/roster.py" --db "$DB" --xvector-dir "$XVECTORS" next \
+      | awk -F'\t' -v s="$speaker" '$1 == s {print $3}')" \
+      || die "could not read the queue from $DB"
+    if [[ -n "$remaining" ]]; then
+      echo "in progress: $speaker ($remaining line(s) queued)"
+    else
+      echo "in progress: $speaker"
+    fi
+    if [[ "$PLAN_ONLY" != "1" ]]; then
+      echo "resuming in-progress run: $speaker"
+      POS=("$speaker")
+    fi
+  fi
+  if [[ ${#POS[@]} -eq 0 ]]; then
+    plan="$(python3 "$ROOT/tools/roster.py" --db "$DB" --xvector-dir "$XVECTORS" next)" || exit 1
+    if [[ -z "$plan" ]]; then
+      echo "nothing queued: every speaker with an x-vector is up to date"
+      exit 0
+    fi
+    mapfile -t POS < <(printf '%s\n' "$plan" | cut -f1)
+    plan_lines="$(printf '%s\n' "$plan" | awk -F'\t' '{s += $3} END {print s + 0}')"
+    echo "plan: ${#POS[@]} speaker(s), $plan_lines queued line(s), most first"
+    printf '%s\n' "$plan" |
+      awk -F'\t' 'NR <= 10 {printf "  %-24s %s line(s)\n", $1, $3}'
+    if (( ${#POS[@]} > 10 )); then
+      echo "  ... $(( ${#POS[@]} - 10 )) more"
+    fi
+  fi
+  if [[ "$PLAN_ONLY" == "1" ]]; then
+    exit 0
+  fi
+fi
+[[ ${#POS[@]} -ge 1 ]] || { usage; exit 2; }
 
 if [[ ${#POS[@]} -gt 1 ]]; then
   total=${#POS[@]}
@@ -107,6 +161,25 @@ rows = connection.execute(
     (lang, value, value, value),
 ).fetchall()
 if not rows:
+    done = connection.execute(
+        """
+        SELECT voice_id, name
+        FROM speakers
+        WHERE voice_id = ? COLLATE NOCASE
+          OR npc_key = ? COLLATE NOCASE
+          OR CAST(npc_id AS TEXT) = ?
+        ORDER BY voice_id
+        """,
+        (value, value, value),
+    ).fetchall()
+    if len(done) == 1:
+        print(f"{done[0][0]}\t{done[0][1]}\t0")
+        raise SystemExit(0)
+    if len(done) > 1:
+        print(f"'{value}' matches more than one voice:", file=sys.stderr)
+        for voice_id, name in done:
+            print(f"    {voice_id:<24} {name}", file=sys.stderr)
+        raise SystemExit(1)
     print(f"no queued lines for '{value}' (lang={lang})", file=sys.stderr)
     suggestions = connection.execute(
         """
@@ -183,6 +256,17 @@ OUT="${OMV_OUT:-$ROOT/data/out/$VOICE}"
 [[ "$CACHE" = /* ]] || CACHE="$ROOT/$CACHE"
 
 LOG_PID=""
+# The generator checkpoints the manifest after every line, so a stopped or
+# crashed run still has valid evidence for everything it finished. Link that
+# before exiting so the queue reflects the progress made.
+link_status() {
+  [[ -f "$OUT/manifest.json" ]] || return 0
+  python3 "$ROOT/tools/qwen/link_audio.py" \
+    --db "$DB" --manifest "$OUT/manifest.json" --repo-root "$ROOT" || {
+    echo "warning: audio/status linkage failed" >&2
+  }
+}
+
 on_signal() {
   trap - INT TERM
   echo
@@ -191,6 +275,7 @@ on_signal() {
     kill "$LOG_PID" 2>/dev/null || true
   fi
   stop_container
+  link_status
   echo "stopped: $NAME"
   echo "resume with: ./voice.sh $VOICE"
   exit 130
@@ -208,6 +293,10 @@ elif [[ -n "$current_state" ]]; then
 fi
 
 if [[ "$current_state" != "true true" && "$current_state" != "true false" ]]; then
+  if [[ "$QUEUED" == "0" && "${OMV_FORCE:-}" != "1" && "${OMV_RECHECK:-}" != "1" ]]; then
+    echo "$VOICE ($VOICE_NAME) is up to date: no queued lines left"
+    exit 0
+  fi
   rm -f "$STOP_MARKER"
   command -v dotnet >/dev/null 2>&1 || die "dotnet not found (needed for xivdata)"
   docker compose version >/dev/null 2>&1 || die "docker compose v2 not available"
@@ -222,9 +311,16 @@ if [[ "$current_state" != "true true" && "$current_state" != "true false" ]]; th
   if [[ -n "${OMV_LIMIT:-}" ]]; then
     export_args+=(--limit "$OMV_LIMIT")
   fi
+  if [[ "${OMV_FORCE:-}" == "1" || "${OMV_RECHECK:-}" == "1" ]]; then
+    export_args+=(--all)
+  fi
   dotnet run --project "$ROOT/tools/xivdata" -- "${export_args[@]}"
   QUEUED="$(wc -l < "$WORKLIST")"
   QUEUED="${QUEUED//[[:space:]]/}"
+  if [[ "$QUEUED" == "0" ]]; then
+    echo "$VOICE ($VOICE_NAME) has nothing to export; nothing started"
+    exit 0
+  fi
 
   PIN="${OMV_SANITIZER_PIN:-}"
   if [[ -z "$PIN" ]]; then
@@ -302,6 +398,7 @@ wait "$LOG_PID" 2>/dev/null || true
 LOG_PID=""
 exit_code="$(docker inspect -f '{{.State.ExitCode}}' "$NAME" 2>/dev/null | tr -d '[:space:]')"
 docker rm -f "$NAME" >/dev/null 2>&1 || true
+link_status
 if [[ -f "$STOP_MARKER" ]]; then
   rm -f "$STOP_MARKER"
   echo "container stopped"
@@ -314,11 +411,5 @@ fi
 echo "container exited (code $exit_code)"
 if [[ "$exit_code" =~ ^[0-9]+$ && "$exit_code" != "0" ]]; then
   exit "$exit_code"
-fi
-if [[ "$exit_code" == "0" && -f "$OUT/manifest.json" ]]; then
-  python3 "$ROOT/tools/qwen/link_audio.py" \
-    --db "$DB" --manifest "$OUT/manifest.json" --repo-root "$ROOT" || {
-    echo "warning: audio variant linkage failed" >&2
-  }
 fi
 echo "pack: $OUT"

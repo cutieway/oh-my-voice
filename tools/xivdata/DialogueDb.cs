@@ -607,6 +607,7 @@ public sealed class DialogueDb : IDisposable
         Execute(connection, """
             DROP VIEW IF EXISTS v_speaker_workload;
             DROP VIEW IF EXISTS v_generation_queue;
+            DROP VIEW IF EXISTS v_generation_candidates;
             DROP VIEW IF EXISTS v_pack_npcs;
             DROP VIEW IF EXISTS v_integrity;
             DROP VIEW IF EXISTS v_speakers;
@@ -621,7 +622,10 @@ public sealed class DialogueDb : IDisposable
             FROM speakers
             WHERE npc_key <> '';
 
-            CREATE VIEW IF NOT EXISTS v_generation_queue AS
+            -- Every planned line, generated or not. Progress lives in
+            -- dialogs.audio_status: link_audio marks a line 'generated' once
+            -- its root audio exists and matches the stored text.
+            CREATE VIEW IF NOT EXISTS v_generation_candidates AS
             WITH candidates AS (
               SELECT d.id, d.lang, d.speaker_id, d.npc_id, d.speaker_name, d.npc_key,
                      d.text_clean AS sentence, d.voice_line_id, d.source, d.sheet, d.row_id,
@@ -629,7 +633,8 @@ public sealed class DialogueDb : IDisposable
                      s.name AS speaker_display, s.xvector_path,
                      ROW_NUMBER() OVER (
                        PARTITION BY d.lang, d.voice_line_id
-                       ORDER BY d.source, d.sheet, d.row_id, d.line_index, d.id
+                       ORDER BY (d.audio_status IN ('pending','failed') OR d.audio_stale = 1) DESC,
+                                d.source, d.sheet, d.row_id, d.line_index, d.id
                      ) AS rn
               FROM dialogs d
               JOIN speakers s ON s.voice_id = d.speaker_id
@@ -638,7 +643,6 @@ public sealed class DialogueDb : IDisposable
                 AND d.text_kind IN ('dialogue','narration')
                 AND s.has_scd = 1
                 AND d.audio_status <> 'skipped'
-                AND (d.audio_status IN ('pending','failed') OR d.audio_stale = 1)
                 AND NOT EXISTS (
                   SELECT 1 FROM dialogs g
                   WHERE g.lang = d.lang
@@ -651,6 +655,12 @@ public sealed class DialogueDb : IDisposable
                    audio_status, audio_stale, speaker_display, xvector_path
             FROM candidates
             WHERE rn = 1;
+
+            -- What still needs rendering: unvoiced lines without a generated
+            -- root, plus lines whose text changed since they were rendered.
+            CREATE VIEW IF NOT EXISTS v_generation_queue AS
+            SELECT * FROM v_generation_candidates
+            WHERE audio_status IN ('pending','failed') OR audio_stale = 1;
 
             CREATE VIEW IF NOT EXISTS v_speaker_workload AS
             SELECT s.voice_id, s.npc_key, s.name, s.has_scd, s.xvector_path,

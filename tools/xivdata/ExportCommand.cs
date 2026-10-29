@@ -22,6 +22,7 @@ internal static class ExportCommand
         string? outPath = null;
         string lang = "en";
         int limit = 0;
+        bool all = false;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -47,6 +48,9 @@ internal static class ExportCommand
                 case "--limit":
                     limit = int.Parse(Next(), CultureInfo.InvariantCulture);
                     if (limit < 0) throw new ArgumentException("--limit must be >= 0");
+                    break;
+                case "--all":
+                    all = true;
                     break;
                 default:
                     throw new ArgumentException($"unknown export option: {arg}");
@@ -78,12 +82,13 @@ internal static class ExportCommand
         connection.Open();
 
         using var command = connection.CreateCommand();
-        command.CommandText = """
+        string view = all ? "v_generation_candidates" : "v_generation_queue";
+        command.CommandText = $$"""
             SELECT q.lang, q.voice_line_id, q.speaker_id, q.npc_id, q.npc_key,
                    q.sentence, q.source, q.sheet, q.row_id, q.line_index,
                    s.name AS speaker_name, s.race_id, s.gender,
                    d.text_raw
-            FROM v_generation_queue q
+            FROM {{view}} q
             JOIN speakers s ON s.voice_id = q.speaker_id
             JOIN dialogs d ON d.id = q.id
             WHERE q.lang = @lang
@@ -161,6 +166,16 @@ internal static class ExportCommand
 
         if (exported == 0)
         {
+            if (all)
+            {
+                // A speaker can have no planned lines at all (every row is
+                // covered or skipped). Write the empty worklist so callers can
+                // trust its line count, and treat it as nothing to do.
+                File.Move(tempPath, outPath, true);
+                Console.Error.WriteLine(
+                    $"no planned lines for '{speaker}' (lang={lang}).");
+                return 0;
+            }
             File.Delete(tempPath);
             Console.Error.WriteLine($"no queued lines for '{speaker}' (lang={lang}).");
             using var suggestions = connection.CreateCommand();
@@ -178,7 +193,7 @@ internal static class ExportCommand
         }
 
         File.Move(tempPath, outPath, true);
-        Console.WriteLine($"exported {exported} queued lines -> {outPath}");
+        Console.WriteLine($"exported {exported} line(s) -> {outPath}");
         foreach (var (source, count) in bySource.OrderBy(kv => kv.Key, StringComparer.Ordinal))
             Console.WriteLine($"  {source,-25} {count}");
         Console.WriteLine("note: speaker-scoped worklist; ./voice.sh merges it into data/out/<voice>.");
@@ -210,6 +225,10 @@ internal static class ExportCommand
               --out FILE      output JSONL (default ./data/worklists/<speaker>.jsonl)
               --lang en|de|fr|ja  default en
               --limit N       max rows (0 = all)
+              --all           every planned line, including already generated
+                              ones (OMV_FORCE=1 rebuilds a finished pack);
+                              writes an empty worklist when nothing is planned;
+                              with --limit it always slices the same first rows
 
             Rows match the plugin's miss-event schema, so the existing
             tools/qwen/generate.py can consume the file directly.

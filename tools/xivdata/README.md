@@ -102,8 +102,9 @@ so they can be aliased later.
 `dialog_speakers` — all NPC links for a line (a DefaultTalk row can be shared
 by several NPCs), with `is_primary`.
 
-`audio_variants` — links generated OGGs without changing `dialogs.audio_status`
-or `audio_path`. `pronoun` is `none` for one neutral clip, `they` for the
+`audio_variants` — links generated OGGs, and `link_audio.py` also writes the
+matching `dialogs` rows (`audio_status='generated'`, `audio_path`).
+`pronoun` is `none` for one neutral clip, `they` for the
 neutral root of a pronoun-variant line, or `she`/`he` for its third-person
 rendering. Populated from pack manifests by `tools/qwen/link_audio.py` (called
 at the end of `./voice.sh`); rows upsert on `(voice_line_id, pronoun)` and are
@@ -123,14 +124,18 @@ and `xvector_path`/`xvector_sha256` when `data/xvectors/<voice_id>.npy` exists.
 Views:
 
 - `v_speakers` — compact speaker inventory.
-- `v_generation_queue` — unvoiced `dialogue`/`narration` lines for speakers
-  that have at least one SCD and a resolved voice; includes stale/failed rows.
-  One row per `(lang, voice_line_id)`, and any line whose id also exists as a
-  `has_scd=1` cutscene line is excluded.
+- `v_generation_candidates` — every planned unvoiced `dialogue`/`narration`
+  line for speakers that have at least one SCD and a resolved voice, generated
+  or not. One row per `(lang, voice_line_id)`, and any line whose id also
+  exists as a `has_scd=1` cutscene line is excluded. When a line id has
+  several rows, a row that still needs work wins the dedupe, so a text change
+  shows up even if the previous text was already rendered.
+- `v_generation_queue` — `v_generation_candidates` filtered to work that is
+  still open: `audio_status` `pending`/`failed`, or `audio_stale=1`.
 - `v_pack_npcs` — `npc_key -> NpcId/VoiceId` mapping ready for a pack
   manifest.
-- `v_speaker_workload` — queued line count per speaker.
-- `v_speaker_workload` — queued line count per speaker (deduped).
+- `v_speaker_workload` — queued line count per speaker (deduped); this is the
+  remaining work, and what `./voice.sh` with no arguments orders by.
 - `v_integrity` — zero-row checks for NPC/line-id/key invariants; must show
   `failures=0` for every check.
 
@@ -145,9 +150,12 @@ FTS5). It is kept in sync by triggers, including manual edits.
 - `unassigned`: no speaker, or text kind is choice/journal/system/content.
 - `generated`, `failed`, `skipped`: generation outcomes. `skipped` covers
   lines that cannot be rendered, including text that is only the player's
-  name.
+  name. `generated` is written by `tools/qwen/link_audio.py` after a run, per
+  line whose root audio exists and whose stored text still matches the
+  manifest; that is what drains the queue.
 - `audio_stale=1`: source text or speaker changed after generation. The queue
-  includes stale rows even when their old status is `generated`.
+  includes stale rows even when their old status is `generated`, and
+  `link_audio.py` clears the flag once the rendered text matches again.
 - Text with no letters (for example `0`, `...`, `\`) is treated as padding
   and is not stored as dialogue. Square Enix development placeholders such
   as `（★未使用／削除予定★）` are filtered by the `★` + `未使用` marker.
@@ -254,6 +262,22 @@ dotnet run --project tools/xivdata -- export \
 # pilot
 dotnet run --project tools/xivdata -- export \
   --speaker yshtola --limit 20
+
+# rebuild a finished pack: include already generated lines
+dotnet run --project tools/xivdata -- export \
+  --speaker sphene --all --out data/worklists/sphene.jsonl
+```
+
+Plain `export` writes the queue, i.e. only lines that still need rendering.
+`--all` reads `v_generation_candidates` instead, which is what `OMV_FORCE=1
+./voice.sh` uses.
+
+`xivdata migrate` re-applies the schema, views, and derived counts to an
+existing DB without re-harvesting — run it after pulling schema changes, or
+once after a patch harvest:
+
+```bash
+dotnet run --project tools/xivdata -- migrate --db data/dialogue.db
 ```
 
 The output uses the plugin miss-event shape (`Result="miss"`, `Id`,
@@ -350,6 +374,9 @@ Full `--source all` run (EN), 3m58s on this machine:
 | voiced + x-vector linked | 667 |
 | `v_generation_queue` (deduped) | 48,203 |
 | DB size (with FTS) | 505 MB |
+
+Those queue numbers are harvest-time, before any generation; the queue shrinks
+as `link_audio.py` marks finished lines `generated`.
 
 Main sources: `quest` 264,971; `custom` 28,812; `cutscene` 26,707;
 `npcyell` 18,625; `defaulttalk` 14,471; `balloon` 10,365;
