@@ -281,13 +281,17 @@ on_signal() {
   exit 130
 }
 
-# A paused or already-running container is attached, not re-exported.
+# A paused or already-running container is attached, not re-exported. Attach
+# shows only the recent log lines; replaying the whole run buries new output.
+LOG_ARGS=(-f)
 current_state="$(state)"
 if [[ "$current_state" == "true true" ]]; then
   docker unpause "$NAME" >/dev/null
   echo "resumed: $NAME"
+  LOG_ARGS=(-f --tail 50)
 elif [[ "$current_state" == "true false" ]]; then
   echo "already running: $NAME"
+  LOG_ARGS=(-f --tail 50)
 elif [[ -n "$current_state" ]]; then
   docker rm -f "$NAME" >/dev/null 2>&1 || true
 fi
@@ -353,7 +357,7 @@ if [[ "$current_state" != "true true" && "$current_state" != "true false" ]]; th
 fi
 
 trap on_signal INT TERM
-docker logs -f "$NAME" 2>&1 &
+docker logs "${LOG_ARGS[@]}" "$NAME" 2>&1 &
 LOG_PID=$!
 echo "commands: -pause  -start  -stop   (Ctrl+C stops after the current line)"
 
