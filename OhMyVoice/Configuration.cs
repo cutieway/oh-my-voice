@@ -37,6 +37,21 @@ public class Configuration : IPluginConfiguration
     /// <summary>Silence between the end of one line and the start of the next, in ms.</summary>
     public int LineGapMs { get; set; } = 1000;
 
+    /// <summary>
+    /// Click the game's Talk box once a voiced line has finished, after
+    /// <see cref="LineGapMs"/>, so the next line shows up without a click.
+    /// Cutscenes advance the same way as NPC dialogue.
+    /// </summary>
+    public bool AutoAdvance { get; set; } = false;
+
+    /// <summary>
+    /// The game's own cutscene text auto-advance was caught cutting a pack line
+    /// short. Its state is unreadable (AgentCutscene models only its dialog's
+    /// pending values, and no ConfigOption covers it), so this observation is
+    /// the only way the settings pane can warn without a fresh cutscene.
+    /// </summary>
+    public bool InGameAutoAdvanceSeen { get; set; } = false;
+
     /// <summary>Subtitle dedupe window in seconds: same final ID within this window is skipped (Q13).</summary>
     public double SubtitleDedupeSeconds { get; set; } = 1.0;
 

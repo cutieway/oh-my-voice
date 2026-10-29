@@ -26,6 +26,7 @@ public sealed class Dispatcher
     private readonly VoiceLog events;
     private readonly NpcMetadataService npcMetadata;
     private readonly VoSuppression suppression;
+    private readonly DialogAdvance advance;
 
     private readonly object gate = new();
     private CancellationTokenSource? pendingCts;
@@ -36,7 +37,8 @@ public sealed class Dispatcher
     public Dispatcher(
         IPluginLog log, Configuration config, GameInterop game,
         PackStore pack, Playback playback, VoiceLog events,
-        NpcMetadataService npcMetadata, VoSuppression suppression)
+        NpcMetadataService npcMetadata, VoSuppression suppression,
+        DialogAdvance advance)
     {
         this.log = log;
         this.config = config;
@@ -46,13 +48,14 @@ public sealed class Dispatcher
         this.events = events;
         this.npcMetadata = npcMetadata;
         this.suppression = suppression;
+        this.advance = advance;
 
         lineQueue = new LineQueue(
             MaxQueuedLines,
             playback.WaitForIdleAsync,
             playback.WaitGapAsync,
             () => config.LineGapMs,
-            playback.Play,
+            PlayLine,
             () => config.Enabled,
             message => { if (config.DebugLogging) log.Information(message); });
     }
@@ -66,8 +69,15 @@ public sealed class Dispatcher
         playback.Stop();
     }
 
-    /// <summary>Drop every queued line. The line already playing is left alone.</summary>
-    public void ClearQueue() => lineQueue.Clear();
+    /// <summary>
+    /// Drop every queued line and cancel a pending auto-advance. The line
+    /// already playing is left alone.
+    /// </summary>
+    public void ClearQueue()
+    {
+        lineQueue.Clear();
+        advance.Disarm();
+    }
 
     /// <summary>Lines waiting for their turn in queue mode.</summary>
     public int QueuedCount => lineQueue.Count;
@@ -102,17 +112,17 @@ public sealed class Dispatcher
 
         try
         {
-            var (id, path) = await ResolveLineAsync(source, rawSpeaker, rawSentence, token);
+            var (id, path, sentence) = await ResolveLineAsync(source, rawSpeaker, rawSentence, token);
             if (ticket is long queued)
             {
                 // The pump plays it in dialog order once the previous line ends.
-                lineQueue.Publish(queued, id, path);
+                lineQueue.Publish(queued, id, path, sentence);
                 if (id != null && path != null && config.DebugLogging)
                     log.Information($"{id}: queued");
                 return;
             }
             if (id == null || path == null) return;
-            await StartCutLineAsync(id, path, token);
+            await StartCutLineAsync(id, path, sentence, token);
         }
         catch (TaskCanceledException)
         {
@@ -132,15 +142,17 @@ public sealed class Dispatcher
 
     /// <summary>
     /// Sanitize, resolve, and record one line. Nulls mean the line was dropped
-    /// (dedupe, real VO, or no pack file), and nothing should play.
+    /// (dedupe, real VO, or no pack file), and nothing should play. The third
+    /// value is the Talk-box text for auto-advance: it is only set for lines
+    /// captured from the Talk addon itself, since only those can be clicked.
     /// </summary>
-    private async Task<(string? Id, string? Path)> ResolveLineAsync(
+    private async Task<(string? Id, string? Path, string? Sentence)> ResolveLineAsync(
         string source, string rawSpeaker, string rawSentence, CancellationToken token)
     {
         string first = game.PlayerFirstName ?? "Forename";
         string last = game.PlayerLastName ?? "Surname";
         var (speaker, sentence) = Sanitizer.Clean(rawSpeaker, rawSentence, first, last);
-        if (string.IsNullOrWhiteSpace(sentence)) return (null, null);
+        if (string.IsNullOrWhiteSpace(sentence)) return (null, null, null);
 
         var npc = pack.ResolveNpc(speaker);
         string voiceId = npc.VoiceId ?? "Unknown";
@@ -155,7 +167,7 @@ public sealed class Dispatcher
                 (DateTime.UtcNow - prev.Utc).TotalSeconds < config.SubtitleDedupeSeconds)
             {
                 if (config.DebugLogging) log.Information($"Dedupe {source} {id}");
-                return (null, null);
+                return (null, null, null);
             }
         }
 
@@ -166,12 +178,12 @@ public sealed class Dispatcher
         }
         catch (TaskCanceledException)
         {
-            return (null, null); // superseded by a newer line
+            return (null, null, null); // superseded by a newer line
         }
         if ((DateTime.UtcNow - suppression.LastRealVoUtc).TotalMilliseconds < 1000)
         {
             if (config.DebugLogging) log.Information($"Suppressed {id}: real VO {suppression.LastRealVoPath}");
-            return (null, null);
+            return (null, null, null);
         }
 
         Pronoun pronoun = Pronouns.Effective(
@@ -199,7 +211,7 @@ public sealed class Dispatcher
                 Utc = DateTimeOffset.UtcNow,
             });
             if (config.DebugLogging) log.Information($"Miss {source} {id} ({speaker})");
-            return (null, null);
+            return (null, null, null);
         }
 
         // A hit is evidence for the developer that this line is covered.
@@ -225,18 +237,29 @@ public sealed class Dispatcher
         // Dedupe counts from acceptance, not from playback: in queue mode a
         // repeat that is still waiting must not be queued twice.
         lock (gate) lastPlayed = (id, DateTime.UtcNow);
-        return (id, path);
+        return (id, path, source == "Talk" ? rawSentence : null);
+    }
+
+    /// <summary>
+    /// Queue mode's play step. Arming here, not at enqueue time, keeps the
+    /// advancer tied to the line that actually reaches the speakers.
+    /// </summary>
+    private void PlayLine(string id, string path, string? sentence)
+    {
+        playback.Play(id, path);
+        if (sentence != null) advance.Arm(id, sentence);
     }
 
     /// <summary>Cut mode: stop the playing line, wait the gap, then play.</summary>
-    private async Task StartCutLineAsync(string id, string path, CancellationToken token)
+    private async Task StartCutLineAsync(
+        string id, string path, string? sentence, CancellationToken token)
     {
         long handoffStart = Environment.TickCount64;
         playback.Stop();
         await playback.WaitGapAsync(config.LineGapMs, token);
         if (config.DebugLogging)
             log.Information($"{id}: cut, waited {Environment.TickCount64 - handoffStart}ms");
-        playback.Play(id, path);
+        PlayLine(id, path, sentence);
     }
 
 }

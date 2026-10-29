@@ -78,6 +78,68 @@ line of a conversation has no gap at all.
 Real VO starting (`StopOnVo`) and logging out clear the queued backlog; the
 line already playing is stopped by the same rule that stops it in cut mode.
 
+## Auto-advance
+
+With `AutoAdvance` on, the plugin clicks the game's `Talk` box once a pack line
+has finished and `LineGapMs` of silence has passed, so the next line appears by
+itself: talk to the NPC once and the conversation continues one line per gap.
+Cutscenes advance the same way as NPC dialogue, so a voiced scene runs at pack
+pace; a line the pack does not cover stays on screen until the player clicks.
+
+The click is a synthetic addon event, not physical input. `DialogAdvance` calls
+`AtkUnitBase.ReceiveEvent` with MouseDown, MouseClick and MouseUp and a
+hand-built `AtkEvent` — the same call TextAdvance makes through ECommons'
+`AddonMaster.Talk.Click`. No keystroke is written, the cursor never moves, and
+the game window does not need focus. Controller players keep their gamepad
+prompt: the input-device glyph comes from `AtkInputManager.HandleInput`, which
+sits upstream of `ReceiveEvent` and is never entered.
+
+Advancing is armed by the line that is about to play, and every gate is
+re-checked at click time rather than at arm time:
+
+1. `Enabled` and `AutoAdvance` are still on.
+2. No real VO in the last second and no pack line still playing. A real voice
+   actor therefore ends the hands-free run: the scene waits for the player.
+3. The `Talk` addon is visible and still shows the exact sentence that was
+   voiced. A box the player already advanced, closed, or one the game replaced
+   is left alone, so a line whose audio was never played is never skipped.
+
+Only lines captured from the `Talk` addon arm the advancer. Subtitle lines,
+misses (no pack file) and lines dropped for real VO never advance; a line
+without audio stays on screen until the player clicks it. Queue mode composes
+with auto-advance: the click shows the next box, whose line joins the queue
+like any other.
+
+A cutscene with real voice actors belongs to the game, never to the pack. A
+line that has VO never arms the advancer (the dispatch pipeline drops the pack
+line for it, and a click within a second of detected VO is skipped), so the
+plugin only advances lines it actually voiced. The game's own cutscene text
+auto-advance has to stay off, though: any setting of it makes the game advance
+on its own timer, which races the pack and moves on before a line finishes.
+There is no third option - the plugin cannot read the toggle, and cannot turn
+it off for the player, so it warns instead.
+
+The plugin cannot read that setting: `AgentCutscene` exposes only the pending
+values of its own toggle dialog, and no `ConfigOption` covers the feature. So
+the settings warning is evidence-based. When a Talk box moves on while a line
+is still waiting to be advanced, `InputWatch` decides who did it from the
+game's own input state - the keyboard confirm keys, the gamepad face buttons
+and the mouse, held within the last quarter second. A press means the player
+was faster and nothing is recorded; no press means the game advanced the line,
+which increments `EarlyAdvanceCount` and raises the warning. The counter is
+reset when the next cutscene starts.
+
+A game advance also changes what the pack does: the text is ahead of the audio,
+so the stale line is stopped and the backlog dropped, and the next line plays
+from its own start. Queue mode would otherwise fall further behind with every
+line the game advanced. A chat notice explains the setting once per cutscene.
+
+No gate fails silently: with `DebugLogging` on, `DialogAdvance` logs
+`Auto-advance: …` for the arm, the natural line end, every skip (auto-advance
+off, superseded, real VO, still playing, `Talk hidden`, `box changed to "…"`,
+no `AtkStage`), and the click itself. A conversation or cutscene that does not
+advance therefore still leaves the reason in `/xllog`.
+
 ## Real-VO suppression
 
 `VoSuppression` hooks `SoundManager.PlaySound` and
@@ -205,6 +267,7 @@ made.
 | `StopOnVo` | on | Stop a playing pack line when real VO starts |
 | `QueueLines` | off | Off: a new line cuts the playing one. On: every line keeps its place and plays in order (8 max) |
 | `LineGapMs` | 1000 | Silence between the end of one line and the start of the next (0–3000 ms) |
+| `AutoAdvance` | off | Click the `Talk` box once a voiced line ends plus `LineGapMs` |
 | `DebugLogging` | off | Verbose `/xllog` output |
 | `SubtitleDedupeSeconds` | 1.0 | Repeat window for the same line ID; config-file only |
 

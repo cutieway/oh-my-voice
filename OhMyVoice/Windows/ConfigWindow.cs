@@ -9,6 +9,14 @@ public class ConfigWindow : Window, IDisposable
     // TODO: Replace with the public voice-pack distribution URL when available.
     private const string VoicePackDownloadUrl = "";
 
+    private static readonly Vector4 WarningColor = new(0.95f, 0.75f, 0.3f, 1f);
+
+    /// <summary>
+    /// The game's own error-chat red (#ff4a4a), so a conflict the player sees
+    /// in the settings window matches what the chat notice shows.
+    /// </summary>
+    private static readonly Vector4 ErrorColor = new(1f, 74 / 255f, 74 / 255f, 1f);
+
     private static readonly string[] PronounLabels =
     [
         "Auto (character sex)", "They/them", "She/her", "He/him",
@@ -95,6 +103,46 @@ public class ConfigWindow : Window, IDisposable
             configuration.Save();
         }
 
+        var autoAdvance = configuration.AutoAdvance;
+        if (ImGui.Checkbox("Auto-advance dialog after each line", ref autoAdvance))
+        {
+            configuration.AutoAdvance = autoAdvance;
+            configuration.Save();
+        }
+        ImGui.TextDisabled(
+            configuration.AutoAdvance
+                ? "Clicks the Talk box once the pack line ends and the silence has passed."
+                : "You click the Talk box yourself.");
+        ImGui.TextDisabled("Never advances real VO or lines without audio.");
+        if (configuration.AutoAdvance)
+        {
+            // The game's own cutscene text auto-advance has no readable state:
+            // AgentCutscene only exposes its dialog's pending values, and no
+            // ConfigOption covers the feature. So the warning is evidence-based:
+            // it appears once boxes moved on before the pack finished with no
+            // confirm press from the player (see DialogAdvance.NoteBoxChanged).
+            int early = plugin.GameAdvancedCount;
+            if (early > 0)
+            {
+                var at = plugin.LastGameAdvanceUtc.ToLocalTime();
+                ImGui.TextColored(ErrorColor,
+                    $"The game advanced {early} line(s) before the pack finished, " +
+                    $"last at {at:HH:mm}.");
+            }
+            else if (plugin.InGameAutoAdvanceSeen)
+            {
+                ImGui.TextColored(ErrorColor,
+                    "The game's cutscene text auto-advance cut pack lines short earlier.");
+            }
+            if (early > 0 || plugin.InGameAutoAdvanceSeen)
+            {
+                ImGui.TextDisabled(
+                    "Turn it off: inside a cutscene the pad toggle offers 'Disable text " +
+                    "auto-advance?'. It is not readable from the plugin, and nothing can " +
+                    "turn it off for you, so while it stays on the game outruns every pack line.");
+            }
+        }
+
         var debug = configuration.DebugLogging;
         if (ImGui.Checkbox("Debug logging (/xllog)", ref debug))
         {
@@ -120,9 +168,7 @@ public class ConfigWindow : Window, IDisposable
         }
         else if (packDirectoryMessage.Length > 0)
         {
-            var color = packDirectoryError
-                ? new Vector4(0.95f, 0.35f, 0.35f, 1f)
-                : new Vector4(0.95f, 0.75f, 0.3f, 1f);
+            var color = packDirectoryError ? ErrorColor : WarningColor;
             ImGui.TextColored(color, packDirectoryMessage);
         }
 

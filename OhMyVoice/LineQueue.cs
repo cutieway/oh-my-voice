@@ -20,7 +20,7 @@ public sealed class LineQueue
     private readonly Func<int, CancellationToken, Task> waitGap;
     private readonly Func<int> gapMs;
     private readonly Func<bool>? enabled;
-    private readonly Action<string, string> play;
+    private readonly Action<string, string, string?> play;
     private readonly Action<string>? log;
     private long seq;
     private bool running;
@@ -31,6 +31,7 @@ public sealed class LineQueue
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         public string? Id;
         public string? Path;
+        public string? Sentence;
         public bool Published;
     }
 
@@ -39,7 +40,7 @@ public sealed class LineQueue
         Func<CancellationToken, Task> waitIdle,
         Func<int, CancellationToken, Task> waitGap,
         Func<int> gapMs,
-        Action<string, string> play,
+        Action<string, string, string?> play,
         Func<bool>? enabled = null,
         Action<string>? log = null)
     {
@@ -80,8 +81,12 @@ public sealed class LineQueue
         return seq;
     }
 
-    /// <summary>Hand the resolved file to the pump; nulls mark a dropped line.</summary>
-    public void Publish(long ticket, string? id, string? path)
+    /// <summary>
+    /// Hand the resolved file to the pump; nulls mark a dropped line.
+    /// <paramref name="sentence"/> is the addon text for auto-advance, and is
+    /// null for lines that must not advance the Talk box.
+    /// </summary>
+    public void Publish(long ticket, string? id, string? path, string? sentence = null)
     {
         Item? item;
         lock (gate)
@@ -90,6 +95,7 @@ public sealed class LineQueue
             item.Published = true;
             item.Id = id;
             item.Path = path;
+            item.Sentence = sentence;
         }
         item.Done.TrySetResult(true);
     }
@@ -160,7 +166,7 @@ public sealed class LineQueue
             }
 
             log?.Invoke($"{item.Id}: queued, playing ({behind} behind)");
-            play(item.Id, item.Path);
+            play(item.Id, item.Path, item.Sentence);
         }
     }
 

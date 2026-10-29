@@ -21,6 +21,8 @@ public sealed class TalkCapture : IDisposable
     private readonly Configuration config;
     private readonly GameInterop game;
     private readonly Dispatcher dispatcher;
+    private readonly DialogAdvance advance;
+    private readonly InputWatch input;
 
     private string lastSpeaker = "";
     private string lastSentence = "";
@@ -38,7 +40,8 @@ public sealed class TalkCapture : IDisposable
 
     public TalkCapture(
         IFramework framework, IGameGui gameGui, IAddonLifecycle addonLifecycle,
-        IPluginLog log, Configuration config, GameInterop game, Dispatcher dispatcher)
+        IPluginLog log, Configuration config, GameInterop game, Dispatcher dispatcher,
+        DialogAdvance advance, InputWatch input)
     {
         this.framework = framework;
         this.gameGui = gameGui;
@@ -47,6 +50,8 @@ public sealed class TalkCapture : IDisposable
         this.config = config;
         this.game = game;
         this.dispatcher = dispatcher;
+        this.advance = advance;
+        this.input = input;
     }
 
     public void Enable()
@@ -64,6 +69,9 @@ public sealed class TalkCapture : IDisposable
     private void OnFrameworkUpdate(IFramework _)
     {
         if (!config.Enabled) return;
+        // Read the player's input before the game consumes it: the box-change
+        // check below has to know whether a confirm press is in flight.
+        input.Poll();
         PollTalk();
         ResetSubtitleGuard();
     }
@@ -95,6 +103,10 @@ public sealed class TalkCapture : IDisposable
             if (string.IsNullOrEmpty(speaker)) speaker = "Narrator";
             string sentence = game.ReadUtf8(addon->String268);
             if (string.IsNullOrEmpty(sentence)) return;
+            // A line still waiting to be advanced just lost its box. Cutscenes
+            // only: at scene end the box also swaps while the scene is tearing
+            // down, which is not the game's auto-advance.
+            if (sentenceChanged && game.IsInCutscene()) advance.NoteBoxChanged(sentence);
             if (speaker == lastSpeaker && sentence == lastSentence) return;
             lastSpeaker = speaker;
             lastSentence = sentence;

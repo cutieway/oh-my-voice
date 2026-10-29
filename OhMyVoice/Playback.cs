@@ -30,6 +30,13 @@ public sealed class Playback : IDisposable
         this.config = config;
     }
 
+    /// <summary>
+    /// Raised when a line reaches its end on its own. A line stopped or cut by
+    /// <see cref="Stop"/> never raises it, so callers can act on "the player
+    /// heard the whole line" (auto-advance) instead of "playback stopped".
+    /// </summary>
+    public event Action<string>? LineFinished;
+
     public bool IsPlaying
     {
         get { lock (gate) return device != null; }
@@ -161,7 +168,15 @@ public sealed class Playback : IDisposable
                 playingId = null;
             }
         }
-        if (notify) SignalIdle();
+        if (notify)
+        {
+            // SignalIdle first: it stamps lastEndTicks, which the advancer
+            // measures its silence gap from. Its continuations are queued
+            // asynchronously, so no queued line can re-arm the advancer before
+            // this line's own LineFinished runs.
+            SignalIdle();
+            LineFinished?.Invoke(id);
+        }
     }
 
     public void Stop()

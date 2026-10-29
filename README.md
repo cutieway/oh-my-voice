@@ -96,6 +96,7 @@ plugin stays quietly out of the way.
 | Stop on real VO | Cuts your pack line if an actor starts talking |
 | Queue lines | Keep every line: skips are queued and play in order, up to 8 behind |
 | Silence between lines | Gap after a line ends before the next one starts (ms) |
+| Auto-advance dialog | Clicks the Talk box itself once a voiced line ends, so conversations and cutscenes run hands-free |
 | Debug logging | Extra detail in `/xllog` |
 
 A missing line is never an error: it is simply silent and recorded for later.

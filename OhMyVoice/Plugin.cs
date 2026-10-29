@@ -1,5 +1,6 @@
 using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.Command;
+using Dalamud.Game.Text;
 using Dalamud.Interface.Windowing;
 using Dalamud.IoC;
 using Dalamud.Plugin;
@@ -22,6 +23,7 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] internal static IAddonLifecycle AddonLifecycle { get; private set; } = null!;
     [PluginService] internal static IGameInteropProvider GameInteropProvider { get; private set; } = null!;
     [PluginService] internal static IPluginLog Log { get; private set; } = null!;
+    [PluginService] internal static IChatGui ChatGui { get; private set; } = null!;
 
     private const string CommandName = "/omv";
 
@@ -41,8 +43,11 @@ public sealed class Plugin : IDalamudPlugin
     private readonly NpcMetadataService npcMetadata;
     private readonly Dispatcher dispatcher;
     private readonly VoSuppression suppression;
+    private readonly DialogAdvance advance;
+    private readonly InputWatch input = new();
     private readonly TalkCapture capture;
     private bool runtimeEnabled;
+    private bool gameAdvanceNoticeShown;
 
     public Plugin()
     {
@@ -62,8 +67,12 @@ public sealed class Plugin : IDalamudPlugin
         npcMetadata = new NpcMetadataService(DataManager, Log);
         npcMetadata.WarmIndex();
         suppression = new VoSuppression(GameInteropProvider, Log, Configuration, OnRealVo);
-        dispatcher = new Dispatcher(Log, Configuration, game, pack, playback, events, npcMetadata, suppression);
-        capture = new TalkCapture(Framework, GameGui, AddonLifecycle, Log, Configuration, game, dispatcher);
+        advance = new DialogAdvance(
+            Log, Configuration, GameGui, game, playback, suppression, input,
+            OnGameAdvanced);
+        dispatcher = new Dispatcher(Log, Configuration, game, pack, playback, events, npcMetadata, suppression, advance);
+        capture = new TalkCapture(
+            Framework, GameGui, AddonLifecycle, Log, Configuration, game, dispatcher, advance, input);
 
         ConfigWindow = new ConfigWindow(this);
         MainWindow = new MainWindow(this);
@@ -90,6 +99,7 @@ public sealed class Plugin : IDalamudPlugin
         Log.Information(
             $"OhMyVoice loaded. Terms={(Configuration.TermsAccepted ? "accepted" : "pending")} " +
             $"PackDirectory={(pack.PackDirectory.Length > 0 ? pack.PackDirectory : "(none)")} " +
+            $"AutoAdvance={(Configuration.AutoAdvance ? "on" : "off")} " +
             $"Sanitizer={Sanitizer.Pin} Events={events.Path}");
     }
 
@@ -143,6 +153,35 @@ public sealed class Plugin : IDalamudPlugin
     private void OnRealVo() => dispatcher.OnRealVoStarted();
 
     /// <summary>
+    /// The game's own cutscene text auto-advance moved a box on while a pack
+    /// line was still playing. The text is ahead of the audio now, so follow
+    /// the text: drop the stale line and the backlog instead of drifting
+    /// further behind, and say once per cutscene how to stop it happening.
+    /// </summary>
+    private void OnGameAdvanced()
+    {
+        dispatcher.ClearQueue();
+        playback.Stop();
+        if (!Configuration.InGameAutoAdvanceSeen)
+        {
+            Configuration.InGameAutoAdvanceSeen = true;
+            Configuration.Save();
+        }
+        if (gameAdvanceNoticeShown) return;
+        gameAdvanceNoticeShown = true;
+        // ErrorMessage: the same red the game uses for its own "/command does not
+        // exist" line, so the conflict reads as a warning at a glance.
+        ChatGui.Print(new XivChatEntry
+        {
+            Type = XivChatType.ErrorMessage,
+            Message =
+                "[Oh My Voice] The game's cutscene text auto-advance is cutting voice " +
+                "lines short. Turn it off: inside a cutscene the pad toggle offers " +
+                "'Disable text auto-advance?'.",
+        });
+    }
+
+    /// <summary>
     /// A cutscene ending - finished or skipped from the "Skip cutscene?" prompt -
     /// stops the pack line and drops the queue: the player wants out, so nothing
     /// from that scene keeps talking. Stopping is immediate: the cutscene flags
@@ -151,7 +190,18 @@ public sealed class Plugin : IDalamudPlugin
     /// </summary>
     private void OnConditionChange(ConditionFlag flag, bool value)
     {
-        if (value) return;
+        if (value)
+        {
+            // A cutscene starting: the early-advance evidence is per scene.
+            if (flag is ConditionFlag.OccupiedInCutSceneEvent
+                or ConditionFlag.WatchingCutscene
+                or ConditionFlag.WatchingCutscene78)
+            {
+                advance.ResetGameAdvances();
+                gameAdvanceNoticeShown = false;
+            }
+            return;
+        }
         if (flag is not (ConditionFlag.OccupiedInCutSceneEvent
             or ConditionFlag.WatchingCutscene
             or ConditionFlag.WatchingCutscene78)) return;
@@ -187,6 +237,7 @@ public sealed class Plugin : IDalamudPlugin
 
         capture.Dispose();
         suppression.Dispose();
+        advance.Dispose();
         playback.Dispose();
     }
 
@@ -208,6 +259,9 @@ public sealed class Plugin : IDalamudPlugin
         return task;
     }
 
+    internal int GameAdvancedCount => advance.GameAdvancedCount;
+    internal bool InGameAutoAdvanceSeen => Configuration.InGameAutoAdvanceSeen;
+    internal DateTime LastGameAdvanceUtc => advance.LastGameAdvanceUtc;
     internal bool IsPlaying => playback.IsPlaying;
     internal string? PlayingId => playback.PlayingId;
     internal bool IsPackLoaded => pack.PackEnabled;
