@@ -102,6 +102,9 @@ _NAME_TOKEN_RE = re.compile(r"_(?:FIRSTNAME|LASTNAME)_(?:['’]s)?")
 # "(-Name-)" ("(-Krile-)Worked, did it?"). That label titles the text box; it
 # is not dialogue, so it must never be spoken. It stays in the canonical
 # Sentence and the line ID: the plugin hashes the sanitized text verbatim.
+# Only the label prefix is removed: a line that names itself again right after
+# it ("(-Jandelaine-)Jandelaine shall hasten to the scene.") keeps that name,
+# because the authored sentence needs it.
 _SPEAKER_LABEL_RE = re.compile(r"^\(-(?:.*?)-\)[ \t]*")
 _VOCATIVE_FOLLOW = set(",.;:!?-–—")
 _VOCATIVE_BEFORE = set("([{)]}.!?;:,-–—")

@@ -395,6 +395,36 @@ class SpeechVariantTests(unittest.TestCase):
         self.assertIsNone(
             self.gen.planned_speech("(-Bakool Ja Ja the Mighty-)"))
 
+    def test_text_repeating_the_label_is_kept(self):
+        # The label titles the box; the name after it is the sentence.
+        self.assertEqual(
+            self.gen.planned_speech("(-Lucia-)Lucia, at your service."),
+            {"speech_text": "Lucia, at your service."})
+        self.assertEqual(
+            self.gen.planned_speech(
+                "(-Jandelaine-)Jandelaine shall hasten to the scene."),
+            {"speech_text": "Jandelaine shall hasten to the scene."})
+        self.assertEqual(
+            self.gen.planned_speech(
+                "(-Ga Bu-)Ga Bu loves the Great Father, but he loves his "
+                "parents too!"),
+            {"speech_text": "Ga Bu loves the Great Father, but he loves his "
+                            "parents too!"})
+        self.assertEqual(
+            self.gen.planned_speech(
+                "(-Tristol-)Tristol. I was invited into Eulmore to work as an "
+                "artist..."),
+            {"speech_text": "Tristol. I was invited into Eulmore to work as "
+                            "an artist..."})
+        # Spaced form, as in the reported case.
+        self.assertEqual(
+            self.gen.planned_speech(
+                "(-Cid-) Cid must be allowed to recuperate."),
+            {"speech_text": "Cid must be allowed to recuperate."})
+        # A label followed only by the player's name still has no speech.
+        self.assertIsNone(
+            self.gen.planned_speech("(-_FIRSTNAME_-)_FIRSTNAME_?"))
+
 
 class DurationCalibrationTests(unittest.TestCase):
     def setUp(self):
