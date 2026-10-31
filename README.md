@@ -113,7 +113,8 @@ folder always wins over that voice's generated audio.
 | Runtime pipeline, pack format, event log | [docs/PLUGIN.md](docs/PLUGIN.md) |
 | Building, playtesting, repo layout | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) |
 | Which characters are covered | [docs/VOICES.md](docs/VOICES.md) |
-| What is left to generate | [docs/workload.csv](docs/workload.csv) |
+| Corpus scale and generation progress | [docs/progress.md](docs/progress.md) |
+| Per-speaker generation workload | [docs/workload.csv](docs/workload.csv) |
 | The dialogue database | [tools/xivdata/README.md](tools/xivdata/README.md) |
 | Speaker embeddings | [tools/xvector/README.md](tools/xvector/README.md) |
 

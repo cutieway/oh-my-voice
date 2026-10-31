@@ -61,6 +61,7 @@ scripts/
 tools/
   qwen/                    # Qwen3-TTS generator, linker, pronoun-pack migrator
   roster.py                # per-speaker workload from dialogue.db (run order, CSV)
+  progress.py              # corpus size + generation progress from dialogue.db
   voice-map.json           # NPC -> xvector name
   xivdata/                 # offline dialogue DB + cutscene SCD extractor
   xvector/                 # average speaker embedding builder
@@ -70,6 +71,7 @@ docs/
   DEVELOPMENT.md           # this file
   QWEN3-TTS.md             # Qwen integration, quality, measurements
   VOICES.md                # voice roster: counts, metadata, caveats
+  progress.md              # corpus scale + generation progress snapshot
   voices.csv               # one row per speaker label, metadata only
   workload.csv             # generation progress per speaker (from dialogue.db)
   assets/                  # README logo and diagrams
@@ -104,6 +106,7 @@ automatic CI workflow. Run the checks locally:
 bash scripts/check-refs.sh
 python3 -m unittest discover -s tools/qwen
 python3 -m unittest tools/test_roster.py   # queue views; skipped without dotnet
+python3 tools/progress.py                 # corpus/generation snapshot
 dotnet build --configuration Release
 ```
 
