@@ -32,12 +32,17 @@ except ModuleNotFoundError:
     from tools import blueprint as blueprint_renderer
 
 
-BENCHMARK_VERSION = "speech-style-benchmark-v1"
-DEFAULT_ROOT = Path("data/blueprints/evaluation/benchmark_v1")
+BENCHMARK_VERSION = "speech-style-benchmark-v2"
+PROTOCOL_VERSION = "annotation-protocol-v2"
+DEFAULT_ROOT = Path("data/blueprints/evaluation/benchmark_v2")
 DEFAULT_SEED = "oh-my-voice-benchmark-v1-2026-11-01"
+# v2 keeps the v1 population, seed, and frozen sample lines so the protocol change
+# is the only difference between the two benchmarks. The experimental
+# `diction_style` field is removed: it overlapped vocabulary/diction and was the
+# least stable field in the v1 stability run.
 FIELDS: dict[str, dict[str, str]] = {
     "register": {
-        "formal": "Predominantly formal vocabulary, constructions, or forms of address.",
+        "formal": "Predominantly formal constructions, honorifics, or elevated forms of address.",
         "neutral": "Predominantly ordinary wording without strong formal or conversational markers.",
         "conversational": "Predominantly informal, conversational wording or constructions.",
         "mixed": "Substantial, recurring shifts between contrasting registers.",
@@ -75,18 +80,98 @@ FIELDS: dict[str, dict[str, str]] = {
         "mixed": "No single rhetorical pattern predominates across the sample.",
         "insufficient_evidence": "Too little usable text to judge rhetorical pattern.",
     },
-    "diction_style": {
-        "precise": "Wording repeatedly favors exact, carefully specified terms.",
-        "relaxed": "Wording repeatedly favors casual, loose expressions.",
-        "plain": "Wording is direct and unembellished without a stronger pattern.",
-        "ornate": "Wording repeatedly uses elaborate or embellished phrasing.",
-        "mixed": "Distinct diction patterns recur without one predominating.",
-        "insufficient_evidence": "Too little usable text to distinguish a diction pattern.",
-    },
 }
+FIELD_SCALE_DISPLAY = {
+    "register": "nominal",
+    "vocabulary_complexity": "ordinal, plain < ordinary < advanced, plus specialized/poetic",
+    "sentence_complexity": "ordinal, simple < mixed < complex",
+    "colloquialism": "ordinal, low < moderate < high",
+    "rhetorical_style": "nominal",
+}
+FIELD_SCALES = {
+    "register": "nominal",
+    "vocabulary_complexity": "ordinal_core_plus_off_scale",
+    "sentence_complexity": "ordinal",
+    "colloquialism": "ordinal",
+    "rhetorical_style": "nominal",
+}
+# Only the ordered core of each ordinal field participates in weighted kappa.
 ORDINAL_FIELD_LABELS = {
+    "vocabulary_complexity": ["plain", "ordinary", "advanced"],
     "sentence_complexity": ["simple", "mixed", "complex"],
     "colloquialism": ["low", "moderate", "high"],
+}
+# Decision rules the annotator must apply before choosing a label.
+EVIDENCE_MIN_UTTERANCES = 8
+EVIDENCE_MIN_WORDS = 100
+MIXED_MIN_UTTERANCE_SHARE = 0.30
+MIXED_MIN_UTTERANCES_PER_SIDE = 3
+MAX_CITED_LINES = 3
+PILOT_ITEMS_PER_STRATUM = 3
+ADJUDICATION_REASONS = (
+    "annotator_agreement",
+    "majority_of_annotators",
+    "tie_break_rule",
+    "insufficient_evidence",
+    "taxonomy_revision",
+)
+PILOT_MIN_EXACT_AGREEMENT = 0.75
+PILOT_MIN_KAPPA = 0.60
+CONDITIONS = ("text_only", "assisted")
+SYSTEM_PREDICTION_DIRS = {
+    "rules_full": "rules_full",
+    "rules_sample": "rules_sample",
+    "nimble_assisted": "nimble/assisted",
+    "nimble_text_only": "nimble/text_only",
+    "qwen_base_assisted": "qwen_base/assisted",
+    "qwen_base_text_only": "qwen_base/text_only",
+    "jev": "jev",
+}
+PROBABILITY_SYSTEMS = ("nimble_assisted", "nimble_text_only")
+CONDITION_PAIRS = (
+    ("nimble_assisted", "nimble_text_only"),
+    ("qwen_base_assisted", "qwen_base_text_only"),
+)
+# Boundary rules that keep the overlapping fields separable.
+FIELD_BOUNDARIES = {
+    "register": "Rate formality of address and construction only. Do not raise the label because a line is long (sentence complexity) or contains rare words (vocabulary complexity).",
+    "vocabulary_complexity": "Rate word rarity and specialization only. Do not raise the label because a sentence has many clauses (sentence complexity) or because the wording is formal (register).",
+    "sentence_complexity": "Rate length and clause structure only. Do not raise the label because the words are rare (vocabulary complexity) or the tone is formal (register).",
+    "colloquialism": "Rate slang, idioms, contractions, and informal constructions only. A blunt or direct line is not colloquial unless it uses informal wording; a single interjection is not enough.",
+    "rhetorical_style": "Rate the recurring utterance shape only (questions, exclamations, fragments, linked clauses, balanced statements). Do not re-score formality or word rarity here.",
+}
+FIELD_GUIDANCE: dict[str, list[dict[str, str]]] = {
+    "register": [
+        {"label": "formal", "text": "I shall inform the steward at once. Pray forgive my intrusion.", "why": "Elevated constructions and honorific address."},
+        {"label": "neutral", "text": "The steward is in the hall. I will tell him you arrived.", "why": "Ordinary wording, no strong formality or slang."},
+        {"label": "conversational", "text": "Yeah, he's in the hall. I'll let him know you're here.", "why": "Contractions and informal phrasing throughout."},
+        {"label": "mixed", "text": "Yeah, he's in the hall. I shall inform the steward at once, if it pleases you.", "why": "Two contrasting registers recur, not one stray line."},
+    ],
+    "vocabulary_complexity": [
+        {"label": "plain", "text": "Take the box. Put it there. Come back later.", "why": "Common words only."},
+        {"label": "ordinary", "text": "Leave the crate by the door and come back after the meeting.", "why": "Everyday vocabulary."},
+        {"label": "advanced", "text": "The discrepancy in the ledger demands a meticulous accounting of every consignment.", "why": "Repeated less-common words."},
+        {"label": "specialized", "text": "The aetherial condenser's pressure differential must not exceed the calibrated threshold.", "why": "Domain terms recur."},
+        {"label": "poetic", "text": "The tide remembers every name the shore has taken.", "why": "Figurative, lyrical wording."},
+    ],
+    "sentence_complexity": [
+        {"label": "simple", "text": "Wait here. He is coming. Do not speak.", "why": "Short, single-clause utterances."},
+        {"label": "mixed", "text": "Wait here. He is coming, and when he arrives you should tell him what you saw at the gate.", "why": "Simple and multi-clause utterances both recur."},
+        {"label": "complex", "text": "When he arrives, you should tell him what you saw at the gate, unless the guards have already told him themselves.", "why": "Multi-clause structure throughout."},
+    ],
+    "colloquialism": [
+        {"label": "low", "text": "The shipment has not arrived. I will inquire at the gate.", "why": "No informal wording."},
+        {"label": "moderate", "text": "The shipment hasn't arrived yet. I'll ask around at the gate.", "why": "Contractions and light informality, no slang."},
+        {"label": "high", "text": "Ain't no shipment yet. I'll poke around the gate, yeah?", "why": "Slang and informal constructions recur."},
+    ],
+    "rhetorical_style": [
+        {"label": "measured", "text": "The gate opens at dawn. We will be ready by then. There is no cause for alarm.", "why": "Balanced statements are the pattern."},
+        {"label": "direct", "text": "Gate. Dawn. Be ready.", "why": "Short, plain statements that get to the point."},
+        {"label": "flowing", "text": "The gate opens at dawn, and we will be ready by then, though there is no cause for alarm, and no reason to hurry.", "why": "Linked clauses recur."},
+        {"label": "fragmented", "text": "The gate. Dawn. Ready, or not.", "why": "Fragments and interrupted phrases recur."},
+        {"label": "inquisitive", "text": "Who told you that? When did the gate open? Did anyone else see it?", "why": "Questions form the prominent pattern."},
+        {"label": "emphatic", "text": "The gate opens at dawn! Be ready! There is no cause for alarm!", "why": "Exclamations and marked emphasis recur."},
+    ],
 }
 MEASUREMENT_KEYS = (
     "line_count", "word_count", "unique_word_count", "vocabulary_diversity",
@@ -98,12 +183,11 @@ MEASUREMENT_KEYS = (
 )
 RULE_ALIASES = {"educated": "advanced"}
 QUESTION_INSTRUCTIONS = {
-    "register": "Classify the predominant register of the supplied dialogue. Judge actual wording, not character identity, occupation, status, or personality.",
-    "vocabulary_complexity": "Classify the vocabulary in the supplied dialogue. Judge word choice, not the speaker's intelligence, education, or social class.",
-    "sentence_complexity": "Classify the structural complexity of the supplied utterances, considering sentence length and clauses.",
-    "colloquialism": "Classify how often the supplied dialogue uses colloquial wording, idioms, slang, and informal constructions.",
-    "rhetorical_style": "Classify the recurring rhetorical pattern in the supplied dialogue. Judge the text, not character personality.",
-    "diction_style": "Experimental field: classify the recurring wording style. Judge observable word choice and phrasing, not character identity or personality.",
+    "register": "Classify the predominant register of the supplied dialogue. Judge formality of address and construction only; ignore word rarity, sentence length, and the character's identity, occupation, status, or personality.",
+    "vocabulary_complexity": "Classify the vocabulary in the supplied dialogue. Judge word rarity and specialization only; ignore sentence length, formality of tone, and the speaker's intelligence, education, or social class.",
+    "sentence_complexity": "Classify the structural complexity of the supplied utterances by length and clause structure only; ignore word rarity and formality of tone.",
+    "colloquialism": "Classify how often the supplied dialogue uses colloquial wording, idioms, slang, contractions, and informal constructions; ignore bluntness and a single isolated interjection.",
+    "rhetorical_style": "Classify the recurring utterance shape in the supplied dialogue (questions, exclamations, fragments, linked clauses, balanced statements). Do not re-score formality or word rarity, and do not infer character personality.",
 }
 
 
@@ -147,8 +231,11 @@ def _stable_key(seed: str, *parts: str) -> str:
 
 
 def _write_text_immutable(path: Path, value: str) -> Path:
+    return _write_bytes_immutable(path, value.encode("utf-8"))
+
+
+def _write_bytes_immutable(path: Path, encoded: bytes) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    encoded = value.encode("utf-8")
     candidate = path
     if candidate.exists():
         if candidate.read_bytes() == encoded:
@@ -185,18 +272,25 @@ def _sample_measurement_view(analysis: dict, samples: list[dict]) -> dict:
     return result
 
 
-def build_speech_style_state(benchmark_dossier: dict) -> dict:
-    """Build an identity-free, sample-only state for text-style classification."""
+def build_speech_style_state(benchmark_dossier: dict, *, condition: str = "assisted") -> dict:
+    """Build an identity-free, sample-only state for text-style classification.
+
+    ``text_only`` withholds every sample-derived measurement so the comparison
+    against the measurement-based rules baseline is not circular.
+    """
+    if condition not in CONDITIONS:
+        raise ValueError(f"unknown condition: {condition}")
     samples = benchmark_dossier.get("dialogue_samples") or []
-    sample_analysis = analyze_dialogue(samples, blueprint_renderer.load_vocabulary())
     state = {
         "task": "Classify observable linguistic patterns in the supplied dialogue only. Do not infer acoustic traits.",
         "dialogue_samples": [
             {"id": sample["id"], "text": sample["text"]}
             for sample in samples
         ],
-        "measurements": _sample_measurement_view(sample_analysis, samples),
     }
+    if condition == "assisted":
+        sample_analysis = analyze_dialogue(samples, blueprint_renderer.load_vocabulary())
+        state["measurements"] = _sample_measurement_view(sample_analysis, samples)
     forbidden = {"name", "npc_id", "canonical_id", "race", "clan", "sex", "occupation", "faction", "personality", "interpretation", "lore", "voice"}
     if forbidden.intersection(state):
         raise ValueError("speech-style state contains a prohibited identity or interpretation key")
@@ -224,7 +318,7 @@ def _blank_annotation(benchmark_id: str, sample_count: int) -> dict:
         "sample_count": sample_count,
         "overall_evidence_sufficiency": "",
         "fields": {
-            field: {"label": "", "evidence_sufficient": "", "notes": ""}
+            field: {"label": "", "evidence_sufficient": "", "evidence_line_ids": [], "notes": ""}
             for field in FIELDS
         },
         "annotator_notes": "",
@@ -233,27 +327,76 @@ def _blank_annotation(benchmark_id: str, sample_count: int) -> dict:
 
 def _annotation_guide() -> str:
     lines = [
-        "# Oh My Voice speech-style benchmark v1 — annotation guide",
+        "# Oh My Voice speech-style benchmark v2 — annotation guide",
         "",
-        "Annotate only the text lines shown in your form. You are rating wording, not a character, actor, personality, job, social position, race, sex, or voice.",
-        "Do not look up names or characters. The benchmark ID is an arbitrary ID. Do not discuss labels with the other annotator.",
-        "For each field, choose one label and record whether the evidence is sufficient. Use `insufficient_evidence` when the available sample cannot support a reliable field label; do not use `neutral` for missing evidence.",
-        "Use `mixed` only when contrasting patterns recur meaningfully in the sample. A few isolated exceptions do not make a sample mixed.",
-        "The supplied lines are a fixed representative sample, not a full transcript. Do not infer pitch, timbre, accent, age, or any other acoustic feature.",
+        "Annotate only the text lines shown in your form. You are rating wording, not a character, actor,",
+        "personality, job, social position, race, sex, or voice. Do not look up names or characters: the",
+        "benchmark ID is arbitrary. Do not discuss labels with the other annotator.",
         "",
-        "## Fields and labels",
+        "The supplied lines are a fixed representative sample, not a full transcript. Do not infer pitch,",
+        "timbre, accent, age, or any other acoustic feature. The number of lines and the benchmark ID carry",
+        "no information about the expected label; ignore both when choosing a label.",
+        "",
+        "## Procedure (apply in this order for every field)",
+        "",
+        f"1. **Evidence floor.** If the item has fewer than {EVIDENCE_MIN_UTTERANCES} usable utterances or fewer",
+        f"   than {EVIDENCE_MIN_WORDS} words, set that field's `label` to `insufficient_evidence` and",
+        "   `evidence_sufficient` to `no`. Do not guess. A sample above the floor may still be marked",
+        "   insufficient if the lines do not show the pattern you are rating.",
+        "2. **Count the pattern.** Read every line and decide, line by line, whether it shows label X or label Y.",
+        "   A label needs the clear majority of lines, not a single memorable line.",
+        f"3. **Mixed test.** Use `mixed` only when two contrasting labels each cover at least about",
+        f"   {int(MIXED_MIN_UTTERANCE_SHARE * 100)}% of the lines and each has at least {MIXED_MIN_UTTERANCES_PER_SIDE} lines of its own.",
+        "   One stray exception, or a single line that could be read either way, does not make a sample mixed.",
+        "4. **Tie-break.** If neither label reaches a majority and the mixed test fails, choose the label supported",
+        "   by the larger share of lines. If the two shares are indistinguishable, choose the milder label",
+        "   (`neutral`, `ordinary`, `moderate`, or `measured`) rather than the extreme one.",
+        "5. **Cite evidence.** Record 1 to 3 line IDs that actually support the chosen label, using the IDs printed",
+        f"   with each line (maximum {MAX_CITED_LINES}). Cite at least 2 lines when you choose `mixed`, one per side.",
+        "   Do not cite a line that contradicts the label.",
+        "",
+        "`insufficient_evidence` is not a neutral label and `mixed` is not a hedge. `evidence_sufficient` must be",
+        "`no` exactly when the label is `insufficient_evidence`, and `yes` or `uncertain` otherwise.",
+        "",
+        "## Field boundaries (the fields overlap, so keep them separate)",
+        "",
+    ]
+    for field, boundary in FIELD_BOUNDARIES.items():
+        lines.append(f"- `{field}` ({FIELD_SCALE_DISPLAY[field]}): {boundary}")
+    lines += [
+        "",
+        "## Fields, labels, and boundary examples",
         "",
     ]
     for field, options in FIELDS.items():
-        lines.extend([f"### `{field}`", ""])
+        lines.extend([f"### `{field}` — {FIELD_SCALE_DISPLAY[field]}", ""])
         for label, description in options.items():
             lines.append(f"- `{label}` — {description}")
         lines.append("")
+        examples = FIELD_GUIDANCE.get(field) or []
+        if examples:
+            lines.append("Boundary examples (illustrative text, not benchmark items):")
+            lines.append("")
+            for example in examples:
+                lines.append(f"- `{example['label']}`: \"{example['text']}\" — {example['why']}")
+            lines.append("")
     lines += [
         "## Evidence fields",
         "",
-        "For `overall_evidence_sufficiency`, choose `sufficient`, `insufficient`, or `uncertain` for judging the five core fields as a group. For each field's `evidence_sufficient`, choose `yes`, `no`, or `uncertain`. Explain ambiguous cases briefly in `notes`; do not write an essay.",
-        "The experimental `diction_style` field is being assessed separately. Its agreement and usefulness should be reported independently before retaining it in any later profile schema.",
+        "`overall_evidence_sufficiency` is a separate judgement for the five fields as a group: `sufficient`,",
+        "`insufficient`, or `uncertain`. Per-field `evidence_sufficient` is `yes`, `no`, or `uncertain`.",
+        "Use `notes` for a short reason when the case is ambiguous, when you chose `mixed`, or when you chose",
+        "`insufficient_evidence`; do not write an essay.",
+        "",
+        "## Agreement gates (why this matters)",
+        "",
+        f"Before the full set is annotated, both annotators label a {PILOT_ITEMS_PER_STRATUM * 4}-item pilot. A field",
+        f"proceeds only if exact agreement is at least {PILOT_MIN_EXACT_AGREEMENT:.2f} and Cohen's kappa is at least",
+        f"{PILOT_MIN_KAPPA:.2f} (linear-weighted kappa for ordinal fields). A field below the gate is revised or",
+        "dropped instead of being annotated in bulk.",
+        "",
+        "Items that both annotators mark `evidence_sufficient: no` are excluded from model accuracy gates and",
+        "reported separately; they are not treated as model errors.",
         "",
         "Return the completed form without adding names, source locations, or guesses about identity.",
     ]
@@ -345,10 +488,25 @@ def prepare_benchmark(
         ids.sort(key=lambda bid: (_stable_key(seed, "split", stratum, bid), bid))
         split_by_id.update({bid: "development" if i < 5 else "locked_test" for i, bid in enumerate(ids)})
 
+    # The pilot is drawn from development items only, so a failed gate never
+    # consumes locked-test annotation effort and never tunes on locked test.
+    stratum_by_id = {bid: priv["stratum"] for bid, _payload, priv in dossier_payloads}
+    pilot_ids: list[str] = []
+    for stratum in strata:
+        development_ids = sorted(
+            (bid for bid in split_by_id if split_by_id[bid] == "development" and stratum_by_id[bid] == stratum),
+            key=lambda bid: (_stable_key(seed, "pilot", stratum, bid), bid),
+        )
+        if len(development_ids) < PILOT_ITEMS_PER_STRATUM:
+            raise RuntimeError(f"stratum {stratum} has only {len(development_ids)} development items for the pilot")
+        pilot_ids.extend(development_ids[:PILOT_ITEMS_PER_STRATUM])
+    pilot_id_set = set(pilot_ids)
+
     for directory in (
-        root / "dossiers", root / "annotations", root / "adjudicated",
+        root / "dossiers", root / "annotations", root / "annotations" / "pilot", root / "adjudicated",
         root / "predictions" / "rules_full", root / "predictions" / "rules_sample",
-        root / "predictions" / "nimble", root / "predictions" / "qwen_base",
+        root / "predictions" / "nimble" / "text_only", root / "predictions" / "nimble" / "assisted",
+        root / "predictions" / "qwen_base" / "text_only", root / "predictions" / "qwen_base" / "assisted",
         root / "predictions" / "jev", root / "reports",
     ):
         directory.mkdir(parents=True, exist_ok=True)
@@ -417,17 +575,27 @@ def prepare_benchmark(
             "dialogue_samples": payload["dialogue_samples"],
         })
     form_items.sort(key=lambda row: (_stable_key(seed, "form-order", row["benchmark_id"]), row["benchmark_id"]))
-    form = {
-        "schema_version": "1.0",
-        "benchmark": BENCHMARK_VERSION,
-        "instructions": "Complete labels independently using annotation_guide.md. Do not look up benchmark IDs or share labels.",
-        "items": form_items,
-    }
+    pilot_items = [item for item in form_items if item["benchmark_id"] in pilot_id_set]
+    if len(pilot_items) != len(pilot_ids):
+        raise RuntimeError("pilot item selection does not match the frozen dossiers")
+
+    def _form(items: list[dict], scope: str) -> dict:
+        return {
+            "schema_version": "2.0",
+            "benchmark": BENCHMARK_VERSION,
+            "protocol": PROTOCOL_VERSION,
+            "scope": scope,
+            "instructions": "Complete labels independently using annotation_guide.md. Cite 1-3 supporting line IDs per field. Do not look up benchmark IDs or share labels.",
+            "items": items,
+        }
+
     for annotator in ("annotator_a", "annotator_b"):
-        write_immutable_json(root / "annotations" / f"{annotator}.json", form)
+        write_immutable_json(root / "annotations" / f"{annotator}.json", _form(form_items, "full"))
+        write_immutable_json(root / "annotations" / "pilot" / f"{annotator}.json", _form(pilot_items, "pilot"))
     write_immutable_json(root / "adjudicated" / "gold.json", {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "benchmark": BENCHMARK_VERSION,
+        "protocol": PROTOCOL_VERSION,
         "status": "pending_independent_annotations_and_adjudication",
         "items": [
             {
@@ -435,6 +603,7 @@ def prepare_benchmark(
                 "annotator_a_labels": {},
                 "annotator_b_labels": {},
                 "adjudicated_labels": {field: "" for field in FIELDS},
+                "adjudication_reasons": {field: "" for field in FIELDS},
                 "adjudication_notes": "",
             }
             for item in form_items
@@ -443,10 +612,17 @@ def prepare_benchmark(
     _write_text_immutable(root / "annotations" / "annotation_guide.md", _annotation_guide())
 
     # Record unavailable model baselines explicitly; do not fabricate predictions.
-    write_immutable_json(root / "predictions" / "qwen_base" / "status.json", {
-        "status": "not_run",
-        "reason": "No base Qwen3.5 9B text-generation checkpoint is present under data/models. The available local 9B GGUF is the Bespoke-Nimble decision fine-tune.",
-    })
+    for condition in CONDITIONS:
+        write_immutable_json(root / "predictions" / "nimble" / condition / "status.json", {
+            "status": "not_run",
+            "condition": condition,
+            "reason": "Model runs are deferred until the pilot agreement gate passes; run `nimble --condition ...` against a live /v1/systemone endpoint.",
+        })
+        write_immutable_json(root / "predictions" / "qwen_base" / condition / "status.json", {
+            "status": "not_run",
+            "condition": condition,
+            "reason": "Model runs are deferred until the pilot agreement gate passes; run `qwen-base --condition ...` against a live chat-completions endpoint.",
+        })
     write_immutable_json(root / "predictions" / "jev" / "status.json", {
         "status": "not_run",
         "reason": "No Jev endpoint/key is configured in this process. The previously pasted key is not persisted or reused.",
@@ -459,8 +635,9 @@ def prepare_benchmark(
         "license_note": "Bespoke-Nimble GGUF model card declares CC BY-NC 4.0; evaluate commercial-use restrictions before deployment.",
     }
     manifest = {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "benchmark": BENCHMARK_VERSION,
+        "protocol": PROTOCOL_VERSION,
         "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "seed": seed,
         "database_path": str(db.resolve()),
@@ -475,8 +652,43 @@ def prepare_benchmark(
             "note": "The 5-20-line stratum can contain fewer than 24 unique lines. The benchmark uses all selected representative unique lines available and records the actual count; no lines are duplicated to reach 24.",
             "not_claimed": "Named/minor/recurring/quest archetype labels were not inferred from identity or lore. Seeded population sampling and source diversity are reported instead.",
         },
+        "annotation_scopes": {
+            "pilot": {
+                "item_ids": sorted(pilot_ids),
+                "items_per_stratum": PILOT_ITEMS_PER_STRATUM,
+                "split": "development",
+                "gate": {
+                    "min_exact_agreement": PILOT_MIN_EXACT_AGREEMENT,
+                    "min_cohen_kappa": PILOT_MIN_KAPPA,
+                    "ordinal_statistic": "linear-weighted Cohen's kappa",
+                    "policy": "Every field must pass before full annotation opens; a failing field is revised or dropped.",
+                },
+            },
+            "full": {
+                "item_ids": [item["benchmark_id"] for item in form_items],
+                "note": "The full form repeats the pilot items; only full-scope submissions feed gold labels.",
+            },
+        },
+        "evidence_protocol": {
+            "min_utterances": EVIDENCE_MIN_UTTERANCES,
+            "min_words": EVIDENCE_MIN_WORDS,
+            "mixed_min_utterance_share": MIXED_MIN_UTTERANCE_SHARE,
+            "mixed_min_utterances_per_side": MIXED_MIN_UTTERANCES_PER_SIDE,
+            "max_cited_lines": MAX_CITED_LINES,
+            "citation_required": True,
+            "adjudication_reasons": list(ADJUDICATION_REASONS),
+            "insufficient_evidence_implies_evidence_sufficient_no": True,
+            "low_evidence_exclusion_rule": "A field is excluded from model accuracy gates when both annotators record evidence_sufficient: no.",
+        },
+        "conditions": {
+            "text_only": "The classifier receives frozen dialogue lines and IDs only.",
+            "assisted": "The classifier also receives sample-derived measurements.",
+            "rules_note": "The deterministic rules baseline consumes measurements by construction, so it is a measurement-only baseline and cannot serve as a text-only condition.",
+        },
         "model": model_metadata,
         "fields": FIELDS,
+        "field_scales": FIELD_SCALES,
+        "ordinal_field_labels": ORDINAL_FIELD_LABELS,
         "public_dossiers": public_dossiers,
         "private_selection": private_manifest,
         "annotator_blinding": "Forms contain anonymous IDs and frozen text only; no demographics, full-corpus rules, model predictions, or split labels.",
@@ -486,8 +698,11 @@ def prepare_benchmark(
     manifest_path = write_immutable_json(root / "manifest.json", manifest)
     report = {
         "benchmark": BENCHMARK_VERSION,
+        "protocol": PROTOCOL_VERSION,
         "manifest_path": str(manifest_path),
         "dossier_count": len(public_dossiers),
+        "fields": list(FIELDS),
+        "pilot_item_count": len(pilot_ids),
         "split_counts": {
             name: sum(row["split"] == name for row in private_manifest)
             for name in ("development", "locked_test")
@@ -499,6 +714,10 @@ def prepare_benchmark(
         "sample_count_min": min(row["dialogue_sample_count"] for row in public_dossiers),
         "sample_count_max": max(row["dialogue_sample_count"] for row in public_dossiers),
         "sample_count_below_24": sum(row["dialogue_sample_count"] < 24 for row in public_dossiers),
+        "sample_below_evidence_floor": [
+            row["benchmark_id"] for row in public_dossiers
+            if row["dialogue_sample_count"] < EVIDENCE_MIN_UTTERANCES
+        ],
         "source_coverage": {
             source: sum(bool(row.get("source_counts", {}).get(source)) for row in private_manifest)
             for source in sorted({source for row in private_manifest for source in row.get("source_counts", {})})
@@ -508,12 +727,28 @@ def prepare_benchmark(
             for source in sorted({source for row in private_manifest for source in row.get("source_counts", {})})
         },
         "quest_source_npcs": sum(bool(set(row.get("source_counts", {})) & {"quest", "custom", "raid"}) for row in private_manifest),
-        "human_annotation_status": "pending",
-        "nimble_status": "not_run",
-        "qwen_base_status": "unavailable_checkpoint",
+        "human_annotation_status": "pending_pilot",
+        "model_status": {system: "not_run" for system in SYSTEM_PREDICTION_DIRS if system not in {"rules_full", "rules_sample"}},
         "jev_status": "unconfigured",
     }
     write_immutable_json(root / "reports" / "preparation.json", report)
+    write_immutable_json(root / "reports" / "protocol.json", {
+        "benchmark": BENCHMARK_VERSION,
+        "protocol": PROTOCOL_VERSION,
+        "changes_from_v1": {
+            "fields": "diction_style removed (overlap with vocabulary_complexity and lowest stability in v1); five core fields retained.",
+            "boundaries": "Per-field boundary rules added to the guide and to model instructions to separate register / vocabulary / sentence complexity.",
+            "decision_rules": "Evidence floor, majority rule, mixed threshold, tie-break, and mandatory 1-3 line citations are operational and validated on import.",
+            "scales": FIELD_SCALES,
+            "ordinal_labels": ORDINAL_FIELD_LABELS,
+            "conditions": list(CONDITIONS),
+            "pilot": f"{len(pilot_ids)} development items gate the full annotation run.",
+        },
+        "not_claimed": [
+            "Model stability numbers (repeats, reordering, alternate samples) are robustness diagnostics, not correctness evidence.",
+            "Rules baselines are measurement-only; they are not a text-only condition.",
+        ],
+    })
     return report
 
 
@@ -548,11 +783,15 @@ def run_nimble(
     *,
     root: Path | str = DEFAULT_ROOT,
     endpoint: str = "http://127.0.0.1:18081/v1/systemone",
+    condition: str = "assisted",
     limit: int | None = None,
     only: set[str] | None = None,
     timeout: float = 600,
 ) -> dict:
+    if condition not in CONDITIONS:
+        raise ValueError(f"unknown condition: {condition}")
     root = Path(root)
+    prediction_dir = root / "predictions" / SYSTEM_PREDICTION_DIRS[f"nimble_{condition}"]
     manifest_path = root / "manifest.json"
     manifest = read_json(manifest_path)
     dossiers = manifest.get("public_dossiers") or []
@@ -569,13 +808,13 @@ def run_nimble(
     run_started = time.perf_counter()
     for entry in dossiers:
         dossier = read_json(Path(entry["dossier_path"]))
-        state = build_speech_style_state(dossier)
+        state = build_speech_style_state(dossier, condition=condition)
         state_bytes = len(json.dumps(state, ensure_ascii=False).encode("utf-8"))
         body = json.dumps({"state": state, "questions": questions}, ensure_ascii=False).encode("utf-8")
         request_bytes = len(body)
         request_sizes.append(request_bytes)
         state_sizes.append(state_bytes)
-        target_path = root / "predictions" / "nimble" / f"{entry['benchmark_id']}.json"
+        target_path = prediction_dir / f"{entry['benchmark_id']}.json"
         request_sha = hashlib.sha256(body).hexdigest()
         if target_path.is_file():
             prior = read_json(target_path)
@@ -608,7 +847,8 @@ def run_nimble(
                 "model_sha256": (manifest.get("model") or {}).get("sha256"),
                 "quantization": "Q4_K_M",
                 "llama_cpp_revision": "dde879bc4f954b809892fd0d660515f42536394a",
-                "configuration_sha256": object_hash({"fields": FIELDS, "instructions": QUESTION_INSTRUCTIONS}),
+                "configuration_sha256": object_hash({"fields": FIELDS, "instructions": QUESTION_INSTRUCTIONS, "condition": condition}),
+                "condition": condition,
                 "endpoint": endpoint,
                 "http_status": status,
                 "latency_ms": elapsed_ms,
@@ -620,7 +860,7 @@ def run_nimble(
                 "usage": payload.get("usage") or {},
                 "answers": answers,
             }
-            path = write_immutable_json(root / "predictions" / "nimble" / f"{entry['benchmark_id']}.json", record)
+            path = write_immutable_json(prediction_dir / f"{entry['benchmark_id']}.json", record)
             results.append({
                 "benchmark_id": entry["benchmark_id"],
                 "latency_ms": elapsed_ms,
@@ -642,7 +882,7 @@ def run_nimble(
                 "request_bytes": request_bytes,
                 "state_bytes": state_bytes,
             }
-            path = write_immutable_json(root / "predictions" / "nimble" / f"{entry['benchmark_id']}.failure.json", failure)
+            path = write_immutable_json(prediction_dir / f"{entry['benchmark_id']}.failure.json", failure)
             failures.append({
                 "benchmark_id": entry["benchmark_id"],
                 "latency_ms": failure["latency_ms"],
@@ -657,6 +897,7 @@ def run_nimble(
     report = {
         "system": "nimble_native_systemone",
         "endpoint": endpoint,
+        "condition": condition,
         "requested": len(dossiers),
         "completed": len(results),
         "failure_count": len(failures),
@@ -678,7 +919,7 @@ def run_nimble(
         "latency_note": "Reused identical predictions contribute their original measured item latency; wall_elapsed_seconds records this invocation's elapsed time.",
         "note": "Probabilities are model scores and are not assumed calibrated for this benchmark.",
     }
-    report_path = write_immutable_json(root / "reports" / "nimble_run.json", report)
+    report_path = write_immutable_json(root / "reports" / f"nimble_{condition}_run.json", report)
     return {**report, "report_path": str(report_path)}
 
 
@@ -687,6 +928,7 @@ def run_nimble_stability(
     root: Path | str = DEFAULT_ROOT,
     cache: Path | str = "data/blueprints/cache",
     endpoint: str = "http://127.0.0.1:18081/v1/systemone",
+    condition: str = "assisted",
     split: str = "locked_test",
     only: set[str] | None = None,
     timeout: float = 600,
@@ -694,6 +936,8 @@ def run_nimble_stability(
     """Run predeclared sample perturbations without tuning on the selected split."""
     if split not in {"development", "locked_test"}:
         raise ValueError("split must be 'development' or 'locked_test'")
+    if condition not in CONDITIONS:
+        raise ValueError(f"unknown condition: {condition}")
     root = Path(root)
     manifest = read_json(root / "manifest.json")
     public = {item["benchmark_id"]: item for item in manifest["public_dossiers"]}
@@ -710,7 +954,7 @@ def run_nimble_stability(
     )
     extended_by_id = {row["canonical_id"]: read_json(Path(row["path"])) for row in extended_records}
     questions = build_questions()
-    stability_root = root / "predictions" / "nimble" / "stability"
+    stability_root = root / "predictions" / "nimble" / "stability" / condition
     stability_manifest = []
     result_rows = []
     baseline_labels: dict[str, dict] = {}
@@ -760,7 +1004,7 @@ def run_nimble_stability(
                 "dialogue_samples": anonymous,
                 "sample_measurements": {},
             }
-            state = build_speech_style_state(temporary_dossier)
+            state = build_speech_style_state(temporary_dossier, condition=condition)
             body = json.dumps({"state": state, "questions": questions}, ensure_ascii=False).encode("utf-8")
             request = Request(endpoint, data=body, headers={"Content-Type": "application/json", "Accept": "application/json"}, method="POST")
             started = time.perf_counter()
@@ -779,7 +1023,8 @@ def run_nimble_stability(
                     "model_sha256": (manifest.get("model") or {}).get("sha256"),
                     "quantization": "Q4_K_M",
                     "llama_cpp_revision": "dde879bc4f954b809892fd0d660515f42536394a",
-                    "configuration_sha256": object_hash({"fields": FIELDS, "instructions": QUESTION_INSTRUCTIONS}),
+                    "configuration_sha256": object_hash({"fields": FIELDS, "instructions": QUESTION_INSTRUCTIONS, "condition": condition}),
+                    "condition": condition,
                     "http_status": status,
                     "latency_ms": elapsed_ms,
                     "request_sha256": hashlib.sha256(body).hexdigest(),
@@ -834,8 +1079,9 @@ def run_nimble_stability(
         variant_summary["repeat_probability_max_abs_delta"] = max(probability_deltas)
         variant_summary["repeat_probability_mean_abs_delta"] = sum(probability_deltas) / len(probability_deltas)
     elapsed_total = round(time.perf_counter() - started_all, 3)
-    artifact_manifest = write_immutable_json(root / "reports" / "stability_manifest.json", {
+    artifact_manifest = write_immutable_json(root / "reports" / f"stability_manifest_{condition}.json", {
         "benchmark": BENCHMARK_VERSION,
+        "condition": condition,
         "split": split,
         "npc_count": len(selection),
         "source_maps": stability_manifest,
@@ -843,6 +1089,7 @@ def run_nimble_stability(
     report = {
         "system": "nimble_native_systemone",
         "endpoint": endpoint,
+        "condition": condition,
         "split": split,
         "npc_count": len(selection),
         "request_count": len(result_rows),
@@ -853,7 +1100,7 @@ def run_nimble_stability(
         "stability_manifest_path": str(artifact_manifest),
         "note": "Robustness results are descriptive only. Do not use locked-test outputs to tune prompts or thresholds.",
     }
-    report_path = write_immutable_json(root / "reports" / "nimble_stability.json", report)
+    report_path = write_immutable_json(root / "reports" / f"nimble_stability_{condition}.json", report)
     return {**report, "report_path": str(report_path)}
 
 
@@ -919,6 +1166,7 @@ def analyze_nimble_stability(
     analysis = {
         "benchmark": BENCHMARK_VERSION,
         "system": report.get("system"),
+        "condition": report.get("condition"),
         "split": report.get("split"),
         "npc_count": report.get("npc_count"),
         "source_report": str(report_path),
@@ -926,7 +1174,7 @@ def analyze_nimble_stability(
         "per_variant_per_field": per_variant,
         "note": "Agreement compares each robustness variant with its same-NPC original frozen input; these results are descriptive and are not used to tune the locked test set.",
     }
-    output_path = write_immutable_json(root / "reports" / "nimble_stability_field_analysis.json", analysis)
+    output_path = write_immutable_json(root / "reports" / f"nimble_stability_field_analysis_{report.get('condition', 'assisted')}.json", analysis)
     return {**analysis, "report_path": str(output_path)}
 
 
@@ -971,6 +1219,7 @@ def run_qwen_base(
     *,
     root: Path | str = DEFAULT_ROOT,
     endpoint: str = "http://127.0.0.1:18082/v1/chat/completions",
+    condition: str = "assisted",
     model: str = "Qwen3.5-9B-Base-Q4_K_M",
     model_path: Path | str = "data/models/qwen3.5-9b/Qwen3.5-9B-Base.Q4_K_M.gguf",
     limit: int | None = None,
@@ -978,7 +1227,10 @@ def run_qwen_base(
     timeout: float = 600,
 ) -> dict:
     """Run constrained JSON generation using the separate Qwen base GGUF."""
+    if condition not in CONDITIONS:
+        raise ValueError(f"unknown condition: {condition}")
     root = Path(root)
+    prediction_dir = root / "predictions" / SYSTEM_PREDICTION_DIRS[f"qwen_base_{condition}"]
     model_path = Path(model_path)
     model_hash = _digest_file(model_path) if model_path.is_file() else None
     manifest = read_json(root / "manifest.json")
@@ -1014,7 +1266,7 @@ def run_qwen_base(
     run_started = time.perf_counter()
     for entry in dossiers:
         dossier = read_json(Path(entry["dossier_path"]))
-        state = build_speech_style_state(dossier)
+        state = build_speech_style_state(dossier, condition=condition)
         state_bytes = len(json.dumps(state, ensure_ascii=False).encode("utf-8"))
         user_content = json.dumps(state, ensure_ascii=False, separators=(",", ":"))
         body_value = {
@@ -1023,7 +1275,7 @@ def run_qwen_base(
             "model_path": str(model_path),
             "model_sha256": model_hash,
             "quantization": "Q4_K_M",
-            "configuration_sha256": object_hash({"fields": FIELDS, "system": system, "schema": schema}),
+            "configuration_sha256": object_hash({"fields": FIELDS, "system": system, "schema": schema, "condition": condition}),
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user_content},
@@ -1040,7 +1292,7 @@ def run_qwen_base(
         request_sizes.append(request_bytes)
         state_sizes.append(state_bytes)
         request_hash = hashlib.sha256(body).hexdigest()
-        target = root / "predictions" / "qwen_base" / f"{entry['benchmark_id']}.json"
+        target = prediction_dir / f"{entry['benchmark_id']}.json"
         if target.exists():
             existing = read_json(target)
             if existing.get("request_sha256") == request_hash:
@@ -1085,6 +1337,7 @@ def run_qwen_base(
                 "benchmark_id": entry["benchmark_id"],
                 "system": "qwen3_5_9b_base_constrained_generation",
                 "model": model,
+                "condition": condition,
                 "endpoint": endpoint,
                 "http_status": status,
                 "finish_reason": finish_reason,
@@ -1126,7 +1379,7 @@ def run_qwen_base(
                 "raw_generation": generated,
                 "usage": (response_payload or {}).get("usage") or {},
             }
-            path = write_immutable_json(root / "predictions" / "qwen_base" / f"{entry['benchmark_id']}.failure.json", failure)
+            path = write_immutable_json(prediction_dir / f"{entry['benchmark_id']}.failure.json", failure)
             results.append({
                 "benchmark_id": entry["benchmark_id"],
                 "latency_ms": elapsed_ms,
@@ -1142,6 +1395,7 @@ def run_qwen_base(
     report = {
         "system": "qwen3_5_9b_base_constrained_generation",
         "model": model,
+        "condition": condition,
         "endpoint": endpoint,
         "requested": len(dossiers),
         "completed": sum("prediction_path" in result for result in results),
@@ -1162,7 +1416,7 @@ def run_qwen_base(
         "prediction_files": results,
         "latency_note": "Reused identical predictions contribute their original measured item latency; wall_elapsed_seconds records this invocation's elapsed time.",
     }
-    report_path = write_immutable_json(root / "reports" / "qwen_base_run.json", report)
+    report_path = write_immutable_json(root / "reports" / f"qwen_base_{condition}_run.json", report)
     return {**report, "report_path": str(report_path)}
 
 
@@ -1593,6 +1847,74 @@ def _select_development_threshold(
     }
 
 
+def build_share_packets(*, root: Path | str = DEFAULT_ROOT, scope: str = "pilot") -> dict:
+    """Package a blind form plus the guide into a self-contained annotator ZIP."""
+    if scope not in {"pilot", "full"}:
+        raise ValueError("annotation scope must be 'pilot' or 'full'")
+    root = Path(root)
+    guide_path = root / "annotations" / "annotation_guide.md"
+    if not guide_path.is_file():
+        raise FileNotFoundError(f"annotation guide not found: {guide_path}")
+    guide = guide_path.read_text(encoding="utf-8")
+    form_root = root / "annotations" / "pilot" if scope == "pilot" else root / "annotations"
+    packets = {}
+    for annotator in ("annotator_a", "annotator_b"):
+        form_path = form_root / f"{annotator}.json"
+        if not form_path.is_file():
+            raise FileNotFoundError(f"frozen form not found: {form_path}")
+        form_bytes = form_path.read_bytes()
+        form = json.loads(form_bytes.decode("utf-8"))
+        item_count = len(form["items"])
+        readme = "\n".join([
+            f"# Speech-style annotation packet — {scope} form, {annotator}",
+            "",
+            "Annotate independently. Do not look up character names and do not compare labels with the other annotator.",
+            "",
+            "Files in this packet:",
+            "",
+            "- `annotation_form.json` — fill this in place.",
+            "- `annotation_guide.md` — the full rubric, decision rules, and boundary examples.",
+            "",
+            "For every item and every field, fill:",
+            "",
+            "- `label` — one label from the rubric for that field.",
+            "- `evidence_sufficient` — `yes`, `no`, or `uncertain`. It must be `no` exactly when `label` is `insufficient_evidence`.",
+            "- `evidence_line_ids` — 1 to 3 line IDs from that item that support the label; at least 2 for `mixed`; empty only for `insufficient_evidence`.",
+            "- `notes` — a short reason for `mixed`, `insufficient_evidence`, or any ambiguous case.",
+            "",
+            f"Also fill `overall_evidence_sufficiency` for the {item_count} items in this packet.",
+            "",
+            "Do not edit `benchmark_id`, `sample_count`, `dialogue_samples`, or any other field: the import rejects changed samples.",
+            "Return the completed `annotation_form.json`, or this ZIP with the form replaced.",
+            "",
+            f"Items in this packet: {item_count}.",
+            "",
+        ])
+        members = {
+            "annotation_form.json": form_bytes,
+            "annotation_guide.md": guide.encode("utf-8"),
+            "README.md": readme.encode("utf-8"),
+        }
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for name in sorted(members):
+                info = zipfile.ZipInfo(name, date_time=(2026, 1, 1, 0, 0, 0))
+                info.compress_type = zipfile.ZIP_DEFLATED
+                info.external_attr = 0o644 << 16
+                archive.writestr(info, members[name])
+        path = _write_bytes_immutable(root / "annotations" / "share_packets" / f"{scope}_{annotator}.zip", buffer.getvalue())
+        packets[annotator] = {"path": str(path), "item_count": item_count, "sha256": hashlib.sha256(buffer.getvalue()).hexdigest()}
+    report = {
+        "benchmark": BENCHMARK_VERSION,
+        "protocol": PROTOCOL_VERSION,
+        "scope": scope,
+        "packets": packets,
+        "note": "Packets contain the blind form and guide only; no identities, strata, splits, predictions, or gold labels.",
+    }
+    report_path = write_immutable_json(root / "annotations" / "share_packets" / f"{scope}_manifest.json", report)
+    return {**report, "report_path": str(report_path)}
+
+
 def _read_annotation_source(path: Path | str) -> tuple[bytes, bytes, dict, bool]:
     """Return original bytes, form bytes, parsed form, and whether input was a ZIP."""
     source_path = Path(path)
@@ -1622,15 +1944,20 @@ def _read_annotation_source(path: Path | str) -> tuple[bytes, bytes, dict, bool]
     return source_bytes, form_bytes, payload, is_zip
 
 
-def _expected_annotation_items(root: Path) -> tuple[dict[str, dict], dict[str, dict]]:
+def _expected_annotation_items(root: Path, scope: str = "full") -> tuple[dict[str, dict], dict[str, dict]]:
+    if scope not in {"pilot", "full"}:
+        raise ValueError("annotation scope must be 'pilot' or 'full'")
     manifest = read_json(root / "manifest.json")
     public = {row["benchmark_id"]: row for row in manifest["public_dossiers"]}
     selection = {row["benchmark_id"]: row for row in manifest["private_selection"]}
     if set(public) != set(selection):
         raise ValueError("public dossier IDs do not match the private selection")
+    scope_ids = set((manifest.get("annotation_scopes") or {}).get(scope, {}).get("item_ids") or public)
+    if not scope_ids <= set(public):
+        raise ValueError(f"{scope} scope references benchmark IDs outside the frozen dossiers")
     expected_items = {}
-    for benchmark_id, row in public.items():
-        dossier = read_json(Path(row["dossier_path"]))
+    for benchmark_id in sorted(scope_ids):
+        dossier = read_json(Path(public[benchmark_id]["dossier_path"]))
         expected_items[benchmark_id] = {
             "sample_count": len(dossier["dialogue_samples"]),
             "dialogue_samples": dossier["dialogue_samples"],
@@ -1638,14 +1965,24 @@ def _expected_annotation_items(root: Path) -> tuple[dict[str, dict], dict[str, d
     return expected_items, selection
 
 
-def _validate_annotation_form(payload: dict, expected_items: dict[str, dict], *, label: str) -> None:
-    required_top = {"benchmark", "instructions", "items", "schema_version"}
+def _validate_annotation_form(
+    payload: dict,
+    expected_items: dict[str, dict],
+    *,
+    label: str,
+    scope: str | None = None,
+) -> None:
+    required_top = {"benchmark", "instructions", "items", "schema_version", "protocol", "scope"}
     if (
         set(payload) != required_top
         or payload.get("benchmark") != BENCHMARK_VERSION
-        or payload.get("schema_version") != "1.0"
+        or payload.get("protocol") != PROTOCOL_VERSION
+        or payload.get("schema_version") != "2.0"
+        or payload.get("scope") not in {"pilot", "full"}
     ):
-        raise ValueError(f"{label}: unexpected form schema or benchmark version")
+        raise ValueError(f"{label}: unexpected form schema, protocol, or benchmark version")
+    if scope is not None and payload.get("scope") != scope:
+        raise ValueError(f"{label}: form scope {payload.get('scope')!r} does not match the requested {scope!r} scope")
     if not isinstance(payload.get("instructions"), str):
         raise ValueError(f"{label}: instructions must be text")
     if not isinstance(payload.get("items"), list):
@@ -1687,9 +2024,11 @@ def _validate_annotation_form(payload: dict, expected_items: dict[str, dict], *,
         fields = item.get("fields")
         if not isinstance(fields, dict) or set(fields) != set(FIELDS):
             raise ValueError(f"{label} {benchmark_id}: field set differs from the rubric")
+        sample_ids = [sample["id"] for sample in expected["dialogue_samples"]]
+        sample_id_set = set(sample_ids)
         for field, options in FIELDS.items():
             answer = fields[field]
-            if not isinstance(answer, dict) or set(answer) != {"evidence_sufficient", "label", "notes"}:
+            if not isinstance(answer, dict) or set(answer) != {"evidence_line_ids", "evidence_sufficient", "label", "notes"}:
                 raise ValueError(f"{label} {benchmark_id} {field}: unexpected answer shape")
             if not isinstance(answer["label"], str) or answer["label"] not in options:
                 raise ValueError(f"{label} {benchmark_id} {field}: label is incomplete or invalid")
@@ -1697,6 +2036,23 @@ def _validate_annotation_form(payload: dict, expected_items: dict[str, dict], *,
                 raise ValueError(f"{label} {benchmark_id} {field}: evidence sufficiency is incomplete or invalid")
             if not isinstance(answer["notes"], str):
                 raise ValueError(f"{label} {benchmark_id} {field}: notes must be text")
+            cited = answer["evidence_line_ids"]
+            if not isinstance(cited, list) or any(not isinstance(line_id, str) for line_id in cited):
+                raise ValueError(f"{label} {benchmark_id} {field}: evidence_line_ids must be a list of line IDs")
+            if len(set(cited)) != len(cited) or len(cited) > MAX_CITED_LINES:
+                raise ValueError(f"{label} {benchmark_id} {field}: cite at most {MAX_CITED_LINES} distinct lines")
+            unknown = sorted(set(cited) - sample_id_set)
+            if unknown:
+                raise ValueError(f"{label} {benchmark_id} {field}: cited lines are not in this item ({unknown[:3]})")
+            insufficient = answer["label"] == "insufficient_evidence"
+            if insufficient and answer["evidence_sufficient"] != "no":
+                raise ValueError(f"{label} {benchmark_id} {field}: insufficient_evidence requires evidence_sufficient='no'")
+            if answer["evidence_sufficient"] == "no" and not insufficient:
+                raise ValueError(f"{label} {benchmark_id} {field}: evidence_sufficient='no' requires label insufficient_evidence")
+            if not insufficient and not cited:
+                raise ValueError(f"{label} {benchmark_id} {field}: at least one supporting line ID is required")
+            if answer["label"] == "mixed" and len(cited) < 2:
+                raise ValueError(f"{label} {benchmark_id} {field}: mixed requires at least two cited lines")
 
 
 def _write_new_bytes(path: Path, value: bytes) -> None:
@@ -1718,20 +2074,28 @@ def _new_revision_dir(parent: Path, prefix: str, digest: str) -> Path:
     return candidate
 
 
-def _annotation_run_directories(root: Path) -> list[tuple[Path, dict]]:
+def _annotation_run_directories(root: Path, scope: str | None = None) -> list[tuple[Path, dict]]:
     parent = root / "annotations" / "submissions"
     runs = []
     if not parent.exists():
         return runs
     for manifest_path in parent.glob("*/manifest.json"):
         manifest = read_json(manifest_path)
-        if manifest.get("benchmark") == BENCHMARK_VERSION:
-            runs.append((manifest_path.parent, manifest))
+        if manifest.get("benchmark") != BENCHMARK_VERSION:
+            continue
+        if scope is not None and manifest.get("scope") != scope:
+            continue
+        runs.append((manifest_path.parent, manifest))
     return sorted(runs, key=lambda row: (int(row[1].get("imported_epoch_ns", 0)), row[1].get("imported_utc", "")))
 
 
-def _resolve_annotation_run(root: Path, annotation_run: str | None) -> tuple[Path, dict] | None:
-    runs = _annotation_run_directories(root)
+def _resolve_annotation_run(
+    root: Path,
+    annotation_run: str | None,
+    *,
+    scope: str = "full",
+) -> tuple[Path, dict] | None:
+    runs = _annotation_run_directories(root, scope)
     if annotation_run is None:
         return runs[-1] if runs else None
     candidate = Path(annotation_run)
@@ -1743,6 +2107,8 @@ def _resolve_annotation_run(root: Path, annotation_run: str | None) -> tuple[Pat
     manifest = read_json(manifest_path)
     if manifest.get("benchmark") != BENCHMARK_VERSION:
         raise ValueError("annotation import run has the wrong benchmark version")
+    if manifest.get("scope") != scope:
+        raise ValueError(f"annotation import run has scope {manifest.get('scope')!r}, not {scope!r}")
     if manifest.get("annotation_run") != candidate.name:
         raise ValueError("annotation import run ID does not match its directory")
     return candidate, manifest
@@ -1753,14 +2119,17 @@ def import_annotation_forms(
     root: Path | str = DEFAULT_ROOT,
     annotator_a: Path | str,
     annotator_b: Path | str,
+    scope: str = "full",
 ) -> dict:
     """Validate and preserve both returned forms as a new immutable import run."""
+    if scope not in {"pilot", "full"}:
+        raise ValueError("annotation scope must be 'pilot' or 'full'")
     root = Path(root)
-    expected_items, _selection = _expected_annotation_items(root)
+    expected_items, _selection = _expected_annotation_items(root, scope)
     source_a, form_a_bytes, form_a, zip_a = _read_annotation_source(annotator_a)
     source_b, form_b_bytes, form_b, zip_b = _read_annotation_source(annotator_b)
-    _validate_annotation_form(form_a, expected_items, label="annotator_a")
-    _validate_annotation_form(form_b, expected_items, label="annotator_b")
+    _validate_annotation_form(form_a, expected_items, label="annotator_a", scope=scope)
+    _validate_annotation_form(form_b, expected_items, label="annotator_b", scope=scope)
     source_digest = hashlib.sha256(source_a + b"\0" + source_b).hexdigest()
     imported_epoch_ns = time.time_ns()
     timestamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
@@ -1773,6 +2142,8 @@ def import_annotation_forms(
         _write_new_bytes(run_dir / "annotator_b_source.zip", source_b)
     manifest = {
         "benchmark": BENCHMARK_VERSION,
+        "protocol": PROTOCOL_VERSION,
+        "scope": scope,
         "annotation_run": run_dir.name,
         "imported_epoch_ns": imported_epoch_ns,
         "imported_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -1816,7 +2187,7 @@ def prepare_adjudication_form(
     }
     expected_items, _selection = _expected_annotation_items(root)
     for name, payload in forms.items():
-        _validate_annotation_form(payload, expected_items, label=name)
+        _validate_annotation_form(payload, expected_items, label=name, scope="full")
     by_annotator = {
         name: {item["benchmark_id"]: item for item in payload["items"]}
         for name, payload in forms.items()
@@ -1832,6 +2203,7 @@ def prepare_adjudication_form(
             "field_evidence": {
                 field: {
                     "evidence_sufficient": annotation_a["fields"][field]["evidence_sufficient"],
+                    "evidence_line_ids": annotation_a["fields"][field]["evidence_line_ids"],
                     "notes": annotation_a["fields"][field]["notes"],
                 }
                 for field in FIELDS
@@ -1843,6 +2215,7 @@ def prepare_adjudication_form(
             "field_evidence": {
                 field: {
                     "evidence_sufficient": annotation_b["fields"][field]["evidence_sufficient"],
+                    "evidence_line_ids": annotation_b["fields"][field]["evidence_line_ids"],
                     "notes": annotation_b["fields"][field]["notes"],
                 }
                 for field in FIELDS
@@ -1858,11 +2231,13 @@ def prepare_adjudication_form(
             "annotator_b_labels": labels_b,
             "annotator_b_evidence": review_b,
             "adjudicated_labels": {field: "" for field in FIELDS},
+            "adjudication_reasons": {field: "" for field in FIELDS},
             "adjudication_notes": "",
         })
     payload = {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "benchmark": BENCHMARK_VERSION,
+        "protocol": PROTOCOL_VERSION,
         "source_annotation_run": run_manifest["annotation_run"],
         "status": "pending_manual_adjudication",
         "items": items,
@@ -1904,16 +2279,17 @@ def import_adjudication(
         payload = json.loads(raw.decode("utf-8-sig"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError("adjudication submission must be valid UTF-8 JSON") from exc
-    if not isinstance(payload, dict) or set(payload) != {"schema_version", "benchmark", "source_annotation_run", "status", "items"}:
+    if not isinstance(payload, dict) or set(payload) != {"schema_version", "benchmark", "protocol", "source_annotation_run", "status", "items"}:
         raise ValueError("adjudication submission has an unexpected schema")
     if (
-        payload.get("schema_version") != "1.0"
+        payload.get("schema_version") != "2.0"
+        or payload.get("protocol") != PROTOCOL_VERSION
         or payload.get("benchmark") != BENCHMARK_VERSION
         or payload.get("source_annotation_run") != run_id
         or payload.get("status") not in {"pending_manual_adjudication", "complete_manual_adjudication"}
     ):
         raise ValueError("adjudication submission does not match the selected annotation run")
-    expected_items, _selection = _expected_annotation_items(root)
+    expected_items, _selection = _expected_annotation_items(root, "full")
     expected_ids = set(expected_items)
     submitted_items = payload.get("items")
     if not isinstance(submitted_items, list):
@@ -1928,7 +2304,7 @@ def import_adjudication(
         raise ValueError("adjudication item IDs do not match the frozen benchmark")
     forms = {name: read_json(source_run_dir / f"{name}.json") for name in ("annotator_a", "annotator_b")}
     for name, form in forms.items():
-        _validate_annotation_form(form, expected_items, label=name)
+        _validate_annotation_form(form, expected_items, label=name, scope="full")
     raw_labels = {
         name: {item["benchmark_id"]: {field: item["fields"][field]["label"] for field in FIELDS} for item in form["items"]}
         for name, form in forms.items()
@@ -1942,6 +2318,7 @@ def import_adjudication(
                 "field_evidence": {
                     field: {
                         "evidence_sufficient": form_item["fields"][field]["evidence_sufficient"],
+                        "evidence_line_ids": form_item["fields"][field]["evidence_line_ids"],
                         "notes": form_item["fields"][field]["notes"],
                     }
                     for field in FIELDS
@@ -1954,7 +2331,7 @@ def import_adjudication(
             "benchmark_id", "sample_count", "dialogue_samples",
             "annotator_a_labels", "annotator_a_evidence",
             "annotator_b_labels", "annotator_b_evidence",
-            "adjudicated_labels", "adjudication_notes",
+            "adjudicated_labels", "adjudication_reasons", "adjudication_notes",
         }
         if set(item) != expected_item_keys:
             raise ValueError(f"adjudication {benchmark_id}: unexpected item fields")
@@ -1976,9 +2353,16 @@ def import_adjudication(
         adjudicated = item["adjudicated_labels"]
         if not isinstance(adjudicated, dict) or set(adjudicated) != set(FIELDS):
             raise ValueError(f"adjudication {benchmark_id}: field set differs from the rubric")
+        reasons = item["adjudication_reasons"]
+        if not isinstance(reasons, dict) or set(reasons) != set(FIELDS):
+            raise ValueError(f"adjudication {benchmark_id}: adjudication_reasons must cover every field")
         for field, options in FIELDS.items():
             if not isinstance(adjudicated[field], str) or adjudicated[field] not in options:
                 raise ValueError(f"adjudication {benchmark_id} {field}: label is incomplete or invalid")
+            if not isinstance(reasons[field], str) or reasons[field] not in ("", *ADJUDICATION_REASONS):
+                raise ValueError(f"adjudication {benchmark_id} {field}: reason is invalid")
+            if adjudicated[field] and not reasons[field]:
+                raise ValueError(f"adjudication {benchmark_id} {field}: a reason is required for every adjudicated label")
 
     digest = hashlib.sha256(raw).hexdigest()
     imported_epoch_ns = time.time_ns()
@@ -2013,80 +2397,34 @@ def _load_adjudication_source(root: Path, annotation_run: str | None) -> tuple[d
     return read_json(template_path), str(template_path)
 
 
-def evaluate_benchmark(
-    *,
-    root: Path | str = DEFAULT_ROOT,
-    auto_threshold: float | None = None,
-    annotation_run: str | None = None,
-) -> dict:
-    root = Path(root)
-    manifest = read_json(root / "manifest.json")
-    selection = {row["benchmark_id"]: row for row in manifest["private_selection"]}
-    resolved_annotation = _resolve_annotation_run(root, annotation_run)
-    selected_annotation_run = None
-    if resolved_annotation is None:
-        form_root = root / "annotations"
-    else:
-        form_root, annotation_manifest = resolved_annotation
-        selected_annotation_run = annotation_manifest["annotation_run"]
-    forms = {}
-    expected_items = None
-    if resolved_annotation is not None:
-        expected_items, _private_selection = _expected_annotation_items(root)
-    for name in ("annotator_a", "annotator_b"):
-        payload = read_json(form_root / f"{name}.json")
-        if resolved_annotation is not None:
-            _validate_annotation_form(payload, expected_items, label=name)
-        forms[name] = payload["items"]
-    by_annotator = {
-        name: {item["benchmark_id"]: item for item in items}
-        for name, items in forms.items()
-    }
-    missing = []
-    for benchmark_id in selection:
-        for annotator in by_annotator:
-            item = by_annotator[annotator].get(benchmark_id) or {}
-            for field in FIELDS:
-                if not ((item.get("fields") or {}).get(field) or {}).get("label"):
-                    missing.append({"benchmark_id": benchmark_id, "annotator": annotator, "field": field})
-    report: dict[str, Any] = {
-        "benchmark": BENCHMARK_VERSION,
-        "annotation_run": selected_annotation_run,
-        "annotation_status": "incomplete" if missing else "raw_annotations_complete",
-        "missing_annotation_count": len(missing),
-        "missing_annotations_preview": missing[:30],
-        "auto_accept_threshold_override": auto_threshold,
-        "auto_accept_threshold_policy": "By default, each probability-bearing classifier's per-field threshold is selected on development labels to maximize coverage while meeting the 0.90 precision and 0.50 coverage targets, then evaluated on locked-test items. --auto-threshold overrides this with one fixed threshold for all fields.",
-        "note": "No gold labels or classifier-accuracy metrics are produced until both independent forms are complete and gold labels are manually adjudicated.",
-    }
-    if missing:
-        path = write_immutable_json(root / "reports" / "evaluation_pending.json", report)
-        return {**report, "report_path": str(path)}
-
+def _agreement_tables(by_annotator: dict[str, dict[str, dict]], ids: list[str]) -> tuple[dict, dict]:
     agreement = {}
     for field in FIELDS:
-        ids = sorted(selection)
         a = [by_annotator["annotator_a"][bid]["fields"][field]["label"] for bid in ids]
         b = [by_annotator["annotator_b"][bid]["fields"][field]["label"] for bid in ids]
-        agreement[field] = {"n": len(ids), "cohen_kappa": _cohen_kappa(a, b)}
+        row = {
+            "n": len(ids),
+            "exact_agreement": sum(left == right for left, right in zip(a, b)) / len(ids) if ids else None,
+            "cohen_kappa": _cohen_kappa(a, b),
+            "scale": FIELD_SCALES[field],
+        }
         ordinal = ORDINAL_FIELD_LABELS.get(field)
         if ordinal:
             ordinal_agreement = _ordinal_metrics(a, b, ordinal)
-            agreement[field]["ordinal_weighted_cohen_kappa"] = ordinal_agreement["weighted_cohen_kappa_linear"]
-            agreement[field]["ordinal_mean_absolute_label_distance"] = ordinal_agreement["mean_absolute_label_distance"]
-            agreement[field]["ordinal_n_scored"] = ordinal_agreement["n"]
-            agreement[field]["ordinal_n_excluded"] = ordinal_agreement["excluded_count"]
-            agreement[field]["ordinal_weighting"] = "linear"
-    report["inter_annotator_agreement"] = agreement
+            row["ordinal_weighted_cohen_kappa"] = ordinal_agreement["weighted_cohen_kappa_linear"]
+            row["ordinal_mean_absolute_label_distance"] = ordinal_agreement["mean_absolute_label_distance"]
+            row["ordinal_n_scored"] = ordinal_agreement["n"]
+            row["ordinal_n_excluded"] = ordinal_agreement["excluded_count"]
+            row["ordinal_weighting"] = "linear"
+        agreement[field] = row
     evidence_agreement = {}
-    ids = sorted(selection)
     for field in FIELDS:
         evidence_a = [by_annotator["annotator_a"][bid]["fields"][field]["evidence_sufficient"] for bid in ids]
         evidence_b = [by_annotator["annotator_b"][bid]["fields"][field]["evidence_sufficient"] for bid in ids]
         evidence_agreement[field] = {
             "n": len(ids),
             "cohen_kappa": _cohen_kappa(evidence_a, evidence_b),
-            "exact_agreement": sum(a == b for a, b in zip(evidence_a, evidence_b)) / len(ids) if ids else None,
+            "exact_agreement": sum(left == right for left, right in zip(evidence_a, evidence_b)) / len(ids) if ids else None,
             "annotator_a_counts": {label: evidence_a.count(label) for label in ("yes", "no", "uncertain")},
             "annotator_b_counts": {label: evidence_b.count(label) for label in ("yes", "no", "uncertain")},
         }
@@ -2095,18 +2433,307 @@ def evaluate_benchmark(
     evidence_agreement["overall_evidence_sufficiency"] = {
         "n": len(ids),
         "cohen_kappa": _cohen_kappa(overall_a, overall_b),
-        "exact_agreement": sum(a == b for a, b in zip(overall_a, overall_b)) / len(ids) if ids else None,
+        "exact_agreement": sum(left == right for left, right in zip(overall_a, overall_b)) / len(ids) if ids else None,
         "annotator_a_counts": {label: overall_a.count(label) for label in ("sufficient", "insufficient", "uncertain")},
         "annotator_b_counts": {label: overall_b.count(label) for label in ("sufficient", "insufficient", "uncertain")},
     }
+    return agreement, evidence_agreement
+
+
+def _pilot_gate(agreement: dict) -> dict:
+    fields = {}
+    for field, row in agreement.items():
+        ordinal = ORDINAL_FIELD_LABELS.get(field)
+        kappa = row.get("ordinal_weighted_cohen_kappa") if ordinal else row.get("cohen_kappa")
+        kappa_name = "ordinal_weighted_cohen_kappa" if ordinal else "cohen_kappa"
+        exact = row.get("exact_agreement")
+        passed = (
+            isinstance(exact, float) and exact >= PILOT_MIN_EXACT_AGREEMENT
+            and isinstance(kappa, float) and kappa >= PILOT_MIN_KAPPA
+        )
+        fields[field] = {
+            "exact_agreement": exact,
+            "kappa": kappa,
+            "kappa_statistic": kappa_name,
+            "min_exact_agreement": PILOT_MIN_EXACT_AGREEMENT,
+            "min_kappa": PILOT_MIN_KAPPA,
+            "passed": passed,
+            "verdict": "proceed" if passed else "revise_or_drop_field",
+        }
+    return {
+        "status": "pass" if all(row["passed"] for row in fields.values()) else "revise_taxonomy",
+        "policy": "Every field must pass before the full annotation run opens; a failing field is revised or dropped.",
+        "fields": fields,
+    }
+
+
+def _precision_at_coverage_curve(rows: list[tuple[bool, float, bool]]) -> dict:
+    """Descriptive operating-point curve over non-abstaining decisions."""
+    scored = [(correct, confidence) for correct, confidence, abstained in rows if not abstained]
+    if not scored:
+        return {"n": 0, "points": [], "note": "No non-abstaining decisions with probabilities."}
+    points = []
+    for threshold in sorted({confidence for _correct, confidence in scored}, reverse=True):
+        accepted = [(correct, confidence) for correct, confidence in scored if confidence >= threshold]
+        points.append({
+            "threshold": threshold,
+            "accepted": len(accepted),
+            "coverage": len(accepted) / len(rows) if rows else None,
+            "precision": sum(correct for correct, _ in accepted) / len(accepted),
+        })
+    return {
+        "n": len(rows),
+        "scored_count": len(scored),
+        "points": points,
+        "note": "Descriptive only; the deployed operating point is selected on development annotations, never on locked-test results.",
+    }
+
+
+def _bootstrap_macro_f1_delta(
+    gold: list[str],
+    left: list[str],
+    right: list[str],
+    labels: list[str],
+    *,
+    seed: int,
+    draws: int = 1500,
+) -> dict:
+    if not gold or len(left) != len(gold) or len(right) != len(gold):
+        return {"n": 0, "delta": None, "confidence_interval_95_percentile": None}
+    left_f1 = _confusion_metrics(gold, left, labels)["macro_f1"]
+    right_f1 = _confusion_metrics(gold, right, labels)["macro_f1"]
+    if left_f1 is None or right_f1 is None:
+        return {"n": len(gold), "delta": None, "confidence_interval_95_percentile": None}
+    rng = random.Random(seed)
+    n = len(gold)
+    deltas = []
+    for _ in range(draws):
+        indices = [rng.randrange(n) for _ in range(n)]
+        sampled_gold = [gold[index] for index in indices]
+        sampled_left = _confusion_metrics(sampled_gold, [left[index] for index in indices], labels)["macro_f1"]
+        sampled_right = _confusion_metrics(sampled_gold, [right[index] for index in indices], labels)["macro_f1"]
+        if sampled_left is not None and sampled_right is not None:
+            deltas.append(sampled_left - sampled_right)
+    deltas.sort()
+    if deltas:
+        low = max(0, math.floor(0.025 * len(deltas)))
+        high = min(len(deltas) - 1, math.ceil(0.975 * len(deltas)) - 1)
+        interval = [deltas[low], deltas[high]]
+    else:
+        interval = None
+    return {
+        "n": n,
+        "left_macro_f1": left_f1,
+        "right_macro_f1": right_f1,
+        "delta": left_f1 - right_f1,
+        "confidence_interval_95_percentile": interval,
+        "bootstrap_draws": draws,
+        "delta_definition": "left minus right macro-F1 on the same locked-test items",
+    }
+
+
+def _sample_evidence_floor_violations(root: Path, selection: dict[str, dict], by_annotator: dict[str, dict[str, dict]]) -> dict:
+    """Items below the guide's evidence floor that still received a positive label."""
+    violations = []
+    floor_ids = []
+    for benchmark_id in sorted(selection):
+        dossier = read_json(Path(selection[benchmark_id]["source_dossier_path"]))
+        samples = dossier.get("dialogue_samples") or []
+        word_count = sum(len(words(str(sample.get("text") or ""))) for sample in samples)
+        below = len(samples) < EVIDENCE_MIN_UTTERANCES or word_count < EVIDENCE_MIN_WORDS
+        if not below:
+            continue
+        floor_ids.append(benchmark_id)
+        for annotator, items in by_annotator.items():
+            item = items.get(benchmark_id) or {}
+            for field in FIELDS:
+                label = ((item.get("fields") or {}).get(field) or {}).get("label")
+                if label and label != "insufficient_evidence":
+                    violations.append({"benchmark_id": benchmark_id, "annotator": annotator, "field": field, "label": label})
+    return {
+        "evidence_floor": {"min_utterances": EVIDENCE_MIN_UTTERANCES, "min_words": EVIDENCE_MIN_WORDS},
+        "items_below_floor": floor_ids,
+        "positive_label_count_below_floor": len(violations),
+        "violations_preview": violations[:30],
+        "note": "Guide-rule compliance check; it does not rewrite submitted labels.",
+    }
+
+
+def _chi_square_independence(groups: list[list[str]], labels: list[str]) -> float:
+    total = sum(len(group) for group in groups)
+    if not total:
+        return 0.0
+    overall = {label: sum(group.count(label) for group in groups) / total for label in labels}
+    statistic = 0.0
+    for group in groups:
+        for label in labels:
+            expected = len(group) * overall[label]
+            if expected <= 0:
+                continue
+            statistic += (group.count(label) - expected) ** 2 / expected
+    return statistic
+
+
+def audit_annotation_leakage(
+    *,
+    root: Path | str = DEFAULT_ROOT,
+    annotation_run: str | None = None,
+    scope: str = "full",
+    permutation_draws: int = 2000,
+) -> dict:
+    """Test whether labels track dialogue volume, which annotators should ignore."""
+    root = Path(root)
+    manifest = read_json(root / "manifest.json")
+    selection = {row["benchmark_id"]: row for row in manifest["private_selection"]}
+    expected_items, _private = _expected_annotation_items(root, scope)
+    resolved = _resolve_annotation_run(root, annotation_run, scope=scope)
+    form_root = root / "annotations" / "pilot" if scope == "pilot" else root / "annotations"
+    if resolved is not None:
+        form_root, _manifest = resolved
+    by_annotator = {}
+    for name in ("annotator_a", "annotator_b"):
+        payload = read_json(form_root / f"{name}.json")
+        if resolved is not None:
+            _validate_annotation_form(payload, expected_items, label=name, scope=scope)
+        by_annotator[name] = {item["benchmark_id"]: item for item in payload["items"]}
+
+    ids = sorted(expected_items)
+    strata = sorted({selection[bid]["stratum"] for bid in ids})
+    rng = random.Random(int(hashlib.sha256(f"leakage:{scope}".encode()).hexdigest()[:8], 16))
+    per_field = {}
+    for field in FIELDS:
+        for annotator in ("annotator_a", "annotator_b"):
+            labels = [by_annotator[annotator][bid]["fields"][field]["label"] for bid in ids]
+            if any(not label for label in labels):
+                per_field.setdefault(field, {})[annotator] = {"status": "incomplete_labels"}
+                continue
+            observed_groups = [[labels[i] for i, bid in enumerate(ids) if selection[bid]["stratum"] == stratum] for stratum in strata]
+            label_values = sorted(set(labels))
+            observed = _chi_square_independence(observed_groups, label_values)
+            at_least = 0
+            shuffled = list(labels)
+            for _ in range(permutation_draws):
+                rng.shuffle(shuffled)
+                groups = [[shuffled[i] for i, bid in enumerate(ids) if selection[bid]["stratum"] == stratum] for stratum in strata]
+                if _chi_square_independence(groups, label_values) >= observed - 1e-12:
+                    at_least += 1
+            p_value = (at_least + 1) / (permutation_draws + 1)
+            counts = {
+                stratum: {label: group.count(label) for label in label_values}
+                for stratum, group in zip(strata, observed_groups)
+            }
+            per_field.setdefault(field, {})[annotator] = {
+                "n": len(labels),
+                "stratum_label_counts": counts,
+                "chi_square_statistic": observed,
+                "permutation_p_value": p_value,
+                "permutation_draws": permutation_draws,
+                "flag": p_value < 0.01,
+                "flag_note": "Low p-value is suggestive, not proof: style may genuinely correlate with dialogue volume.",
+            }
+    allowed_item_keys = {
+        "annotator_notes", "benchmark_id", "dialogue_samples", "fields",
+        "overall_evidence_sufficiency", "sample_count",
+    }
+    allowed_field_keys = {"evidence_line_ids", "evidence_sufficient", "label", "notes"}
+    residual = [
+        {"benchmark_id": item["benchmark_id"], "unexpected_keys": sorted(set(item) - allowed_item_keys)}
+        for items in by_annotator.values()
+        for item in items.values()
+        if set(item) - allowed_item_keys
+        or any(set(answer) - allowed_field_keys for answer in (item.get("fields") or {}).values())
+    ]
+    report = {
+        "benchmark": BENCHMARK_VERSION,
+        "scope": scope,
+        "annotation_run": resolved[1]["annotation_run"] if resolved else None,
+        "item_count": len(ids),
+        "volume_shortcut_test": per_field,
+        "residual_metadata_findings": residual[:30],
+        "residual_metadata_clean": not residual,
+        "note": "Annotators see line text, line IDs, and line counts only. Volume is visible through the sample size, so this audit tests whether labels track it.",
+    }
+    path = write_immutable_json(root / "reports" / f"annotation_leakage_audit_{scope}.json", report)
+    return {**report, "report_path": str(path)}
+
+
+def evaluate_benchmark(
+    *,
+    root: Path | str = DEFAULT_ROOT,
+    auto_threshold: float | None = None,
+    annotation_run: str | None = None,
+    scope: str = "full",
+) -> dict:
+    if scope not in {"pilot", "full"}:
+        raise ValueError("annotation scope must be 'pilot' or 'full'")
+    root = Path(root)
+    manifest = read_json(root / "manifest.json")
+    selection = {row["benchmark_id"]: row for row in manifest["private_selection"]}
+    resolved_annotation = _resolve_annotation_run(root, annotation_run, scope=scope)
+    selected_annotation_run = None
+    if resolved_annotation is None:
+        form_root = root / "annotations" / "pilot" if scope == "pilot" else root / "annotations"
+    else:
+        form_root, annotation_manifest = resolved_annotation
+        selected_annotation_run = annotation_manifest["annotation_run"]
+    expected_items, _private_selection = _expected_annotation_items(root, scope)
+    forms = {}
+    for name in ("annotator_a", "annotator_b"):
+        payload = read_json(form_root / f"{name}.json")
+        if resolved_annotation is not None:
+            _validate_annotation_form(payload, expected_items, label=name, scope=scope)
+        forms[name] = payload["items"]
+    by_annotator = {
+        name: {item["benchmark_id"]: item for item in items}
+        for name, items in forms.items()
+    }
+    ids = sorted(expected_items)
+    missing = []
+    for benchmark_id in ids:
+        for annotator in by_annotator:
+            item = by_annotator[annotator].get(benchmark_id) or {}
+            for field in FIELDS:
+                if not ((item.get("fields") or {}).get(field) or {}).get("label"):
+                    missing.append({"benchmark_id": benchmark_id, "annotator": annotator, "field": field})
+    report: dict[str, Any] = {
+        "benchmark": BENCHMARK_VERSION,
+        "protocol": PROTOCOL_VERSION,
+        "scope": scope,
+        "annotation_run": selected_annotation_run,
+        "annotation_status": "incomplete" if missing else "raw_annotations_complete",
+        "missing_annotation_count": len(missing),
+        "missing_annotations_preview": missing[:30],
+        "auto_accept_threshold_override": auto_threshold,
+        "auto_accept_threshold_policy": "By default, each probability-bearing classifier's per-field threshold is selected on development labels to maximize coverage while meeting the 0.90 precision and 0.50 coverage targets, then evaluated on locked-test items. --auto-threshold overrides this with one fixed threshold for all fields.",
+        "stability_not_correctness": "Repeat, reordering, and alternate-sample stability numbers are robustness diagnostics. They are not correctness evidence and never substitute for gold labels.",
+        "note": "No gold labels or classifier-accuracy metrics are produced until both independent forms are complete and gold labels are manually adjudicated.",
+    }
+    if scope == "pilot":
+        report["annotation_status"] = "pilot_incomplete" if missing else "pilot_raw_annotations_complete"
+        if not missing:
+            agreement, evidence_agreement = _agreement_tables(by_annotator, ids)
+            report["inter_annotator_agreement"] = agreement
+            report["inter_annotator_evidence_agreement"] = evidence_agreement
+            report["pilot_gate"] = _pilot_gate(agreement)
+            report["note"] = "Pilot agreement only. Full annotation opens only when every field passes the gate."
+        path = write_immutable_json(root / "reports" / "pilot_evaluation.json", report)
+        return {**report, "report_path": str(path)}
+    if missing:
+        path = write_immutable_json(root / "reports" / "evaluation_pending.json", report)
+        return {**report, "report_path": str(path)}
+
+    agreement, evidence_agreement = _agreement_tables(by_annotator, ids)
+    report["inter_annotator_agreement"] = agreement
     report["inter_annotator_evidence_agreement"] = evidence_agreement
+    report["pilot_gate"] = _pilot_gate(agreement)
+    report["guide_rule_compliance"] = _sample_evidence_floor_violations(root, selection, by_annotator)
 
     gold_payload, gold_source_path = _load_adjudication_source(root, selected_annotation_run)
     report["adjudication_source"] = gold_source_path
     gold_by_id = {item["benchmark_id"]: item for item in gold_payload.get("items", [])}
     gold_missing = [
         {"benchmark_id": bid, "field": field}
-        for bid in selection
+        for bid in ids
         for field in FIELDS
         if not ((gold_by_id.get(bid, {}).get("adjudicated_labels") or {}).get(field))
     ]
@@ -2117,200 +2744,255 @@ def evaluate_benchmark(
             "missing_adjudicated_preview": gold_missing[:30],
             "note": "Inter-annotator agreement is available; model-versus-gold metrics wait for completed manual adjudication.",
         })
-    else:
-        locked = sorted(bid for bid, row in selection.items() if row["split"] == "locked_test")
-        development_ids = sorted(bid for bid, row in selection.items() if row["split"] == "development")
-        gold_metrics = {}
-        scored_rows: dict[str, dict[str, dict[str, tuple[str, str]]]] = {}
-        for system in ("rules_full", "rules_sample", "nimble", "qwen_base", "jev"):
-            records = {}
-            for bid in locked:
-                path = root / "predictions" / system / f"{bid}.json"
-                if path.is_file():
-                    records[bid] = read_json(path)
-            if not records:
-                gold_metrics[system] = {"status": "not_run"}
-                continue
-            metrics_for_fields = {}
-            for field, options in FIELDS.items():
-                available = []
-                for bid in locked:
-                    record = records.get(bid)
-                    labels_payload = (record.get("labels") or (record.get("answers") or {})) if record else {}
-                    prediction = labels_payload.get(field)
-                    if isinstance(prediction, dict):
-                        prediction = prediction.get("label") or prediction.get("choice")
-                    actual = gold_by_id[bid]["adjudicated_labels"][field]
-                    if actual not in options:
-                        raise ValueError(f"adjudicated label is invalid for {bid} {field}: {actual!r}")
-                    valid_prediction = isinstance(prediction, str) and prediction in options
-                    scored_prediction = prediction if valid_prediction else "__missing_or_invalid_prediction__"
-                    available.append((bid, actual, scored_prediction, record, valid_prediction))
-                actuals = [row[1] for row in available]
-                predictions = [row[2] for row in available]
-                scored_rows.setdefault(system, {})[field] = {row[0]: (row[1], row[2]) for row in available}
-                labels = list(options)
-                field_metrics = _confusion_metrics(actuals, predictions, labels)
-                valid_prediction_count = sum(row[4] for row in available)
-                field_metrics["prediction_coverage"] = valid_prediction_count / len(locked) if locked else None
-                field_metrics["missing_or_invalid_prediction_count"] = len(locked) - valid_prediction_count
-                field_metrics["abstention"] = {
-                    "label": "insufficient_evidence",
-                    "count": sum(prediction == "insufficient_evidence" for prediction in predictions),
-                    "rate_among_valid_predictions": sum(prediction == "insufficient_evidence" for prediction in predictions) / valid_prediction_count if valid_prediction_count else None,
-                    "decision_coverage_among_valid_predictions": sum(row[4] and row[2] != "insufficient_evidence" for row in available) / valid_prediction_count if valid_prediction_count else None,
-                }
-                ordinal_order = ORDINAL_FIELD_LABELS.get(field)
-                if ordinal_order:
-                    field_metrics["ordinal_metrics"] = _ordinal_metrics(actuals, predictions, ordinal_order)
-                field_metrics["by_dialogue_volume_stratum"] = {}
-                for stratum in sorted({selection[bid]["stratum"] for bid in locked}):
-                    stratum_rows = [row for row in available if selection[row[0]]["stratum"] == stratum]
-                    stratum_metrics = _confusion_metrics(
-                        [row[1] for row in stratum_rows],
-                        [row[2] for row in stratum_rows],
-                        labels,
-                    )
-                    stratum_valid_count = sum(row[4] for row in stratum_rows)
-                    stratum_metrics["prediction_coverage"] = stratum_valid_count / sum(selection[bid]["stratum"] == stratum for bid in locked)
-                    field_metrics["by_dialogue_volume_stratum"][stratum] = stratum_metrics
-                field_metrics["confidence_intervals"] = _bootstrap_intervals(
-                    actuals,
-                    predictions,
-                    labels,
-                    seed=int(hashlib.sha256(f"{system}:{field}".encode()).hexdigest()[:8], 16),
-                    ordinal_order=ordinal_order,
-                )
-                prediction_records = [row[3] for row in available]
-                calibration = _calibration_report(actuals, prediction_records, field, labels)
-                if calibration:
-                    field_metrics["calibration"] = calibration
-                    threshold_selection = None
-                    selected_threshold = auto_threshold
-                    if auto_threshold is None:
-                        threshold_selection = _select_development_threshold(
-                            root=root,
-                            system=system,
-                            development_ids=development_ids,
-                            gold_by_id=gold_by_id,
-                            field=field,
-                            labels=labels,
-                        )
-                        selected_threshold = threshold_selection["selected_threshold"]
-                    else:
-                        threshold_selection = {
-                            "method": "fixed caller override; not selected from test results",
-                            "status": "fixed_override",
-                            "selected_threshold": auto_threshold,
-                        }
-                    scored = []
-                    acceptance_rows = []
-                    for actual, record in zip(actuals, prediction_records):
-                        if not isinstance(record, dict):
-                            acceptance_rows.append((False, False))
-                            continue
-                        answer = (record.get("answers") or {}).get(field)
-                        probabilities = _validated_probabilities(answer, labels) if isinstance(answer, dict) else None
-                        if probabilities is None:
-                            acceptance_rows.append((False, False))
-                            continue
-                        predicted = max(labels, key=lambda label: probabilities[label])
-                        reported_choice = answer.get("label") or answer.get("choice")
-                        is_accepted = (
-                            selected_threshold is not None
-                            and probabilities[predicted] >= selected_threshold
-                            and predicted != "insufficient_evidence"
-                            and reported_choice == predicted
-                        )
-                        scored.append((actual, predicted, probabilities[predicted], reported_choice))
-                        acceptance_rows.append((actual == predicted, is_accepted))
-                    accepted_count = sum(is_accepted for _correct, is_accepted in acceptance_rows)
-                    accepted_correct = sum(correct and is_accepted for correct, is_accepted in acceptance_rows)
-                    field_metrics["auto_accept"] = {
-                        "threshold": selected_threshold,
-                        "threshold_selection": threshold_selection,
-                        "coverage": accepted_count / len(actuals) if actuals else None,
-                        "accepted_precision": accepted_correct / accepted_count if accepted_count else None,
-                        "coverage_and_precision_confidence_intervals": _bootstrap_acceptance_intervals(
-                            acceptance_rows,
-                            seed=int(hashlib.sha256(f"{system}:{field}:auto-accept".encode()).hexdigest()[:8], 16),
-                        ),
-                        "accepted_count": accepted_count,
-                        "manual_review_count": len(actuals) - accepted_count,
-                        "manual_review_rate": (len(actuals) - accepted_count) / len(actuals) if actuals else None,
-                        "probability_distribution_coverage": len(scored) / len(actuals) if actuals else None,
-                        "abstentions_excluded_from_auto_accept": sum(predicted == "insufficient_evidence" for _, predicted, _, _reported in scored),
-                        "decision_distribution_mismatch_count": sum(predicted != reported for _, predicted, _, reported in scored),
-                    }
-                metrics_for_fields[field] = field_metrics
-            gold_metrics[system] = {
-                "status": "scored",
-                "test_npc_count": len(locked),
-                "prediction_record_count": len(records),
-                "missing_prediction_ids": sorted(set(locked) - set(records)),
-                "prediction_record_coverage": len(records) / len(locked) if locked else None,
-                "fields": metrics_for_fields,
+        path = write_immutable_json(root / "reports" / "evaluation.json", report)
+        return {**report, "report_path": str(path)}
+
+    locked = sorted(bid for bid, row in selection.items() if row["split"] == "locked_test")
+    development_ids = sorted(bid for bid, row in selection.items() if row["split"] == "development")
+    gold_metrics = {}
+    scored_rows: dict[str, dict[str, dict[str, tuple[str, str]]]] = {}
+    evidence_exclusions: dict[str, list[str]] = {}
+    for field in FIELDS:
+        evidence_exclusions[field] = sorted(
+            bid for bid in locked
+            if by_annotator["annotator_a"][bid]["fields"][field]["evidence_sufficient"] == "no"
+            and by_annotator["annotator_b"][bid]["fields"][field]["evidence_sufficient"] == "no"
+        )
+    for system, prediction_dir in SYSTEM_PREDICTION_DIRS.items():
+        records = {}
+        for bid in locked:
+            path = root / "predictions" / prediction_dir / f"{bid}.json"
+            if path.is_file():
+                records[bid] = read_json(path)
+        if not records:
+            gold_metrics[system] = {"status": "not_run"}
+            continue
+        metrics_for_fields = {}
+        for field, options in FIELDS.items():
+            excluded = set(evidence_exclusions[field])
+            eligible_ids = [bid for bid in locked if bid not in excluded]
+            available = []
+            for bid in eligible_ids:
+                record = records.get(bid)
+                labels_payload = (record.get("labels") or (record.get("answers") or {})) if record else {}
+                prediction = labels_payload.get(field)
+                if isinstance(prediction, dict):
+                    prediction = prediction.get("label") or prediction.get("choice")
+                actual = gold_by_id[bid]["adjudicated_labels"][field]
+                if actual not in options:
+                    raise ValueError(f"adjudicated label is invalid for {bid} {field}: {actual!r}")
+                valid_prediction = isinstance(prediction, str) and prediction in options
+                scored_prediction = prediction if valid_prediction else "__missing_or_invalid_prediction__"
+                available.append((bid, actual, scored_prediction, record, valid_prediction))
+            actuals = [row[1] for row in available]
+            predictions = [row[2] for row in available]
+            scored_rows.setdefault(system, {})[field] = {row[0]: (row[1], row[2]) for row in available}
+            labels = list(options)
+            field_metrics = _confusion_metrics(actuals, predictions, labels)
+            valid_prediction_count = sum(row[4] for row in available)
+            field_metrics["scored_n"] = len(available)
+            field_metrics["prediction_coverage"] = valid_prediction_count / len(available) if available else None
+            field_metrics["missing_or_invalid_prediction_count"] = len(available) - valid_prediction_count
+            field_metrics["low_evidence_exclusion"] = {
+                "rule": "both annotators recorded evidence_sufficient: no",
+                "excluded_count": len(excluded),
+                "excluded_benchmark_ids": sorted(excluded),
+                "note": "Excluded items are scored separately and never counted as model errors.",
             }
-        for system in ("nimble", "qwen_base"):
-            if system not in gold_metrics or gold_metrics[system].get("status") != "scored":
+            field_metrics["abstention"] = {
+                "label": "insufficient_evidence",
+                "count": sum(prediction == "insufficient_evidence" for prediction in predictions),
+                "rate_among_valid_predictions": sum(prediction == "insufficient_evidence" for prediction in predictions) / valid_prediction_count if valid_prediction_count else None,
+                "decision_coverage_among_valid_predictions": sum(row[4] and row[2] != "insufficient_evidence" for row in available) / valid_prediction_count if valid_prediction_count else None,
+            }
+            ordinal_order = ORDINAL_FIELD_LABELS.get(field)
+            if ordinal_order:
+                field_metrics["ordinal_metrics"] = _ordinal_metrics(actuals, predictions, ordinal_order)
+            field_metrics["by_dialogue_volume_stratum"] = {}
+            for stratum in sorted({selection[bid]["stratum"] for bid in eligible_ids}):
+                stratum_rows = [row for row in available if selection[row[0]]["stratum"] == stratum]
+                stratum_metrics = _confusion_metrics(
+                    [row[1] for row in stratum_rows],
+                    [row[2] for row in stratum_rows],
+                    labels,
+                )
+                stratum_valid_count = sum(row[4] for row in stratum_rows)
+                stratum_metrics["prediction_coverage"] = stratum_valid_count / len(stratum_rows) if stratum_rows else None
+                field_metrics["by_dialogue_volume_stratum"][stratum] = stratum_metrics
+            field_metrics["confidence_intervals"] = _bootstrap_intervals(
+                actuals,
+                predictions,
+                labels,
+                seed=int(hashlib.sha256(f"{system}:{field}".encode()).hexdigest()[:8], 16),
+                ordinal_order=ordinal_order,
+            )
+            prediction_records = [row[3] for row in available]
+            calibration = _calibration_report(actuals, prediction_records, field, labels)
+            if calibration:
+                field_metrics["calibration"] = calibration
+                threshold_selection = None
+                selected_threshold = auto_threshold
+                if auto_threshold is None:
+                    threshold_selection = _select_development_threshold(
+                        root=root,
+                        system=prediction_dir,
+                        development_ids=development_ids,
+                        gold_by_id=gold_by_id,
+                        field=field,
+                        labels=labels,
+                    )
+                    selected_threshold = threshold_selection["selected_threshold"]
+                else:
+                    threshold_selection = {
+                        "method": "fixed caller override; not selected from test results",
+                        "status": "fixed_override",
+                        "selected_threshold": auto_threshold,
+                    }
+                scored = []
+                acceptance_rows = []
+                curve_rows = []
+                for actual, record in zip(actuals, prediction_records):
+                    if not isinstance(record, dict):
+                        acceptance_rows.append((False, False))
+                        continue
+                    answer = (record.get("answers") or {}).get(field)
+                    probabilities = _validated_probabilities(answer, labels) if isinstance(answer, dict) else None
+                    if probabilities is None:
+                        acceptance_rows.append((False, False))
+                        continue
+                    predicted = max(labels, key=lambda label: probabilities[label])
+                    reported_choice = answer.get("label") or answer.get("choice")
+                    is_accepted = (
+                        selected_threshold is not None
+                        and probabilities[predicted] >= selected_threshold
+                        and predicted != "insufficient_evidence"
+                        and reported_choice == predicted
+                    )
+                    scored.append((actual, predicted, probabilities[predicted], reported_choice))
+                    curve_rows.append((actual == predicted, probabilities[predicted], predicted == "insufficient_evidence"))
+                    acceptance_rows.append((actual == predicted, is_accepted))
+                accepted_count = sum(is_accepted for _correct, is_accepted in acceptance_rows)
+                accepted_correct = sum(correct and is_accepted for correct, is_accepted in acceptance_rows)
+                field_metrics["auto_accept"] = {
+                    "threshold": selected_threshold,
+                    "threshold_selection": threshold_selection,
+                    "coverage": accepted_count / len(actuals) if actuals else None,
+                    "accepted_precision": accepted_correct / accepted_count if accepted_count else None,
+                    "coverage_and_precision_confidence_intervals": _bootstrap_acceptance_intervals(
+                        acceptance_rows,
+                        seed=int(hashlib.sha256(f"{system}:{field}:auto-accept".encode()).hexdigest()[:8], 16),
+                    ),
+                    "accepted_count": accepted_count,
+                    "manual_review_count": len(actuals) - accepted_count,
+                    "manual_review_rate": (len(actuals) - accepted_count) / len(actuals) if actuals else None,
+                    "probability_distribution_coverage": len(scored) / len(actuals) if actuals else None,
+                    "abstentions_excluded_from_auto_accept": sum(predicted == "insufficient_evidence" for _, predicted, _, _reported in scored),
+                    "decision_distribution_mismatch_count": sum(predicted != reported for _, predicted, _, reported in scored),
+                }
+                field_metrics["precision_at_coverage"] = _precision_at_coverage_curve(curve_rows)
+            metrics_for_fields[field] = field_metrics
+        gold_metrics[system] = {
+            "status": "scored",
+            "condition": system.rsplit("_", 1)[-1] if system.startswith(("nimble_", "qwen_base_")) else None,
+            "test_npc_count": len(locked),
+            "prediction_record_count": len(records),
+            "missing_prediction_ids": sorted(set(locked) - set(records)),
+            "prediction_record_coverage": len(records) / len(locked) if locked else None,
+            "fields": metrics_for_fields,
+        }
+    for system in SYSTEM_PREDICTION_DIRS:
+        if system not in gold_metrics or gold_metrics[system].get("status") != "scored":
+            continue
+        for field, options in FIELDS.items():
+            candidate_rows = scored_rows.get(system, {}).get(field, {})
+            baseline_rows = {
+                baseline: scored_rows.get(baseline, {}).get(field, {})
+                for baseline in ("rules_full", "rules_sample")
+                if scored_rows.get(baseline, {}).get(field)
+            }
+            if not candidate_rows or not baseline_rows:
                 continue
-            for field, options in FIELDS.items():
-                candidate_rows = scored_rows.get(system, {}).get(field, {})
-                baseline_rows = {
-                    baseline: scored_rows.get(baseline, {}).get(field, {})
-                    for baseline in ("rules_full", "rules_sample")
-                    if scored_rows.get(baseline, {}).get(field)
-                }
-                if not candidate_rows or not baseline_rows:
-                    continue
-                common_ids = set(candidate_rows)
-                for rows in baseline_rows.values():
-                    common_ids.intersection_update(rows)
-                common_ids = sorted(common_ids)
-                if not common_ids:
-                    continue
-                gold = [candidate_rows[bid][0] for bid in common_ids]
-                candidate_predictions = [candidate_rows[bid][1] for bid in common_ids]
-                baseline_predictions = {
-                    baseline: [rows[bid][1] for bid in common_ids]
-                    for baseline, rows in baseline_rows.items()
-                }
-                comparison = _bootstrap_macro_f1_margin(
-                    gold,
-                    candidate_predictions,
-                    baseline_predictions,
-                    list(options),
-                    seed=int(hashlib.sha256(f"{system}:{field}:rules-margin".encode()).hexdigest()[:8], 16),
-                )
-                comparison["target_margin"] = 0.05
-                comparison["point_estimate_meets_target"] = (
-                    comparison["margin"] >= comparison["target_margin"]
-                    if comparison["margin"] is not None else None
-                )
-                gold_metrics[system]["fields"][field]["comparison_to_rules"] = comparison
-        report.update({
-            "annotation_status": "complete_and_adjudicated",
-            "locked_test_npc_count": len(locked),
-            "locked_test_sampling": {
-                "stratum_counts": {
-                    stratum: sum(selection[bid]["stratum"] == stratum for bid in locked)
-                    for stratum in sorted({selection[bid]["stratum"] for bid in locked})
-                },
-                "aggregate_metrics_are_population_weighted": False,
-                "interpretation": "The benchmark allocates equal counts to dialogue-volume strata. Overall locked-test metrics weight those strata equally; see per-stratum results before applying them to the full eligible NPC population.",
+            common_ids = set(candidate_rows)
+            for rows in baseline_rows.values():
+                common_ids.intersection_update(rows)
+            common_ids = sorted(common_ids)
+            if not common_ids:
+                continue
+            gold = [candidate_rows[bid][0] for bid in common_ids]
+            candidate_predictions = [candidate_rows[bid][1] for bid in common_ids]
+            baseline_predictions = {
+                baseline: [rows[bid][1] for bid in common_ids]
+                for baseline, rows in baseline_rows.items()
+            }
+            comparison = _bootstrap_macro_f1_margin(
+                gold,
+                candidate_predictions,
+                baseline_predictions,
+                list(options),
+                seed=int(hashlib.sha256(f"{system}:{field}:rules-margin".encode()).hexdigest()[:8], 16),
+            )
+            comparison["target_margin"] = 0.05
+            comparison["point_estimate_meets_target"] = (
+                comparison["margin"] >= comparison["target_margin"]
+                if comparison["margin"] is not None else None
+            )
+            comparison["baseline_note"] = "Rules baselines consume measurements by construction; they are measurement-only, not a text-only condition."
+            gold_metrics[system]["fields"][field]["comparison_to_rules"] = comparison
+    condition_comparison = {}
+    for assisted, text_only in CONDITION_PAIRS:
+        if gold_metrics.get(assisted, {}).get("status") != "scored" or gold_metrics.get(text_only, {}).get("status") != "scored":
+            condition_comparison[assisted.replace("_assisted", "")] = {"status": "requires_both_conditions"}
+            continue
+        per_field = {}
+        for field, options in FIELDS.items():
+            assisted_rows = scored_rows.get(assisted, {}).get(field, {})
+            text_rows = scored_rows.get(text_only, {}).get(field, {})
+            common_ids = sorted(set(assisted_rows) & set(text_rows))
+            if not common_ids:
+                per_field[field] = {"n": 0}
+                continue
+            per_field[field] = _bootstrap_macro_f1_delta(
+                [assisted_rows[bid][0] for bid in common_ids],
+                [assisted_rows[bid][1] for bid in common_ids],
+                [text_rows[bid][1] for bid in common_ids],
+                list(options),
+                seed=int(hashlib.sha256(f"{assisted}:{field}:condition".encode()).hexdigest()[:8], 16),
+            )
+        condition_comparison[assisted.replace("_assisted", "")] = {
+            "status": "scored",
+            "assisted_system": assisted,
+            "text_only_system": text_only,
+            "fields": per_field,
+            "note": "Positive delta means the measurement-assisted condition scored higher on the same items. This isolates whether the supplied measurements, not the text, drive the decision.",
+        }
+    report.update({
+        "annotation_status": "complete_and_adjudicated",
+        "locked_test_npc_count": len(locked),
+        "low_evidence_excluded_items": evidence_exclusions,
+        "locked_test_sampling": {
+            "stratum_counts": {
+                stratum: sum(selection[bid]["stratum"] == stratum for bid in locked)
+                for stratum in sorted({selection[bid]["stratum"] for bid in locked})
             },
-            "gold_metrics": gold_metrics,
-            "gates": {
-                "inter_annotator_kappa_target": 0.70,
-                "macro_f1_target": 0.85,
-                "rules_margin_target": 0.05,
-                "accepted_precision_target": 0.90,
-                "coverage_target": 0.50,
-                "common_class_recall_target": 0.75,
-                "order_stability_target": 0.95,
-                "status": "requires_human_review_of_report_and_stability_runs",
-            },
-        })
+            "aggregate_metrics_are_population_weighted": False,
+            "interpretation": "The benchmark allocates equal counts to dialogue-volume strata. Overall locked-test metrics weight those strata equally; see per-stratum results before applying them to the full eligible NPC population.",
+        },
+        "mixed_and_insufficient_reporting": "mixed and insufficient_evidence are scored as distinct classes in accuracy and macro-F1; insufficient_evidence is additionally reported as abstention with decision coverage.",
+        "gold_metrics": gold_metrics,
+        "condition_comparison": condition_comparison,
+        "gates": {
+            "inter_annotator_kappa_target": 0.70,
+            "pilot_exact_agreement_target": PILOT_MIN_EXACT_AGREEMENT,
+            "pilot_kappa_target": PILOT_MIN_KAPPA,
+            "macro_f1_target": 0.85,
+            "rules_margin_target": 0.05,
+            "accepted_precision_target": 0.90,
+            "coverage_target": 0.50,
+            "common_class_recall_target": 0.75,
+            "order_stability_target": 0.95,
+            "status": "requires_human_review_of_report_and_stability_runs",
+        },
+    })
     path = write_immutable_json(root / "reports" / "evaluation.json", report)
     return {**report, "report_path": str(path)}
 
@@ -2327,6 +3009,7 @@ def main() -> None:
     nimble = subparsers.add_parser("nimble", help="run frozen dossiers through native /v1/systemone")
     nimble.add_argument("--root", default=str(DEFAULT_ROOT))
     nimble.add_argument("--endpoint", default="http://127.0.0.1:18081/v1/systemone")
+    nimble.add_argument("--condition", choices=CONDITIONS, default="assisted")
     nimble.add_argument("--limit", type=int)
     nimble.add_argument("--only", action="append")
     nimble.add_argument("--timeout", type=float, default=600)
@@ -2334,6 +3017,7 @@ def main() -> None:
     stability.add_argument("--root", default=str(DEFAULT_ROOT))
     stability.add_argument("--cache", default="data/blueprints/cache")
     stability.add_argument("--endpoint", default="http://127.0.0.1:18081/v1/systemone")
+    stability.add_argument("--condition", choices=CONDITIONS, default="assisted")
     stability.add_argument("--split", choices=("development", "locked_test"), default="locked_test")
     stability.add_argument("--only", action="append")
     stability.add_argument("--timeout", type=float, default=600)
@@ -2346,6 +3030,7 @@ def main() -> None:
     import_annotations.add_argument("--root", default=str(DEFAULT_ROOT))
     import_annotations.add_argument("--annotator-a", required=True)
     import_annotations.add_argument("--annotator-b", required=True)
+    import_annotations.add_argument("--scope", choices=("pilot", "full"), default="full")
     prepare_adjudication = subparsers.add_parser("prepare-adjudication", help="create a comparison form from an imported annotation run")
     prepare_adjudication.add_argument("--root", default=str(DEFAULT_ROOT))
     prepare_adjudication.add_argument("--annotation-run")
@@ -2356,6 +3041,7 @@ def main() -> None:
     qwen = subparsers.add_parser("qwen-base", help="run constrained JSON generation through a local OpenAI-compatible endpoint")
     qwen.add_argument("--root", default=str(DEFAULT_ROOT))
     qwen.add_argument("--endpoint", default="http://127.0.0.1:18082/v1/chat/completions")
+    qwen.add_argument("--condition", choices=CONDITIONS, default="assisted")
     qwen.add_argument("--model", default="Qwen3.5-9B-Base-Q4_K_M")
     qwen.add_argument("--model-path", default="data/models/qwen3.5-9b/Qwen3.5-9B-Base.Q4_K_M.gguf")
     qwen.add_argument("--limit", type=int)
@@ -2364,32 +3050,45 @@ def main() -> None:
     evaluate = subparsers.add_parser("evaluate", help="score human agreement and adjudicated labels when available")
     evaluate.add_argument("--root", default=str(DEFAULT_ROOT))
     evaluate.add_argument("--annotation-run", help="import run ID or path; defaults to the newest imported run")
+    evaluate.add_argument("--scope", choices=("pilot", "full"), default="full")
     evaluate.add_argument(
         "--auto-threshold",
         type=float,
         help="fixed global threshold override; default selects per-field thresholds on development annotations",
     )
+    packets = subparsers.add_parser("share-packets", help="package a blind form plus the guide for an annotator")
+    packets.add_argument("--root", default=str(DEFAULT_ROOT))
+    packets.add_argument("--scope", choices=("pilot", "full"), default="pilot")
+    leakage = subparsers.add_parser("audit-leakage", help="test whether labels track dialogue volume or residual metadata")
+    leakage.add_argument("--root", default=str(DEFAULT_ROOT))
+    leakage.add_argument("--annotation-run")
+    leakage.add_argument("--scope", choices=("pilot", "full"), default="full")
+    leakage.add_argument("--permutation-draws", type=int, default=2000)
     args = parser.parse_args()
     if args.command == "prepare":
         result = prepare_benchmark(db=args.db, cache=args.cache, root=args.root, seed=args.seed, model_path=args.model)
     elif args.command == "nimble":
-        result = run_nimble(root=args.root, endpoint=args.endpoint, limit=args.limit, only=set(args.only or []), timeout=args.timeout)
+        result = run_nimble(root=args.root, endpoint=args.endpoint, condition=args.condition, limit=args.limit, only=set(args.only or []), timeout=args.timeout)
     elif args.command == "nimble-stability":
-        result = run_nimble_stability(root=args.root, cache=args.cache, endpoint=args.endpoint, split=args.split, only=set(args.only or []), timeout=args.timeout)
+        result = run_nimble_stability(root=args.root, cache=args.cache, endpoint=args.endpoint, condition=args.condition, split=args.split, only=set(args.only or []), timeout=args.timeout)
     elif args.command == "analyze-stability":
         result = analyze_nimble_stability(root=args.root, report_path=args.report)
     elif args.command == "audit-baseline-provenance":
         result = audit_rules_baseline_provenance(root=args.root)
     elif args.command == "import-annotations":
-        result = import_annotation_forms(root=args.root, annotator_a=args.annotator_a, annotator_b=args.annotator_b)
+        result = import_annotation_forms(root=args.root, annotator_a=args.annotator_a, annotator_b=args.annotator_b, scope=args.scope)
     elif args.command == "prepare-adjudication":
         result = prepare_adjudication_form(root=args.root, annotation_run=args.annotation_run)
     elif args.command == "import-adjudication":
         result = import_adjudication(root=args.root, source=args.source, annotation_run=args.annotation_run)
     elif args.command == "qwen-base":
-        result = run_qwen_base(root=args.root, endpoint=args.endpoint, model=args.model, model_path=args.model_path, limit=args.limit, only=set(args.only or []), timeout=args.timeout)
+        result = run_qwen_base(root=args.root, endpoint=args.endpoint, condition=args.condition, model=args.model, model_path=args.model_path, limit=args.limit, only=set(args.only or []), timeout=args.timeout)
+    elif args.command == "share-packets":
+        result = build_share_packets(root=args.root, scope=args.scope)
+    elif args.command == "audit-leakage":
+        result = audit_annotation_leakage(root=args.root, annotation_run=args.annotation_run, scope=args.scope, permutation_draws=args.permutation_draws)
     else:
-        result = evaluate_benchmark(root=args.root, auto_threshold=args.auto_threshold, annotation_run=args.annotation_run)
+        result = evaluate_benchmark(root=args.root, auto_threshold=args.auto_threshold, annotation_run=args.annotation_run, scope=args.scope)
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 

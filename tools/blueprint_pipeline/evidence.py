@@ -49,5 +49,5 @@ def source_evidence(
     )
 
 
-def creative_evidence(field: str, note: str) -> dict[str, Any]:
-    return make_evidence(field, "creative_selection", note=note)
+def creative_evidence(field: str, note: str, *, source: str | None = None) -> dict[str, Any]:
+    return make_evidence(field, "creative_selection", note=note, source=source)

@@ -24,10 +24,12 @@ from blueprint_pipeline.archetypes import (
     write_assignment_snapshot,
     load_assignment_snapshot,
 )
+from blueprint_pipeline import evaluation
 from blueprint_pipeline.cache import object_hash, read_json
 from blueprint_pipeline.classifier import RulesProvider, classify_dossier
 from blueprint_pipeline.dossier import build_dossiers
 from blueprint_pipeline.dialogue import analyze_dialogue, select_representative_samples
+from blueprint_pipeline.casting import cast_identity
 from blueprint_pipeline.generator import build_individual_profile, validate_generated_profile
 from blueprint_pipeline.inventory import build_inventory
 from blueprint_pipeline.jev import (
@@ -305,7 +307,7 @@ class JevTests(unittest.TestCase):
             with self.assertRaises(JevConfigurationError):
                 JevProvider(api_key_env="UNIT_TYPESAFE_MISSING").classify({}, self.questions)
         payload = response_for(self.questions)
-        payload["answers"]["identity.pitch"]["choice"] = "not-a-vocabulary-value"
+        payload["answers"]["speech_style.register"]["choice"] = "not-a-vocabulary-value"
         with self.assertRaises(JevResponseError):
             validate_response(payload, self.questions)
 
@@ -325,9 +327,9 @@ class JevTests(unittest.TestCase):
         }
         result = classify_dossier(dossier, UncertainRules(self.vocab), self.vocab)
         self.assertEqual(result["status"], "needs_review")
-        self.assertNotIn("presentation", result["acoustic_casting"])
-        confident = classify_dossier(dossier, RulesProvider(self.vocab), self.vocab)
-        self.assertEqual(confident["acoustic_casting"]["presentation"]["value"], "neutral")
+        # Acoustics are cast from game data, never asked of the model.
+        self.assertNotIn("acoustic_casting", result)
+        self.assertFalse([key for key in result["questions"] if key.startswith("identity.")])
 
     def test_voiced_identity_is_rejected_before_provider_call(self):
         class NeverCall(RulesProvider):
@@ -357,14 +359,9 @@ class BlueprintAndReviewTests(unittest.TestCase):
             "provider": "rules", "model_id": "rules-1.0", "dossier_hash": "dossier-hash",
             "configuration_hash": "config-hash", "timestamp": "2026-11-01T00:00:00Z",
             "answers": {},
-            "acoustic_casting": {
-                "presentation": {"value": "neutral"}, "pitch": {"value": "mid"},
-                "timbre_primary": {"value": "clear"}, "articulation": {"value": "relaxed"},
-                "speaking_pace": {"value": "moderate"}, "intonation": {"value": "natural"},
-            },
             "speech_style": {"register": {"value": "formal"}},
         }
-        profile = build_individual_profile(dossier, classification, self.archetypes[0], self.vocab)
+        casting = cast_identity(dossier["identity"])
         self.assertEqual(validate_generated_profile(profile, self.vocab), [])
         self.assertEqual(profile["lifecycle"]["status"], "draft")
         self.assertTrue(all(field in profile["evidence"] for field, value in profile["identity"].items() if value not in (None, [])))
@@ -400,6 +397,241 @@ class BlueprintAndReviewTests(unittest.TestCase):
             self.assertIsNone(changed["lifecycle"]["approval"])
             self.assertEqual(blueprint.validate_profile(changed, self.vocab), [])
             self.assertEqual(preserve_manual_profile(changed, original), changed)
+
+
+class SpeechStyleBenchmarkProtocolTests(unittest.TestCase):
+    def _items(self, sample_count: int = 12) -> dict:
+        samples = [{"id": f"B1-L{index:02d}", "text": f"Line {index} of the sample."} for index in range(1, sample_count + 1)]
+        return {"B1": {"sample_count": len(samples), "dialogue_samples": samples}}
+
+    def _form(self, items: dict, scope: str = "full") -> dict:
+        payload_items = []
+        for benchmark_id, item in items.items():
+            payload_items.append({
+                "benchmark_id": benchmark_id,
+                "sample_count": item["sample_count"],
+                "overall_evidence_sufficiency": "sufficient",
+                "annotator_notes": "",
+                "dialogue_samples": item["dialogue_samples"],
+                "fields": {
+                    field: {
+                        "label": next(iter(options)),
+                        "evidence_sufficient": "yes",
+                        "evidence_line_ids": [item["dialogue_samples"][0]["id"]],
+                        "notes": "",
+                    }
+                    for field, options in evaluation.FIELDS.items()
+                },
+            })
+        return {
+            "schema_version": "2.0",
+            "benchmark": evaluation.BENCHMARK_VERSION,
+            "protocol": evaluation.PROTOCOL_VERSION,
+            "scope": scope,
+            "instructions": "test",
+            "items": payload_items,
+        }
+
+    def test_text_only_state_withholds_measurements(self):
+        dossier = {"benchmark_id": "B1", "dialogue_samples": [
+            {"id": "B1-L01", "text": "The gate opens at dawn."},
+            {"id": "B1-L02", "text": "We will be ready."},
+        ]}
+        assisted = evaluation.build_speech_style_state(dossier, condition="assisted")
+        text_only = evaluation.build_speech_style_state(dossier, condition="text_only")
+        self.assertIn("measurements", assisted)
+        self.assertNotIn("measurements", text_only)
+        self.assertEqual(assisted["dialogue_samples"], text_only["dialogue_samples"])
+        with self.assertRaises(ValueError):
+            evaluation.build_speech_style_state(dossier, condition="audio")
+
+    def test_form_validation_requires_citations_and_binds_sufficiency(self):
+        items = self._items()
+        evaluation._validate_annotation_form(self._form(items), items, label="a", scope="full")
+
+        uncited = self._form(items)
+        uncited["items"][0]["fields"]["register"]["evidence_line_ids"] = []
+        with self.assertRaisesRegex(ValueError, "at least one supporting line"):
+            evaluation._validate_annotation_form(uncited, items, label="a", scope="full")
+
+        mixed_one_cite = self._form(items)
+        mixed_one_cite["items"][0]["fields"]["register"].update(label="mixed")
+        with self.assertRaisesRegex(ValueError, "mixed requires at least two"):
+            evaluation._validate_annotation_form(mixed_one_cite, items, label="a", scope="full")
+
+        unknown_line = self._form(items)
+        unknown_line["items"][0]["fields"]["register"]["evidence_line_ids"] = ["B1-L99"]
+        with self.assertRaisesRegex(ValueError, "not in this item"):
+            evaluation._validate_annotation_form(unknown_line, items, label="a", scope="full")
+
+        unbound = self._form(items)
+        unbound["items"][0]["fields"]["register"].update(label="insufficient_evidence", evidence_line_ids=[])
+        with self.assertRaisesRegex(ValueError, "requires evidence_sufficient='no'"):
+            evaluation._validate_annotation_form(unbound, items, label="a", scope="full")
+
+        inverse = self._form(items)
+        inverse["items"][0]["fields"]["register"]["evidence_sufficient"] = "no"
+        with self.assertRaisesRegex(ValueError, "requires label insufficient_evidence"):
+            evaluation._validate_annotation_form(inverse, items, label="a", scope="full")
+
+        wrong_scope = self._form(items, scope="pilot")
+        with self.assertRaisesRegex(ValueError, "does not match the requested"):
+            evaluation._validate_annotation_form(wrong_scope, items, label="a", scope="full")
+
+    def test_pilot_gate_requires_every_field_to_pass(self):
+        agreement = {
+            "register": {"exact_agreement": 0.80, "cohen_kappa": 0.61},
+            "colloquialism": {"exact_agreement": 0.80, "ordinal_weighted_cohen_kappa": 0.59},
+        }
+        gate = evaluation._pilot_gate(agreement)
+        self.assertEqual(gate["status"], "revise_taxonomy")
+        self.assertTrue(gate["fields"]["register"]["passed"])
+        self.assertFalse(gate["fields"]["colloquialism"]["passed"])
+        self.assertEqual(gate["fields"]["colloquialism"]["kappa_statistic"], "ordinal_weighted_cohen_kappa")
+
+    def test_off_scale_vocabulary_labels_are_excluded_from_ordinal_metrics(self):
+        order = evaluation.ORDINAL_FIELD_LABELS["vocabulary_complexity"]
+        metrics = evaluation._ordinal_metrics(["plain", "advanced", "poetic", "specialized"], ["ordinary", "advanced", "poetic", "plain"], order)
+        self.assertEqual(metrics["n"], 2)
+        self.assertEqual(metrics["excluded_count"], 2)
+        self.assertAlmostEqual(metrics["mean_absolute_label_distance"], 0.5)
+
+    def test_composed_profile_keeps_acoustics_and_validated_style_only(self):
+        from blueprint_pipeline.compose import compose_archetype_style_profile
+        archetype = json.loads((Path(__file__).resolve().parents[3] / "blueprints" / "archetypes" / "archetype_masculine_warm_low_mid.json").read_text())
+        dossier = {"identity": {"canonical_id": "npc_1", "name": "Test", "npc_id": 1, "sex": "male"}}
+        classification = {
+            "canonical_id": "npc_1",
+            "provider": "jev",
+            "model_id": "local",
+            "status": "needs_review",
+            "speech_style": {
+                "register": {"value": "conversational", "confidence": 0.9, "probabilities": {"conversational": 0.9}},
+                "sentence_complexity": {"value": "simple", "confidence": 0.6},
+                "diction_style": {"value": "plain", "confidence": 0.99},
+            },
+        }
+        vocabulary = json.loads((Path(__file__).resolve().parents[3] / "blueprints" / "vocabulary.json").read_text())
+        profile = compose_archetype_style_profile(archetype, classification, dossier, vocabulary)
+        self.assertEqual(profile["profile_kind"], "character")
+        self.assertEqual(profile["character"]["id"], "npc_1")
+        # Acoustics come from casting rules, not from the shared archetype.
+        self.assertEqual(profile["identity"]["presentation"], "masculine")
+        self.assertEqual(profile["identity"]["pitch"], "low_mid")
+        self.assertEqual(profile["evidence"]["pitch"]["level"], "creative_selection")
+        # No BodyType in this dossier, so the ladder must not claim an age step.
+        self.assertIn("sex_race_pitch_ladder", profile["evidence"]["pitch"]["note"])
+        self.assertEqual(profile["evidence"]["perceived_age"]["level"], "default")
+        self.assertEqual(set(profile["speech_style"]), {"register", "sentence_complexity"})
+        self.assertNotIn("diction_style", profile["speech_style"])
+        self.assertEqual(profile["speech_style_analysis"]["fields"]["register"]["confidence"], 0.9)
+        self.assertEqual(profile["lifecycle"]["status"], "draft")
+
+    def test_style_clause_renders_only_when_requested(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        import blueprint as renderer
+        vocabulary = renderer.load_vocabulary(Path(__file__).resolve().parents[3] / "blueprints" / "vocabulary.json")
+        profile = json.loads((Path(__file__).resolve().parents[3] / "blueprints" / "archetypes" / "archetype_masculine_clear_mid.json").read_text())
+        profile["speech_style"] = {
+            "register": "formal",
+            "vocabulary_complexity": "specialized",
+            "sentence_complexity": "complex",
+            "colloquialism": "low",
+            "rhetorical_style": "measured",
+        }
+        plain = renderer.build_plan(profile, vocabulary)["variants"]["neutral"]["instruct"]
+        styled = renderer.build_plan(profile, vocabulary, with_style=True)["variants"]["neutral"]["instruct"]
+        self.assertNotIn("wording is", plain)
+        self.assertIn("formal in register", styled)
+        self.assertTrue(styled.startswith(plain.rstrip(".")), "style clause must append, never rewrite identity")
+
+    def test_share_packet_carries_form_guide_and_readme(self):
+        import zipfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            form_root = root / "annotations" / "pilot"
+            form_root.mkdir(parents=True)
+            items = self._items()
+            for name in ("annotator_a", "annotator_b"):
+                (form_root / f"{name}.json").write_text(json.dumps(self._form(items, scope="pilot")), encoding="utf-8")
+            (root / "annotations" / "annotation_guide.md").write_text("# guide\n", encoding="utf-8")
+            result = evaluation.build_share_packets(root=root, scope="pilot")
+            for name in ("annotator_a", "annotator_b"):
+                packet = Path(result["packets"][name]["path"])
+                with zipfile.ZipFile(packet) as archive:
+                    self.assertEqual(sorted(archive.namelist()), ["README.md", "annotation_form.json", "annotation_guide.md"])
+                    self.assertEqual(
+                        json.loads(archive.read("annotation_form.json")),
+                        json.loads((form_root / f"{name}.json").read_text()),
+                    )
+                    self.assertIn("Do not edit `benchmark_id`", archive.read("README.md").decode())
+                _, _, parsed, is_zip = evaluation._read_annotation_source(packet)
+                self.assertTrue(is_zip)
+                self.assertEqual(parsed["scope"], "pilot")
+
+    def test_adjudication_requires_a_reason_per_label(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            items = self._items()
+            (root / "dossiers").mkdir()
+            public, selection = [], []
+            for benchmark_id, item in items.items():
+                path = root / "dossiers" / f"{benchmark_id}.json"
+                path.write_text(json.dumps({"benchmark_id": benchmark_id, "dialogue_samples": item["dialogue_samples"]}), encoding="utf-8")
+                public.append({"benchmark_id": benchmark_id, "dossier_path": str(path)})
+                selection.append({"benchmark_id": benchmark_id, "split": "development", "stratum": "5-20"})
+            (root / "manifest.json").write_text(json.dumps({
+                "public_dossiers": public,
+                "private_selection": selection,
+                "annotation_scopes": {"full": {"item_ids": [benchmark_id for benchmark_id in items]}},
+            }), encoding="utf-8")
+            run_dir = root / "annotations" / "submissions" / "run-1"
+            run_dir.mkdir(parents=True)
+            for name, seed in (("annotator_a", 1), ("annotator_b", 2)):
+                (run_dir / f"{name}.json").write_text(json.dumps(self._form(items)), encoding="utf-8")
+            (run_dir / "manifest.json").write_text(json.dumps({
+                "benchmark": evaluation.BENCHMARK_VERSION,
+                "protocol": evaluation.PROTOCOL_VERSION,
+                "scope": "full",
+                "annotation_run": "run-1",
+                "imported_epoch_ns": seed,
+                "imported_utc": "2026-11-01T00:00:00Z",
+            }), encoding="utf-8")
+            form_path = evaluation.prepare_adjudication_form(root=root, annotation_run="run-1")["adjudication_form_path"]
+            payload = json.loads(Path(form_path).read_text())
+            item = payload["items"][0]
+            item["adjudicated_labels"] = {field: next(iter(options)) for field, options in evaluation.FIELDS.items()}
+            item["adjudication_reasons"] = {field: "" for field in evaluation.FIELDS}
+            payload["status"] = "complete_manual_adjudication"
+            submission = root / "submission.json"
+            submission.write_text(json.dumps(payload), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "a reason is required"):
+                evaluation.import_adjudication(root=root, source=submission, annotation_run="run-1")
+            item["adjudication_reasons"] = {field: "annotator_agreement" for field in evaluation.FIELDS}
+            submission.write_text(json.dumps(payload), encoding="utf-8")
+            result = evaluation.import_adjudication(root=root, source=submission, annotation_run="run-1")
+            self.assertEqual(result["adjudicated_field_count"], len(evaluation.FIELDS))
+
+    def test_expected_items_follow_manifest_scope(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "dossiers").mkdir()
+            public = []
+            selection = []
+            for benchmark_id in ("B1", "B2"):
+                samples = [{"id": f"{benchmark_id}-L01", "text": "Line."}]
+                dossier = {"benchmark_id": benchmark_id, "dialogue_samples": samples}
+                path = root / "dossiers" / f"{benchmark_id}.json"
+                path.write_text(json.dumps(dossier), encoding="utf-8")
+                public.append({"benchmark_id": benchmark_id, "dossier_path": str(path)})
+                selection.append({"benchmark_id": benchmark_id, "split": "development", "stratum": "5-20"})
+            (root / "manifest.json").write_text(json.dumps({
+                "public_dossiers": public,
+                "private_selection": selection,
+                "annotation_scopes": {"pilot": {"item_ids": ["B2"]}, "full": {"item_ids": ["B1", "B2"]}},
+            }), encoding="utf-8")
+            self.assertEqual(sorted(evaluation._expected_annotation_items(root, "pilot")[0]), ["B2"])
+            self.assertEqual(sorted(evaluation._expected_annotation_items(root, "full")[0]), ["B1", "B2"])
 
 
 if __name__ == "__main__":

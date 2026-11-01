@@ -182,6 +182,8 @@ def build_inventory(
                     else "female" if any(row.get("gender") == 1 for row in label_rows)
                     else "unknown"
                 ),
+                "body_type": meta.get("body_type"),
+                "height": meta.get("height"),
                 "lore_data_available": False,
                 "race_clan_metadata_available": bool(meta.get("race") or meta.get("clan")),
                 "review_reasons": sorted(set(reasons)),
@@ -215,6 +217,8 @@ def build_inventory(
                 "tribe_id": None,
                 "clan": None,
                 "sex": "unknown",
+                "body_type": meta.get("body_type"),
+                "height": meta.get("height"),
                 "lore_data_available": False,
                 "race_clan_metadata_available": False,
                 "review_reasons": ["speaker label has no canonical NPC ID; do not create a named character profile"],

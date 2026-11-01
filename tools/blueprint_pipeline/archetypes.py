@@ -22,11 +22,9 @@ def load_archetypes(directory: pathlib.Path = ARCHETYPE_DIR) -> list[dict]:
 
 
 def _presentation_for(candidate: dict, classification: dict | None) -> str:
-    selected = ((classification or {}).get("acoustic_casting") or {}).get("presentation")
-    if selected:
-        return selected["value"]
-    # Game sex, race, and clan are identity metadata, not acoustic evidence.
-    return "neutral"
+    """Presentation comes from the game's own sex field."""
+    sex = str((candidate or {}).get("sex") or "").strip().casefold()
+    return {"male": "masculine", "female": "feminine"}.get(sex, "neutral")
 
 
 def select_archetype(

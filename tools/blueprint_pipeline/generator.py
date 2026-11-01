@@ -11,6 +11,17 @@ from .cache import object_hash
 from .evidence import creative_evidence, make_evidence, source_evidence
 
 
+# Only fields with a validation story may reach a profile. `diction_style` and
+# `contraction_frequency` failed the benchmark and stay out until they pass.
+VALIDATED_STYLE_FIELDS = (
+    "register",
+    "vocabulary_complexity",
+    "sentence_complexity",
+    "colloquialism",
+    "rhetorical_style",
+)
+
+
 def _voice_evidence_for(dossier: dict, field: str, value: str, vocabulary: dict) -> dict | None:
     if not value:
         return None
@@ -40,12 +51,11 @@ def _voice_evidence_for(dossier: dict, field: str, value: str, vocabulary: dict)
 def build_individual_profile(
     dossier: dict,
     classification: dict,
-    archetype_profile: dict,
+    casting: dict,
     vocabulary: dict,
 ) -> dict:
+    """Compose an NPC profile: acoustics cast from game data, style classified."""
     identity_context = dossier.get("identity") or {}
-    archetype_identity = archetype_profile["identity"]
-    cast = classification.get("acoustic_casting") or {}
     identity = {}
     evidence = {}
     identity_fields = (
@@ -54,25 +64,29 @@ def build_individual_profile(
         "intonation", "distinctive_traits",
     )
     for field in identity_fields:
-        decision = cast.get(field) or {}
+        decision = casting.get(field) or {}
         value = decision.get("value")
-        if value is None:
-            value = archetype_identity.get(field)
-        if field not in {"perceived_age", "pitch_range", "timbre_secondary", "resonance", "distinctive_traits"}:
-            if value is None:
-                value = vocabulary["classification"]["defaults"].get(field)
         identity[field] = value
         if value is None or value == []:
             continue
         source = _voice_evidence_for(dossier, field, value, vocabulary)
         if source is not None:
             evidence[field] = source
-        elif field == "accent":
             continue
+        level = decision.get("level") or "creative_selection"
+        rule = decision.get("rule")
+        facts = decision.get("facts") or {}
+        note = decision.get("note") or (
+            "Deterministic casting rule "
+            f"`{rule}` applied to game facts "
+            f"({', '.join(f'{key}={value}' for key, value in facts.items() if value not in (None, ''))}). "
+            "This describes the synthetic voice we create, not the original actor."
+        )
+        if level == "default":
+            evidence[field] = make_evidence(field, "default", note=note)
         else:
             evidence[field] = creative_evidence(
-                field,
-                "Deliberate synthetic casting choice; this is not a claim about an original actor or recording.",
+                field, note, source=f"casting:{rule or 'rule'}"
             )
 
     defaults = vocabulary["classification"]["defaults"]
@@ -95,10 +109,33 @@ def build_individual_profile(
 
     speech_style = {}
     for field, decision in (classification.get("speech_style") or {}).items():
+        if field not in VALIDATED_STYLE_FIELDS:
+            continue
         value = decision.get("value")
         if value is not None:
             speech_style[field] = value
-    analysis = dossier.get("dialogue_analysis") or {}
+    style_analysis = {}
+    for field, decision in (classification.get("speech_style") or {}).items():
+        if field not in VALIDATED_STYLE_FIELDS or decision.get("value") is None:
+            continue
+        style_analysis[field] = {
+            "value": decision.get("value"),
+            "confidence": decision.get("confidence"),
+            "probabilities": decision.get("probabilities"),
+            "method": decision.get("method") or classification.get("provider"),
+        }
+    analysis = (
+        {
+            "source": "blueprint_pipeline.classify",
+            "provider": classification.get("provider"),
+            "model_id": classification.get("model_id"),
+            "classification": classification.get("canonical_id"),
+            "dossier_hash": classification.get("dossier_hash"),
+            "fields": style_analysis,
+        }
+        if style_analysis
+        else None
+    )
     confidence_values = [
         float(answer.get("confidence"))
         for answer in (classification.get("answers") or {}).values()
@@ -127,7 +164,7 @@ def build_individual_profile(
         },
         "identity": identity,
         "speech_style": speech_style or None,
-        "speech_style_analysis": analysis or None,
+        "speech_style_analysis": analysis,
         "classification": {
             "provider": classification.get("provider", "unknown"),
             "model_id": classification.get("model_id", "unknown"),

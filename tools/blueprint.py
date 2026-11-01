@@ -208,11 +208,27 @@ def pack_archon(profile: dict) -> str:
     return profile.get("pack_archon") or "neutral"
 
 
-def render_instructs(profile: dict, vocab: dict) -> dict:
+def render_style(profile: dict, vocab: dict) -> str:
+    """Render the speech-style clause, or "" when the profile carries no style."""
+    style = profile.get("speech_style") or {}
+    dimensions = vocab.get("speech_style", {}).get("dimensions") or {}
+    values = {}
+    for field in ("register", "vocabulary_complexity", "sentence_complexity", "colloquialism", "rhetorical_style"):
+        label = style.get(field)
+        if not label:
+            return ""
+        entry = (dimensions.get(field, {}).get("values") or {}).get(label) or {}
+        values[field] = entry.get("render") or str(label).replace("_", " ")
+    return vocab["render"]["style_template"].format(**values)
+
+
+def render_instructs(profile: dict, vocab: dict, with_style: bool = False) -> dict:
     identity = render_identity(profile, vocab)
+    style = render_style(profile, vocab) if with_style else ""
+    base = f"{identity}{style}"
     return {
-        mood: identity if mood == "neutral" and not (profile.get("moods") or {}).get(mood)
-        else f"{identity} {render_mood(profile, vocab, mood)}"
+        mood: base if mood == "neutral" and not (profile.get("moods") or {}).get(mood)
+        else f"{base} {render_mood(profile, vocab, mood)}"
         for mood in mood_ids(profile)
     }
 
@@ -486,9 +502,9 @@ def seed_for(voice_id: str, mood: str, base: int = 20261101) -> int:
     return base + int(digest[:8], 16) % 1_000_000
 
 
-def build_plan(profile: dict, vocab: dict) -> dict:
+def build_plan(profile: dict, vocab: dict, with_style: bool = False) -> dict:
     voice_id = profile["character"]["id"]
-    instructs = render_instructs(profile, vocab)
+    instructs = render_instructs(profile, vocab, with_style=with_style)
     reference = vocab["reference"]
     return {
         "profile_id": voice_id,
@@ -624,7 +640,7 @@ def cmd_plan(args) -> int:
         for error in errors:
             print(error, file=sys.stderr)
         return 1
-    plan = build_plan(profile, vocab)
+    plan = build_plan(profile, vocab, with_style=getattr(args, "with_style", False))
     text = json.dumps(plan, indent=2, ensure_ascii=False) + "\n"
     if args.out:
         out = pathlib.Path(args.out)
@@ -705,6 +721,11 @@ def main(argv: list[str] | None = None) -> int:
     plan = sub.add_parser("plan", help="emit the generation plan JSON")
     plan.add_argument("target")
     plan.add_argument("--out", type=pathlib.Path)
+    plan.add_argument(
+        "--with-style",
+        action="store_true",
+        help="append the profile's speech_style clause to the identity instruct",
+    )
     plan.set_defaults(func=cmd_plan)
 
     migrate = sub.add_parser("migrate-1.0", help="explicitly migrate one schema 1.0 profile to 1.1")

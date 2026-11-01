@@ -25,6 +25,8 @@ def load_game_index(path: pathlib.Path | None) -> dict[int, dict[str, Any]]:
             "tribe_id": row.get("tribe_id"),
             "clan": row.get("tribe_name", row.get("clan")),
             "sex": row.get("sex", row.get("gender_name", "unknown")),
+            "body_type": row.get("body_type"),
+            "height": row.get("height"),
         }
     return result
 
@@ -34,5 +36,8 @@ def game_metadata(npc_id: int | None, game_index: dict[int, dict]) -> dict:
         return {"race_id": None, "race": None, "tribe_id": None, "clan": None, "sex": "unknown"}
     return game_index.get(
         npc_id,
-        {"race_id": None, "race": None, "tribe_id": None, "clan": None, "sex": "unknown"},
+        {
+            "race_id": None, "race": None, "tribe_id": None, "clan": None,
+            "sex": "unknown", "body_type": None, "height": None,
+        },
     )

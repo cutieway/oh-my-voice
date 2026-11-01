@@ -72,6 +72,82 @@ def median_f0(samples, sr, low=60.0, high=400.0):
     return round(float(np.median(values)), 1) if values else None
 
 
+def summarize_profile(profile: dict) -> dict:
+    """Flatten a blueprint into what a listener needs to judge the voice."""
+    identity = profile.get("identity") or {}
+    evidence = profile.get("evidence") or {}
+    analysis = (profile.get("speech_style_analysis") or {}).get("fields") or {}
+    identity_rows = []
+    for field, value in identity.items():
+        if value in (None, [], {}):
+            continue
+        record = evidence.get(field) or {}
+        identity_rows.append({
+            "field": field,
+            "value": value if not isinstance(value, dict) else json.dumps(value, sort_keys=True),
+            "evidence": record.get("level"),
+            "source": record.get("source"),
+        })
+    style_rows = []
+    for field, value in (profile.get("speech_style") or {}).items():
+        row = analysis.get(field) or {}
+        probabilities = row.get("probabilities") or {}
+        ranked = sorted(probabilities.items(), key=lambda item: -item[1])[:3]
+        style_rows.append({
+            "field": field,
+            "value": value,
+            "confidence": row.get("confidence"),
+            "method": row.get("method"),
+            "top": ranked,
+        })
+    character = profile.get("character") or {}
+    return {
+        "character": {key: character.get(key) for key in
+                      ("id", "name", "npc_id", "race", "clan", "sex", "lore_age", "source_url")},
+        "identity": identity_rows,
+        "style": style_rows,
+        "classification": profile.get("classification") or {},
+        "style_source": (profile.get("speech_style_analysis") or {}).get("model_id"),
+    }
+
+
+def render_decisions(profile_summary: dict) -> str:
+    if not profile_summary:
+        return ""
+    character = profile_summary["character"]
+    facts = " · ".join(
+        f"{key}={html.escape(str(value))}" for key, value in character.items()
+        if value not in (None, "")
+    )
+    identity_rows = "".join(
+        f'<tr><td>{html.escape(row["field"])}</td><td>{html.escape(str(row["value"]))}</td>'
+        f'<td>{html.escape(str(row["evidence"] or ""))}</td>'
+        f'<td>{html.escape(str(row["source"] or ""))}</td></tr>'
+        for row in profile_summary["identity"]
+    )
+    style_rows = "".join(
+        f'<tr><td>{html.escape(row["field"])}</td><td><b>{html.escape(str(row["value"]))}</b></td>'
+        f'<td>{"—" if row["confidence"] is None else format(row["confidence"], ".2f")}</td>'
+        f'<td>{html.escape(", ".join(f"{label} {prob:.2f}" for label, prob in row["top"]))}</td></tr>'
+        for row in profile_summary["style"]
+    )
+    classification = profile_summary["classification"]
+    return (
+        '<details open><summary>decisions</summary>'
+        f'<p class="facts">{facts}</p>'
+        '<table><caption>acoustic identity</caption>'
+        '<tr><th>field</th><th>value</th><th>evidence</th><th>source</th></tr>'
+        f'{identity_rows}</table>'
+        '<table><caption>speech style (model probabilities)</caption>'
+        '<tr><th>field</th><th>value</th><th>confidence</th><th>top labels</th></tr>'
+        f'{style_rows}</table>'
+        f'<p class="facts">model={html.escape(str(profile_summary["style_source"]))} '
+        f'status={html.escape(str(classification.get("status")))} '
+        f'review={html.escape(", ".join(classification.get("review_reasons") or []))}</p>'
+        '</details>'
+    )
+
+
 def write_audition(out: pathlib.Path, report: dict) -> None:
     blocks = []
     for voice in report["voices"]:
@@ -106,7 +182,9 @@ def write_audition(out: pathlib.Path, report: dict) -> None:
                       else f'{variant["distinct_references"]} different outputs')
                    + '</div>' if variant["repeat_seed"] else '')
                 + '<details><summary>instruct</summary>'
-                f'<p>{html.escape(variant["instruct"])}</p></details></section>'
+                f'<p>{html.escape(variant["instruct"])}</p></details>'
+                + render_decisions(voice.get("profile"))
+                + '</section>'
             )
     (out / "index.html").write_text(
         '<!doctype html><meta charset="utf-8"><title>voicebank audition</title>'
@@ -122,6 +200,11 @@ def write_audition(out: pathlib.Path, report: dict) -> None:
         "section .verdict{margin:6px 0 0;font-size:12px;opacity:.8}"
         ".clips{display:flex;flex-direction:column;gap:4px}audio{width:100%;height:30px}"
         "details{opacity:.75;margin-top:4px}"
+        "table{border-collapse:collapse;margin:6px 0 10px;font-size:12px}"
+        "caption{text-align:left;opacity:.6;padding-bottom:2px}"
+        "th,td{border-bottom:1px solid rgba(128,128,128,.25);padding:2px 10px 2px 0;"
+        "text-align:left;vertical-align:top}"
+        ".facts{font-size:12px;opacity:.75;margin:4px 0}"
         "summary{cursor:pointer;font-size:12px}details p{margin:4px 0;font-size:12px}"
         "</style><h1>voicebank audition</h1>"
         f"<p>Reference script: <q>{html.escape(report['reference_text'])}</q><br>"
@@ -206,9 +289,12 @@ def main() -> int:
         voice_dir = out / "voices" / data["profile_id"]
         (voice_dir / "refs").mkdir(parents=True, exist_ok=True)
         (voice_dir / "lines").mkdir(parents=True, exist_ok=True)
+        profile_path = plan.with_name(plan.name.replace(".plan.json", ".profile.json"))
+        profile = json.loads(profile_path.read_text(encoding="utf-8")) if profile_path.is_file() else None
         entry = {
             "profile_id": data["profile_id"],
             "profile_version": data["profile_version"],
+            "profile": summarize_profile(profile) if profile else None,
             "variants": [],
         }
         for mood, variant in data["variants"].items():

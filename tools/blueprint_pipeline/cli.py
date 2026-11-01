@@ -46,6 +46,9 @@ from blueprint_pipeline.config import (
 )
 from blueprint_pipeline.dossier import build_dossiers, latest_dossiers
 from blueprint_pipeline.game_data import load_game_index
+from blueprint_pipeline.archetypes import load_archetypes
+from blueprint_pipeline.compose import compose_archetype_style_profile
+from blueprint_pipeline.casting import cast_identity
 from blueprint_pipeline.generator import build_individual_profile, validate_generated_profile
 from blueprint_pipeline.identity import canonical_id
 from blueprint_pipeline.inventory import build_inventory
@@ -83,6 +86,7 @@ def make_parser() -> argparse.ArgumentParser:
         ("dossiers", "aggregate dialogue and build character dossiers"),
         ("enrich", "resolve and enrich dossier lore using MediaWiki"),
         ("classify", "classify eligible dossiers with rules or Jev"),
+        ("compose", "compose draft profiles from archetype acoustics plus classified speech style"),
         ("inspect", "print a dossier, classification, profile, and decision audit"),
         ("validate", "validate curated and generated blueprint profiles"),
         ("report", "summarize inventory, classifications, assignments, and review work"),
@@ -121,7 +125,7 @@ def make_parser() -> argparse.ArgumentParser:
             sub.add_argument("--archon", default="neutral")
             sub.add_argument("--reason")
             sub.add_argument("--note")
-        if name in {"inventory", "dossiers", "enrich", "classify", "inspect", "validate", "report", "review"}:
+        if name in {"inventory", "dossiers", "enrich", "classify", "compose", "inspect", "validate", "report", "review"}:
             sub.add_argument("--vocabulary", type=Path, default=ROOT / "blueprints" / "vocabulary.json")
     return parser
 
@@ -308,8 +312,9 @@ def _route_classification(dossier: dict, classification: dict, vocabulary: dict,
     archetype_assignment = select_archetype(candidate, archetypes, classification=classification)
     profile_path = None
     if classification.get("distinctive") and classification.get("status") == "ready_for_audition":
-        archetype_profile = next(item for item in archetypes if item["character"]["id"] == archetype_assignment["profile_id"])
-        profile = build_individual_profile(dossier, classification, archetype_profile, vocabulary)
+        profile = build_individual_profile(
+            dossier, classification, cast_identity(dossier.get("identity") or {}), vocabulary,
+        )
         errors = validate_generated_profile(profile, vocabulary)
         if errors:
             classification.setdefault("review_reasons", []).append(
@@ -481,6 +486,43 @@ def _find_profile(target: str, out: Path) -> tuple[dict, Path] | None:
     return matches[-1][1], matches[-1][2]
 
 
+def cmd_compose(args) -> int:
+    """Compose a draft character profile: archetype acoustics plus classified style."""
+    vocabulary = blueprint_renderer.load_vocabulary(args.vocabulary)
+    latest = latest_dossiers(args.cache_dir)
+    dossiers = {value.get("identity", {}).get("canonical_id"): value for value, _ in latest.values()}
+    classifications = _latest_records(args.cache_dir / "classifications", "*.json")
+    by_canonical = {}
+    for value, _ in classifications.values():
+        by_canonical[value.get("canonical_id")] = value
+    assignments = _load_assignments(args.out)
+    archetypes = {item["character"]["id"]: item for item in load_archetypes()}
+    selected = _selected(
+        [dossiers[key] for key in sorted(dossiers) if key in by_canonical],
+        args,
+    )
+    written = 0
+    for dossier in selected:
+        canonical_id = dossier["identity"]["canonical_id"]
+        classification = by_canonical[canonical_id]
+        assignment = assignments.get(canonical_id) or {}
+        archetype_id = assignment.get("profile_id")
+        archetype = archetypes.get(archetype_id)
+        if archetype is None:
+            print(f"skip {canonical_id}: no archetype assignment", flush=True)
+            continue
+        profile = compose_archetype_style_profile(archetype, classification, dossier, vocabulary)
+        errors = validate_generated_profile(profile, vocabulary)
+        if errors:
+            print(f"invalid {canonical_id}: {errors[0]}", flush=True)
+            continue
+        effective, path = _save_profile(profile, args.out, args.force)
+        print(f"composed {canonical_id} -> {path} ({archetype_id})", flush=True)
+        written += 1
+    print(f"composed profiles: {written}")
+    return 0
+
+
 def cmd_inspect(args) -> int:
     found = _find_dossier(args, args.target)
     profile_found = _find_profile(args.target, args.out)
@@ -602,6 +644,7 @@ def main(argv: list[str] | None = None) -> int:
         "dossiers": cmd_dossiers,
         "enrich": cmd_enrich,
         "classify": cmd_classify,
+        "compose": cmd_compose,
         "inspect": cmd_inspect,
         "validate": cmd_validate,
         "report": cmd_report,

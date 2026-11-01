@@ -792,7 +792,9 @@
       "loving"
     ],
     "banned_identity_words_reason": "Identity is the constant; emotion belongs to the mood layer. An emotion word in the identity prompt makes every line of the character permanently emotional.",
-    "word_target_note": "48 is the hard ceiling: it still fits accent plus secondary timbre plus two traits. Anything longer dilutes the description, and Qwen's own voice-design examples are shorter."
+    "word_target_note": "48 is the hard ceiling: it still fits accent plus secondary timbre plus two traits. Anything longer dilutes the description, and Qwen's own voice-design examples are shorter.",
+    "style_template": " The wording is {register} in register, {vocabulary_complexity} in vocabulary, {sentence_complexity} in sentence structure, {colloquialism} in colloquialism, and {rhetorical_style} in rhetorical shape.",
+    "style_note": "Optional speech-style clause rendered only when a plan asks for it; it describes wording, never pitch, timbre, or accent."
   },
   "evidence": {
     "values": {
@@ -1082,14 +1084,6 @@
           "false": "Identity is ambiguous, unresolved, or has an SE voice reference."
         }
       },
-      "voice_evidence_present": {
-        "type": "noul",
-        "instructions": "Does the dossier contain a source quote that explicitly describes an audible voice quality?",
-        "criteria": {
-          "true": "At least one attributed source quote describes an audible quality.",
-          "false": "No source quote describes an audible voice quality."
-        }
-      },
       "individual_design": {
         "type": "score",
         "instructions": "How strongly does the evidence justify a unique individual synthetic voice design instead of a shared archetype?",
@@ -1101,70 +1095,38 @@
           "Strong, explicit voice description and substantial character-specific evidence justify an individual design."
         ]
       },
-      "speech_style.register": {
-        "type": "choice",
-        "instructions": "Which register best describes the actual wording in the sampled dialogue?",
-        "values": "speech_style.register"
-      },
-      "speech_style.vocabulary_complexity": {
-        "type": "choice",
-        "instructions": "How complex is the vocabulary in the sampled dialogue? Judge words, not the character’s intelligence or social class.",
-        "values": "speech_style.vocabulary_complexity"
-      },
-      "speech_style.sentence_complexity": {
-        "type": "choice",
-        "instructions": "How structurally complex are the sampled utterances? Judge the text only.",
-        "values": "speech_style.sentence_complexity"
-      },
       "speech_style.colloquialism": {
         "type": "choice",
         "instructions": "How often does the sampled dialogue use colloquial wording?",
         "values": "speech_style.colloquialism"
       },
-      "speech_style.diction_style": {
+      "speech_style.register": {
         "type": "choice",
-        "instructions": "Which wording style best fits the sampled dialogue?",
-        "values": "speech_style.diction_style"
+        "instructions": "Which register best describes the actual wording in the sampled dialogue?",
+        "values": "speech_style.register"
       },
       "speech_style.rhetorical_style": {
         "type": "choice",
         "instructions": "What rhetorical pattern is most representative of the sampled dialogue?",
         "values": "speech_style.rhetorical_style"
       },
-      "speech_style.contraction_frequency": {
+      "speech_style.sentence_complexity": {
         "type": "choice",
-        "instructions": "How frequently does the sample use contractions?",
-        "values": "speech_style.contraction_frequency"
+        "instructions": "How structurally complex are the sampled utterances? Judge the text only.",
+        "values": "speech_style.sentence_complexity"
       },
-      "identity.presentation": {
+      "speech_style.vocabulary_complexity": {
         "type": "choice",
-        "instructions": "Choose a deliberate synthetic vocal presentation. Do not claim it describes an original actor; game sex, race, clan, body, and personality are not acoustic evidence.",
-        "values": "identity.presentation"
+        "instructions": "How complex is the vocabulary in the sampled dialogue? Judge words, not the character’s intelligence or social class.",
+        "values": "speech_style.vocabulary_complexity"
       },
-      "identity.pitch": {
-        "type": "choice",
-        "instructions": "Choose a plausible synthetic pitch category. Do not infer pitch from race, clan, sex, body, occupation, or personality; use explicit audible source evidence only when present.",
-        "values": "identity.pitch"
-      },
-      "identity.timbre_primary": {
-        "type": "choice",
-        "instructions": "Choose one deliberate synthetic primary timbre. Text style and character context do not establish acoustic timbre.",
-        "values": "identity.timbre_primary"
-      },
-      "identity.articulation": {
-        "type": "choice",
-        "instructions": "Choose a synthetic articulation style. Dialogue phrasing alone is not proof of audible articulation.",
-        "values": "identity.articulation"
-      },
-      "identity.speaking_pace": {
-        "type": "choice",
-        "instructions": "Choose a synthetic speaking pace; do not infer pace from emotion or personality.",
-        "values": "identity.speaking_pace"
-      },
-      "identity.intonation": {
-        "type": "choice",
-        "instructions": "Choose a stable synthetic intonation suitable for neutral dialogue. Do not choose a per-line emotion.",
-        "values": "identity.intonation"
+      "voice_evidence_present": {
+        "type": "noul",
+        "instructions": "Does the dossier contain a source quote that explicitly describes an audible voice quality?",
+        "criteria": {
+          "true": "At least one attributed source quote describes an audible quality.",
+          "false": "No source quote describes an audible voice quality."
+        }
       }
     },
     "thresholds": {

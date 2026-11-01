@@ -228,23 +228,10 @@ def classify_dossier(
             >= policy["min_dialogue_lines_for_individual"]
         )
     )
-    acoustic_fields = (
-        "presentation", "pitch", "timbre_primary", "articulation",
-        "speaking_pace", "intonation",
-    )
     speech_fields = (
         "register", "vocabulary_complexity", "sentence_complexity", "colloquialism",
-        "diction_style", "rhetorical_style", "contraction_frequency",
+        "rhetorical_style",
     )
-    cast = {}
-    for field in acoustic_fields:
-        value = accepted_choices.get(f"identity.{field}")
-        if value is not None:
-            cast[field] = {
-                "value": value,
-                "evidence_level": "creative_selection",
-                "source_claim": False,
-            }
     speech_style = {}
     analysis = (dossier.get("dialogue_analysis") or {}).get("interpretation") or {}
     for field in speech_fields:
@@ -257,6 +244,7 @@ def classify_dossier(
                 "value": value,
                 "method": "jev" if question_id in accepted_choices else "deterministic_dialogue_analysis",
                 "confidence": decision_checks.get(question_id, {}).get("confidence"),
+                "probabilities": (answers.get(question_id) or {}).get("probabilities"),
             }
     speech_style["speech_habits"] = {
         "value": analysis.get("speech_habits", ["none_observed"]),
@@ -309,7 +297,6 @@ def classify_dossier(
         "answers": answers,
         "decision_checks": decision_checks,
         "distinctive": distinctive,
-        "acoustic_casting": cast,
         "speech_style": speech_style,
         "voice_claims": [
             {

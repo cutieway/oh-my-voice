@@ -8,6 +8,7 @@ import datetime as dt
 import email.utils
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 from .config import (
@@ -210,7 +211,13 @@ def validate_response(payload: dict, questions: dict[str, dict]) -> dict:
 
 
 class JevProvider:
-    """HTTP adapter for TypeSafe System One / Jev."""
+    """HTTP adapter for TypeSafe System One / Jev.
+
+    Duck-typed against ``ClassifierProvider``: ``classifier`` imports
+    ``build_questions`` from this module, so subclassing it here would cycle.
+    """
+
+    name = "jev"
 
     def __init__(
         self,
@@ -225,17 +232,25 @@ class JevProvider:
     ):
         self.endpoint = endpoint
         self.model = model
+        self.model_id = model
         self.api_key_env = api_key_env
         self.timeout = timeout
         self.retries = retries
         self.opener = opener or urlopen
         self.sleeper = sleeper
 
+    @property
+    def local_endpoint(self) -> bool:
+        """True when the endpoint is a loopback server that needs no API key."""
+        host = urlsplit(self.endpoint).hostname or ""
+        return host in {"127.0.0.1", "localhost", "::1", "0.0.0.0"}
+
     def classify(self, dossier: dict, questions: dict[str, dict]) -> dict:
         api_key = os.environ.get(self.api_key_env)
-        if not api_key:
+        if not api_key and not self.local_endpoint:
             raise JevConfigurationError(
-                f"Jev API key missing; set {self.api_key_env} in the environment"
+                f"Jev API key missing; set {self.api_key_env} in the environment "
+                "(a loopback endpoint such as http://127.0.0.1:18081/v1/systemone needs none)"
             )
         state = compact_state(dossier)
         payload = {"model": self.model, "state": state, "questions": questions}
@@ -249,7 +264,7 @@ class JevProvider:
             self.endpoint,
             data=encoded,
             headers={
-                "Authorization": f"Bearer {api_key}",
+                **({"Authorization": f"Bearer {api_key}"} if api_key else {}),
                 "Content-Type": "application/json",
                 "Accept": "application/json",
                 "User-Agent": DEFAULT_USER_AGENT,

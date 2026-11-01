@@ -163,7 +163,7 @@ def build_dossiers(
         if candidate.get("npc_id") is None:
             metadata = {
                 "race": None, "clan": None, "sex": "unknown",
-                "race_id": None, "tribe_id": None,
+                "race_id": None, "tribe_id": None, "body_type": None, "height": None,
             }
         else:
             metadata = game_metadata(candidate["npc_id"], game_index or {})
@@ -179,6 +179,8 @@ def build_dossiers(
             "tribe_id": candidate.get("tribe_id") or metadata.get("tribe_id"),
             "clan": candidate.get("clan") or metadata.get("clan"),
             "sex": candidate.get("sex") or metadata.get("sex", "unknown"),
+            "body_type": candidate.get("body_type") or metadata.get("body_type"),
+            "height": candidate.get("height") or metadata.get("height"),
             "lore_age": None,
             "occupation": None,
             "faction": None,

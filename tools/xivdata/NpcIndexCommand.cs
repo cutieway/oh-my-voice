@@ -18,7 +18,9 @@ internal static class NpcIndexCommand
         string? RaceName,
         uint? TribeId,
         string? TribeName,
-        string Sex);
+        string Sex,
+        uint? BodyType,
+        uint? Height);
 
     public static int Run(string[] args)
     {
@@ -62,6 +64,8 @@ internal static class NpcIndexCommand
                 byte? gender = null;
                 string? raceName = null;
                 string? tribeName = null;
+                uint? bodyType = null;
+                uint? height = null;
                 if (bases.TryGetRow(resident.RowId, out var npcBase))
                 {
                     raceId = npcBase.Race.RowId is > 0 ? npcBase.Race.RowId : null;
@@ -71,6 +75,8 @@ internal static class NpcIndexCommand
                         raceName = GenderedName(race, gender.Value);
                     if (tribeId is uint tid && tribes.TryGetValue(tid, out var tribe))
                         tribeName = GenderedName(tribe, gender.Value);
+                    bodyType = npcBase.BodyType;
+                    height = npcBase.Height;
                 }
 
                 records.Add(new NpcRecord(
@@ -80,7 +86,9 @@ internal static class NpcIndexCommand
                     EmptyToNull(raceName),
                     tribeId,
                     EmptyToNull(tribeName),
-                    gender switch { 0 => "male", 1 => "female", _ => "unknown" }));
+                    gender switch { 0 => "male", 1 => "female", _ => "unknown" },
+                    bodyType,
+                    height));
             }
 
             Console.WriteLine(JsonSerializer.Serialize(new
@@ -97,6 +105,8 @@ internal static class NpcIndexCommand
                     tribe_id = row.TribeId,
                     tribe_name = row.TribeName,
                     sex = row.Sex,
+                    body_type = row.BodyType,
+                    height = row.Height,
                 }),
             }, new JsonSerializerOptions { WriteIndented = true }));
             return 0;

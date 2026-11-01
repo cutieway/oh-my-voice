@@ -88,8 +88,12 @@ The earlier survey of the 25 highest-line unvoiced speakers found:
 
 The initial policy uses a small shared archetype catalog for ordinary or sparse
 identities and reserves an individual draft for high distinctiveness scores
-with adequate evidence. Archetype choice is deterministic and does not use
-race, clan, or sex to infer acoustic qualities.
+with adequate evidence. Archetype choice is deterministic and filters on the
+game's own sex field so a masculine assignment never lands on a feminine bank.
+Individual drafts no longer inherit acoustics from a bank: their acoustic fields
+come from `tools/blueprint_pipeline/casting.py`, which applies readable rules to
+game facts (race, clan, sex, body type) plus a stable per-NPC choice. See
+`docs/blueprint-decisions.md` for the full decision table.
 
 ## Files
 
