@@ -148,14 +148,23 @@ def build_individual_profile(
     )
     mood = classification.get("mood") or {}
     pack_archon = str(mood.get("archon") or "neutral")
+    gate = mood.get("gate") or {}
+    if gate.get("chunks"):
+        chunk_note = (
+            f"{gate.get('agreeing_chunks')} of {gate.get('chunks')} dialogue chunks agreed, "
+            f"dispersion {gate.get('dispersion')}"
+        )
+    else:
+        chunk_note = "no chunked evidence"
     if pack_archon != "neutral":
         moods = {pack_archon: {}}
         evidence["pack_archon"] = creative_evidence(
             "pack_archon",
             "Default archon chosen by the classification model: "
-            f"preset `{pack_archon}`, confidence {mood.get('gate', {}).get('confidence')}, "
-            f"p={mood.get('gate', {}).get('selected_probability')}, "
-            f"{mood.get('gate', {}).get('line_count')} unique lines. "
+            f"preset `{pack_archon}`, confidence {gate.get('confidence')}, "
+            f"p={gate.get('selected_probability')}, "
+            f"{gate.get('line_count')} unique lines; {chunk_note}; "
+            "mean of the per-chunk distributions. "
             "Audition it against neutral before packing; it is a proposal, not canon.",
             source="blueprint_pipeline.classifier:mood",
         )
@@ -167,7 +176,8 @@ def build_individual_profile(
             note=(
                 "Neutral archon. "
                 + ("; ".join(mood.get("blocked_by") or []) or "no mood evidence recorded")
-                + ". Neutral is the project default until a source justifies another archon."
+                + f". {chunk_note}; judged from dialogue alone."
+                " Neutral is the project default until a source justifies another archon."
             ),
         )
     profile = {

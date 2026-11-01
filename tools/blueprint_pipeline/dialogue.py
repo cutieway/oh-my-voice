@@ -277,6 +277,10 @@ def _length_bucket(text: str) -> str:
     return "long"
 
 
+# Public name for the chunk planner, which stratifies by the same buckets.
+length_bucket = _length_bucket
+
+
 def _rank(canonical_id: str, line: dict) -> str:
     token = f"{canonical_id}:{line.get('voice_line_id') or line.get('dialog_id')}"
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
@@ -289,22 +293,46 @@ NEAR_DUPLICATE_JACCARD = 0.82
 NEAR_DUPLICATE_CONTAINMENT = 0.80
 
 
-def _near_duplicate(left: str, right: str) -> bool:
-    left_words, right_words = words(left), words(right)
-    if not left_words or not right_words:
+def _duplicate_signature(text: str) -> tuple[frozenset[str], frozenset[tuple[str, ...]], int]:
+    """Word set, word-trigram set, and word count, computed once per line.
+
+    Pool selection compares every candidate against everything already chosen.
+    Rebuilding these sets inside the comparison made a 1,300-line pool cost
+    hundreds of thousands of redundant set constructions, so the predicate takes
+    the precomputed signature instead.
+    """
+    word_list = words(text)
+    return (
+        frozenset(word_list),
+        frozenset(zip(word_list, word_list[1:], word_list[2:])),
+        len(word_list),
+    )
+
+
+def _near_duplicate_signature(left: tuple, right: tuple) -> bool:
+    left_set, left_grams, left_length = left
+    right_set, right_grams, right_length = right
+    if not left_set or not right_set:
         return True
-    left_grams = set(zip(left_words, left_words[1:], left_words[2:]))
-    right_grams = set(zip(right_words, right_words[1:], right_words[2:]))
     if not left_grams and not right_grams:
-        return left_words == right_words
+        return left_set == right_set
     intersection = len(left_grams & right_grams)
     union = max(1, len(left_grams | right_grams))
     if intersection / union >= NEAR_DUPLICATE_JACCARD:
         return True
-    left_set, right_set = set(left_words), set(right_words)
     containment = len(left_set & right_set) / max(1, min(len(left_set), len(right_set)))
-    length_ratio = min(len(left_words), len(right_words)) / max(len(left_words), len(right_words))
+    length_ratio = min(left_length, right_length) / max(left_length, right_length)
     return containment >= NEAR_DUPLICATE_CONTAINMENT and length_ratio >= 0.5
+
+
+def _near_duplicate(left: str, right: str) -> bool:
+    return _near_duplicate_signature(_duplicate_signature(left), _duplicate_signature(right))
+
+
+def _duplicate_keys(signature: tuple) -> frozenset:
+    """Index keys that a near-duplicate pair is guaranteed to share."""
+    _, grams, _ = signature
+    return grams if grams else signature[0]
 
 
 BUCKETS = ("short", "medium", "long")
@@ -403,6 +431,8 @@ def select_representative_samples(
         line["_rank"] = _rank(canonical_id, line)
         line["signals"] = _signal_hits(text, signals)
         line["_weight"] = _signal_weight(line["signals"])
+        line["_signature"] = _duplicate_signature(text)
+        line["_duplicate_keys"] = _duplicate_keys(line["_signature"])
         line.setdefault("provenance", [{
             "dialog_id": line.get("dialog_id"),
             "source": line.get("source"),
@@ -421,6 +451,8 @@ def select_representative_samples(
     selected = []
     consumed = set()
     consumed_chars = 0
+    selected_signatures = []
+    duplicate_index: dict[Any, list[int]] = defaultdict(list)
 
     def consider(line: dict) -> bool:
         nonlocal consumed_chars
@@ -428,10 +460,20 @@ def select_representative_samples(
         text = str(line.get("text") or "")
         if key in consumed or not text or consumed_chars + len(text) > max_chars:
             return False
-        if any(_near_duplicate(text, str(previous.get("text") or "")) for previous in selected):
+        signature = line["_signature"]
+        candidates = set()
+        for duplicate_key in line["_duplicate_keys"]:
+            candidates.update(duplicate_index.get(duplicate_key, ()))
+        if any(
+            _near_duplicate_signature(signature, selected_signatures[index])
+            for index in candidates
+        ):
             return False
         cleaned = {k: v for k, v in line.items() if not k.startswith("_")}
         selected.append(cleaned)
+        selected_signatures.append(signature)
+        for duplicate_key in line["_duplicate_keys"]:
+            duplicate_index[duplicate_key].append(len(selected) - 1)
         consumed.add(key)
         consumed_chars += len(text)
         return True

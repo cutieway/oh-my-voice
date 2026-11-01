@@ -95,12 +95,18 @@ Ten questions, from `blueprints/vocabulary.json` `classification.questions`:
 the list cannot drift and no free-form mood name can be answered. Each preset's
 `classification_description` describes a **default** register, not a scene.
 
-The model sees `compact_state` (`jev.py`): game identity, `dialogue_measurements`
-(aggregates only), `dialogue_coverage`, sampled lines with their signal tags,
-`lore_quotes`, `voice_evidence`, `wiki_resolution`, `fact_conflicts`, and six
-guardrails. It answers with a probability distribution over that question's
-closed value list; `classifier` accepts a choice only above the threshold and
-records the distribution in the classification.
+The model sees `compact_state` (`jev.py`). In the style/identity call that is
+game identity, `dialogue_measurements` (aggregates only), `dialogue_coverage`,
+sampled lines with their signal tags, `lore_quotes`, `voice_evidence`,
+`wiki_resolution`, `fact_conflicts`, and eight guardrails. In a mood chunk call
+it is identity, `dialogue_aggregates` (the token-cheap subset of the same
+numbers), `dialogue_coverage`, the chunk's dialogue as bare strings,
+`dialogue_chunk` (index, count, sources), and the guardrails; `lore_quotes`,
+`voice_evidence`, `wiki_resolution`, and `fact_conflicts` are withheld so no
+lore sentence can stand in for dialogue. The model answers with a probability
+distribution over that question's closed value list; `classifier` accepts a
+choice only above the threshold and records the distribution in the
+classification.
 
 `dialogue_measurements` deliberately excludes the rules-derived interpretation
 (`register: formal`, …). Showing the model its own baseline's labels turned the
@@ -115,39 +121,135 @@ to have read the whole character.
 
 `moods` in `vocabulary.json` already forbids per-line mood: one archon per
 character, chosen once, recorded in `pack_archon`, defaulting to `neutral`.
-The model only *proposes* it. `classifier._mood_decision` requires all four:
+Mood is decided from **in-game dialogue alone**; wiki text is still fetched for
+identity fields but never reaches a mood call.
+
+A character with 1,552 lines cannot be judged in one 8k-context request, and a
+24-line sample makes one dramatic scene look like a baseline. So the dossier
+carries a `dialogue_pool` (signal-ranked, bucket-stratified, deduplicated) and
+`classifier` asks the same two typed questions on every chunk window
+(`mood.py`, `build_mood_chunks`): corpus-share stratification across short /
+medium / long, signal weight first inside each bucket, and a 15% overlap
+between consecutive windows. Each chunk state carries the same compact
+aggregates (`dialogue_aggregates`) and identity, and no wiki text at all.
+
+| Volume | Chunks | Note |
+|---|---:|---|
+| < 40 unique lines | 0 | no mood question is asked; `blocked_by: ["insufficient_volume"]` |
+| 40–119 | 1–2 | one request per window |
+| 120–499 | 3–4 | |
+| 500–799 | 5 | |
+| 800–1,199 | 6 | |
+| 1,200–1,999 | 7 | |
+| ≥ 2,000 | 8 | `mood_max_chunks` caps it |
+
+Each window is one request: `1 + chunks` calls for a mood-eligible dossier
+(one identity/style call plus one per chunk).
+
+`mood_chunk_chars` is 7,000 characters because this tokenizer runs ~1.34
+characters per token: that is ~5.2k tokens of dialogue, and a measured chunk
+state is ~7.1k of the 8k context including aggregates, schema, and questions.
+The first design used 16k characters and the server rejected it with
+`exceed_context_size_error: request (9068 tokens) exceeds 8192`.
+
+Sampling inside the pool reuses the style selector, so chunking never invents a
+second convention: bucket quotas by corpus share, then signal weight (dialect,
+colloquial, formal, all-caps, honorific, exclamation, question, ellipsis,
+contraction), then a stable per-NPC order, with near-duplicates rejected. Pure
+stage directions never reach the pool — `(-Label-)` prefixes are split off and an
+empty remainder is dropped — and pure quest steps are excluded upstream by the
+ingestion filter `text_kind IN ('dialogue','narration')`, which keeps the 44,191
+`journal` rows out; among the 248,904 dialogue and narration lines only 205
+(0.08%) still match an imperative quest template, so a runtime pattern filter
+would be dead weight.
+
+`mood.aggregate` then decides the archon:
 
 | Gate | Threshold | Rationale |
 |---|---|---|
-| Choice confidence | `mood_confidence` 0.70 | stricter than style (0.55): a wrong archon changes every line |
-| Selected probability | `mood_probability` 0.50 | the preset must beat the whole field |
-| Justification | `mood.justified` = yes | a default register, not one emotional scene |
-| Volume | `min_dialogue_lines_for_mood` 120 unique lines | a baseline register needs a corpus |
+| Winner | argmax of the mean probability vector; ties go to `none` | one answer per character, not per chunk |
+| Consistency | the winner leads (or is within `mood_consistency_margin` 0.05 of the top) in ≥ `ceil(N × 0.6)` chunks | a single loud chunk must not decide |
+| Selected probability | mean `mood_probability` 0.50 | the preset must beat the whole field, on average |
+| Confidence | mean `mood_confidence` 0.70 | stricter than style (0.55): a wrong archon changes every line |
+| Dispersion | normalised entropy of the mean vector ≤ 0.55 | a flat field means no dominant register |
+| Justification | mean `mood.justified` ≥ `noul_yes` 0.75 | a default register, not one emotional scene |
 
-Any failure sets `pack_archon: neutral` and records every failed gate in
-`mood.blocked_by`; the profile evidence for `pack_archon` is then level
-`default` with those reasons in the note. An accepted mood is level
-`creative_selection` with the preset, confidence, probability and line count in
-the note, and declares the archon in `moods` so `validate_profile` accepts it.
+Any failure sets `pack_archon: neutral` and records the failed gates in
+`mood.blocked_by` as stable tokens: `insufficient_volume`, `insufficient_pool`,
+`none_winner`, `low_consistency`, `low_probability`, `low_confidence`,
+`high_dispersion`, `not_justified`. `insufficient_pool` is a pipeline-state
+refusal, not a character judgement: a dossier built before the mood pool carries
+only the 24-line style sample, and chunking that would present one window as the
+corpus, so `classify` asks no mood question and adds a review reason telling the
+operator to re-run `dossiers`. The profile evidence for `pack_archon` is then level `default`
+with those reasons in the note. An accepted mood is level `creative_selection`
+with the preset, mean confidence, mean probability, chunk count, and agreeing
+chunk count in the note, and declares the archon in `moods` so
+`validate_profile` accepts it.
 
-Measured 2026-11-02 against the local Nimble 9B:
+`mood.chunks` records every chunk's top preset, its probability for the
+winner, confidence, justified value, and full distribution; `mood.aggregate`
+records the mean vector, agreeing/required counts, mean probability, mean
+confidence, mean justification, and dispersion. A profile can therefore be
+audited back to the individual windows that produced it.
 
-| Case | Answer | Gate outcome |
-|---|---|---|
-| Gerolt, Hildibrand, Haermaga (real samples) | `none` at 0.96, justified 0.004 | neutral |
-| Knem Cheleim-In (47 lines) | `none` at 0.95 | neutral |
-| Probe: 400 explicitly angry lines | `angry` at 0.99, justified 0.99 | accepted → `pack_archon: angry` |
-| Probe: 400 calm lines | `calm` at 0.94, justified 0.94 | accepted → `pack_archon: calm` |
+### Gating policy in one paragraph
 
-So the question discriminates, and the model is conservative on real dialogue:
-no real NPC among the sixteen tested earned a mood archon.
+Mood is decided from in-game dialogue alone: below 40 unique lines no mood
+question is asked and the pack is neutral with `blocked_by: ["insufficient_volume"]`;
+above it the signal-ranked dialogue pool is cut into overlapping, bucket-stratified
+windows (1 for 40-119 lines up to 8 at 2,000+), each window is asked the same two
+typed questions with the same compact aggregates and no wiki text, and the archon
+is the argmax of the mean probability vector accepted only if that preset leads
+(or is within 0.05 of the top) in at least 60% of windows, the mean selected
+probability is at least 0.50, mean confidence at least 0.70, the normalised
+entropy of the mean vector at most 0.55, and mean `mood.justified` at least 0.75.
+Every failure is recorded as a stable token in `mood.blocked_by`
+(`insufficient_volume`, `insufficient_pool`, `none_winner`, `low_consistency`,
+`low_probability`, `low_confidence`, `high_dispersion`, `not_justified`), the pack archon stays
+`neutral`, and the profile evidence is level `default` naming those gates; an
+accepted preset is level `creative_selection`, declares the archon in `moods`,
+and keeps every per-window answer, distribution, and the mean vector for audit.
+Acoustics never enter this path: they remain deterministic casting from game data.
+
+The rules provider (`--provider rules`) does not chunk: it is deterministic and
+answers `none`, so offline runs are unchanged and always neutral.
+
+Measured 2026-11-02 against the local Nimble 9B, sixteen real NPCs, on dossiers
+rebuilt by the current `dossiers` command:
+
+| NPC | lines | chunks | per-chunk tops | mean top | p | conf | outcome |
+|---|---:|---:|---|---|---:|---:|---|
+| Gerolt | 1,552 | 7 | angry x3, neutral x4 | neutral | 0.36 | 0.38 | `low_consistency`, `low_probability`, `low_confidence`, `high_dispersion`, `not_justified` |
+| Hildibrand | 1,133 | 6 | happy x5, none x1 | happy | 0.51 | 0.47 | `low_confidence`, `not_justified` |
+| wandering minstrel | 1,062 | 6 | neutral x6 | neutral | 0.57 | 0.51 | `low_confidence`, `not_justified` |
+| Haermaga | 466 | 4 | happy x1, neutral x3 | neutral | 0.41 | 0.38 | `low_probability`, `low_confidence`, `high_dispersion`, `not_justified` |
+| Widargelt | 459 | 4 | neutral x3, none x1 | neutral | 0.54 | 0.52 | `low_confidence`, `not_justified` |
+| Erik | 405 | 4 | neutral x4 | neutral | 0.61 | 0.55 | `low_confidence`, `not_justified` |
+| Motte | 51 | 1 | happy | happy | 0.63 | 0.58 | `low_confidence`, `not_justified` |
+| Hachisuba | 51 | 1 | neutral | neutral | 0.52 | 0.46 | `low_confidence`, `not_justified` |
+| Linu Vanu | 49 | 1 | neutral | neutral | 0.60 | 0.55 | `low_confidence`, `high_dispersion`, `not_justified` |
+| Knem Cheleim-In | 47 | 1 | neutral | neutral | 0.62 | 0.57 | `low_confidence`, `not_justified` |
+| six sparse NPCs | 5-8 | 0 | - | - | - | - | `insufficient_volume` |
+
+No real NPC passed, and the binding gate is `mood_confidence`: the model's
+self-reported confidence on real dialogue sits at 0.38-0.58, well under the
+0.70 bar. The two informative cases are Gerolt and Hildibrand. Gerolt splits
+3 angry / 4 neutral across seven windows, so the mean lands on `neutral` and
+`low_consistency` joins the refusal: the corpus really does mix forge-grumbling
+with ordinary instruction. Hildibrand is 5/6 `happy` with mean p 0.51, so the
+register is consistent and the model still will not claim it confidently;
+refusing that is the conservative reading, not a bug in the aggregation. The
+accept path itself is proven with the same model on uniform evidence: a 400-line
+angry probe produced 4/4 chunks at mean p 0.994, confidence 0.993, dispersion
+0.019, and `pack_archon: angry` with `method: jev_chunks`.
 
 ## Volume gates
 
 | Gate | Value | Effect |
 |---|---|---|
 | `min_dialogue_lines_for_style` | 40 unique lines | below it every style field is recorded with `value: null`, `method: insufficient_dialogue_volume`, and the deterministic estimate kept only for audit; the profile carries `speech_style: null` and renders from identity alone |
-| `min_dialogue_lines_for_mood` | 120 unique lines | below it no mood archon is possible |
+| `min_dialogue_lines_for_mood` | 40 unique lines | below it no mood question is asked; `insufficient_volume` |
 
 Sparse characters therefore stay simple by construction, not by luck: six of the
 sixteen test NPCs (5–8 lines) produced zero style fields.
@@ -215,13 +317,14 @@ Measured on the 16-NPC set (`enrich --allow-network --force`): 13 resolved with
 1–15 infobox fields, Gerolt `ambiguous` (no location context to pick an
 instance), the minstrel `missing` (page title differs), 4 `fact_conflicts`, and
 1 NPC (Hachisuba) with disposition quotes. Most NPC pages are stubs or dialogue
-transcripts, so wiki lore rarely decides a mood on its own; it is evidence, not
-a substitute for the dialogue corpus.
+transcripts, and mood no longer reads them at all: lore supports identity fields
+and `voice_evidence`, never the archon.
 
 ## Sample selection
 
 `dialogue.select_representative_samples` picks 24 lines (≤6,000 chars) per
-dossier, deterministically:
+dossier, and the same selector with a larger budget builds the mood pool, so the
+style sample and the chunk windows are drawn by one convention:
 
 1. Deduplicate by `voice_line_id`, then drop near-duplicates: trigram Jaccard
    ≥ 0.82 **or** word-set containment ≥ 0.80 with length ratio ≥ 0.5. SE reuses
@@ -299,38 +402,70 @@ python3 -m tools.blueprint_pipeline.cli compose --game-index data/xivdata/npc-in
 python3 tools/blueprint.py check
 ```
 
-| NPC | unique lines | style fields | pack_archon | pack_archon evidence |
-|---|---:|---:|---|---|
-| Pimoh Nelhah | 5 | 0 | neutral | default |
-| Colina | 5 | 0 | neutral | default |
-| Diggin | 6 | 0 | neutral | default |
-| Colden | 7 | 0 | neutral | default |
-| Waldew | 8 | 0 | neutral | default |
-| Hathenbet | 8 | 0 | neutral | default |
-| Knem Cheleim-In | 47 | 5 | neutral | default |
-| Linu Vanu | 49 | 5 | neutral | default |
-| Motte | 51 | 5 | neutral | default |
-| Hachisuba | 51 | 5 | neutral | default |
-| Erik | 405 | 5 | neutral | default |
-| Widargelt | 459 | 5 | neutral | default |
-| Haermaga | 466 | 5 | neutral | default |
-| wandering minstrel | 1062 | 5 | neutral | default |
-| Hildibrand | 1133 | 5 | neutral | default |
-| Gerolt | 1552 | 5 | neutral | default |
+| NPC | unique lines | style fields | mood chunks | pack_archon | blocked_by |
+|---|---:|---:|---:|---|---|
+| Pimoh Nelhah | 5 | 0 | 0 | neutral | insufficient_volume |
+| Colina | 5 | 0 | 0 | neutral | insufficient_volume |
+| Diggin | 6 | 0 | 0 | neutral | insufficient_volume |
+| Colden | 7 | 0 | 0 | neutral | insufficient_volume |
+| Waldew | 8 | 0 | 0 | neutral | insufficient_volume |
+| Hathenbet | 8 | 0 | 0 | neutral | insufficient_volume |
+| Knem Cheleim-In | 47 | 5 | 1 | neutral | low_confidence, not_justified |
+| Linu Vanu | 49 | 5 | 1 | neutral | low_confidence, high_dispersion, not_justified |
+| Motte | 51 | 5 | 1 | neutral | low_probability, low_confidence, high_dispersion, not_justified |
+| Hachisuba | 51 | 5 | 1 | neutral | low_confidence, not_justified |
+| Erik | 405 | 5 | 4 | neutral | low_confidence, not_justified |
+| Widargelt | 459 | 5 | 4 | neutral | low_confidence, not_justified |
+| Haermaga | 466 | 5 | 4 | neutral | low_consistency, low_probability, low_confidence, not_justified |
+| wandering minstrel | 1062 | 5 | 6 | neutral | low_confidence, not_justified |
+| Hildibrand | 1133 | 5 | 6 | neutral | low_confidence, not_justified |
+| Gerolt | 1552 | 5 | 7 | neutral | low_probability, low_confidence, high_dispersion, not_justified |
+
+### Mood, offline (no model server)
+
+`RulesProvider` never chunks and always answers `none`, so an offline run proves
+the gates and the profile shape but not the model path:
+
+```bash
+python3 -m unittest discover -s tools -p "test_*.py"
+```
+
+`ChunkedMoodTests` covers the design without a server: below the floor no mood
+question is asked and `blocked_by` is `["insufficient_volume"]`; a dossier with
+no mood pool is refused with `insufficient_pool` and zero chunk calls; consistent
+chunks accept (`stub_chunks`); one loud chunk among disagreeing ones is blocked
+by `low_consistency`; a flat field is blocked by `high_dispersion` and
+`low_probability`; every rejection names at least one gate; `plan_chunk_count`
+follows the volume bands; a Gerolt-scale pool yields seven windows that all
+contain short, medium, and long lines and overlap their neighbour; a chunk
+state carries the global aggregates and no lore; the aggregate records per-chunk
+evidence; a composed profile names the agreeing-chunk count in its evidence.
+
+### Mood, real multi-chunk path
+
+With the local server up:
+
+```bash
+llama-server --model data/models/qwen3.5-9b/Bespoke-Nimble-9B-v3-Q4_K_M.gguf \
+  --port 18081 --n-gpu-layers 999 --ctx-size 8192 --jinja
+python3 -m tools.blueprint_pipeline.cli classify --provider jev --allow-network \
+  --endpoint http://127.0.0.1:18081/v1/systemone --model nimble-9b --only $NPC --force
+python3 -m tools.blueprint_pipeline.cli compose --game-index data/xivdata/npc-index.json --only $NPC
+```
+
+`classify --dry-run` prints the request count and bytes first; a mood-eligible
+dossier costs one request per chunk plus one for identity and style.
 
 Expected and observed: every sparse character renders from identity alone, every
-character at or above 40 lines carries all five style fields, and no real
-character earns a mood archon. To exercise the acceptance path, run the model
-questions against a synthetic dossier whose samples are uniformly angry or calm
-(400 unique lines); both are accepted, and the resulting profile validates with
-`pack_archon: angry` / `calm` declared in `moods`.
+character at or above 40 lines carries all five style fields, and sparse
+characters ask no mood question at all. Acceptance is exercised by
+`ChunkedMoodTests` with a scripted provider (uniform angry/calm chunks across
+all windows); real characters land on neutral with the failed gates named.
 
-`python3 -m unittest discover -s tools -p "test_*.py"` covers the gates:
-mood option list, each blocking gate in isolation, the style floor, state
-contents, label stripping, whole-word term matching, signal-weighted sampling,
-bucket quotas across many sheets, wikitext rendering without extracts, `{{NPC
-infobox}}` parsing, template disambiguation, and the mood profile evidence
-levels.
+The suite also covers the style floor, state contents, label stripping,
+whole-word term matching, signal-weighted sampling, bucket quotas across many
+sheets, wikitext rendering without extracts, `{{NPC infobox}}` parsing, template
+disambiguation, and the mood profile evidence levels.
 
 ## Known limits
 
@@ -342,15 +477,21 @@ levels.
 3. `vocabulary_complexity` confidence is low (median 0.31 across 80 items).
 4. Casting rules are taste encoded once: they are auditable, not measured. A
    human override is still required before a profile becomes canon.
-5. None of the seven real NPCs run through the model earned a mood archon: it
-   answers `none` at ≥0.86 on every real sample set, including 1,552-line
-   Gerolt. That is the safe failure direction, but it means mood currently
-   fires only when a corpus is unusually uniform. Human auditions, not the
-   model, remain the way a mood archon gets chosen in practice.
-6. Wiki lore is evidence, not a corpus. On the 16-NPC set only Hachisuba's page
-   carried disposition sentences, and it has 51 unique lines, so the mood floor
-   blocked it anyway. Most FFXIV NPC pages are stubs or dialogue transcripts;
-   enrich mainly buys identity fields and `fact_conflicts`.
+5. None of the sixteen real NPCs earned a mood archon. Chunking changed the
+   shape of the refusal: the model no longer answers `none` at 0.96 from 24
+   lines, it now splits a 1,552-line character across seven windows and lands
+   on `neutral` with 3 of 7 windows reading `angry`. The binding gate is
+   `mood_confidence` (0.32-0.57 against 0.70), so a consistent but hedged
+   register like Hildibrand's 6/6 `happy` is still refused. That is the safe
+   failure direction; human auditions, not the model, remain the way a mood
+   archon gets chosen in practice. If real auditions show the model is simply
+   under-confident, `mood_confidence` is the one knob to calibrate first - not
+   the consistency gate, which is what protects against one loud scene.
+6. Wiki lore is no longer mood evidence. It is still fetched for identity
+   fields, but a mood chunk state withholds `lore_quotes`, `voice_evidence`,
+   `wiki_resolution`, and `fact_conflicts`, so no disposition sentence can
+   stand in for dialogue. Most FFXIV NPC pages are stubs or dialogue
+   transcripts; enrich mainly buys identity fields and `fact_conflicts`.
 7. `mood.justified` is a yes/no gate rather than a score: a score would need
    calibration against human labels before it could set a threshold, and the
    gate is what the archon decision actually needs. No `insufficient_evidence`

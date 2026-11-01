@@ -53,6 +53,7 @@ from blueprint_pipeline.generator import build_individual_profile, validate_gene
 from blueprint_pipeline.identity import canonical_id
 from blueprint_pipeline.inventory import build_inventory
 from blueprint_pipeline.jev import JevProvider, build_questions, compact_state
+from blueprint_pipeline.mood import build_mood_chunks, plan_chunk_count
 from blueprint_pipeline.reporting import build_pipeline_report, review_report
 from blueprint_pipeline.review import (
     apply_manual_changes,
@@ -385,22 +386,59 @@ def cmd_classify(args) -> int:
         and any(value.get("cache_key") == cache_key for value, _ in cached.values())
         for cache_key in cache_keys
     ]
-    request_bytes = [
-        len(json.dumps({
+    # A chunked mood run is one style/identity request plus one request per
+    # dialogue window, so the preflight has to count calls, not dossiers.
+    mood_questions = {
+        question_id: question for question_id, question in questions.items()
+        if question_id.startswith("mood.")
+    }
+    policy = dict(DEFAULT_THRESHOLDS)
+    policy.update(vocabulary.get("classification", {}).get("thresholds", {}))
+
+    def _request_plan(dossier: dict) -> tuple[int, int]:
+        if args.provider != "jev":
+            return 0, 0
+        base = len(json.dumps({
             "model": args.model,
-            "state": compact_state(item),
+            "state": compact_state(dossier),
             "questions": questions,
         }, ensure_ascii=False).encode())
-        for item, can_reuse in zip(records, reusable)
-        if not can_reuse
+        statistics = dossier.get("statistics") or {}
+        line_count = int(statistics.get("unique_line_count") or statistics.get("dialogue_count") or 0)
+        pool = dossier.get("dialogue_pool") or []
+        chunk_count = plan_chunk_count(line_count, policy)
+        if not chunk_count or not pool:
+            return 1, base
+        requests = 1
+        total = base
+        for chunk in build_mood_chunks(pool, chunk_count, policy):
+            total += len(json.dumps({
+                "model": args.model,
+                "state": compact_state(
+                    dossier,
+                    samples=chunk["lines"],
+                    chunk={"index": chunk["index"], "count": chunk_count, "chars": chunk["chars"]},
+                ),
+                "questions": mood_questions,
+            }, ensure_ascii=False).encode())
+            requests += 1
+        return requests, total
+
+    plans = [
+        _request_plan(item) for item, can_reuse in zip(records, reusable) if not can_reuse
     ]
-    request_count = sum(not can_reuse for can_reuse in reusable) if args.provider == "jev" else 0
+    request_bytes = [total for _, total in plans]
+    request_count = sum(count for count, _ in plans)
     estimated_tokens = math.ceil(sum(request_bytes) / 4) if request_count else 0
     estimated_cost = estimated_tokens / 1_000_000 * args.input_usd_per_million_tokens
     print(
         f"classification workload: {len(records)} dossiers, {request_count} Jev requests, "
         f"{sum(request_bytes)} request bytes ({max(request_bytes, default=0)} max per dossier)"
     )
+    if args.provider == "jev":
+        print(
+            "mood calls are chunked: each mood-eligible dossier costs one request per dialogue window"
+        )
     if request_count:
         print(
             f"rough Jev estimate: about {estimated_tokens:,} input tokens and "

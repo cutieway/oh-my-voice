@@ -26,7 +26,8 @@ from blueprint_pipeline.archetypes import (
 )
 from blueprint_pipeline import evaluation
 from blueprint_pipeline.cache import object_hash, read_json
-from blueprint_pipeline.classifier import RulesProvider, classify_dossier
+from blueprint_pipeline.classifier import ClassifierProvider, RulesProvider, classify_dossier
+from blueprint_pipeline.config import DEFAULT_THRESHOLDS
 from blueprint_pipeline.dossier import build_dossiers
 from blueprint_pipeline.dialogue import (
     _length_bucket as length_bucket,
@@ -44,6 +45,11 @@ from blueprint_pipeline.jev import (
     build_questions,
     compact_state,
     validate_response,
+)
+from blueprint_pipeline.mood import (
+    aggregate_mood,
+    build_mood_chunks,
+    plan_chunk_count,
 )
 from blueprint_pipeline.review import (
     apply_manual_changes,
@@ -1035,7 +1041,14 @@ class MoodProfileTests(unittest.TestCase):
                 "preset": archon if accepted else "none",
                 "archon": archon,
                 "accepted": accepted,
-                "gate": {"confidence": 0.9, "selected_probability": 0.88, "line_count": 400},
+                "gate": {
+                    "confidence": 0.9,
+                    "selected_probability": 0.88,
+                    "line_count": 400,
+                    "chunks": 3,
+                    "agreeing_chunks": 3,
+                    "dispersion": 0.04,
+                },
                 "blocked_by": [] if accepted else ["answer was none/neutral: no consistent default register"],
             },
         }
@@ -1047,7 +1060,9 @@ class MoodProfileTests(unittest.TestCase):
         self.assertEqual(profile["pack_archon"], "calm")
         self.assertEqual(profile["moods"], {"calm": {}})
         self.assertEqual(profile["evidence"]["pack_archon"]["level"], "creative_selection")
-        self.assertIn("calm", profile["evidence"]["pack_archon"]["note"])
+        note = profile["evidence"]["pack_archon"]["note"]
+        self.assertIn("calm", note)
+        self.assertIn("3 of 3 dialogue chunks agreed", note)
         self.assertEqual(validate_generated_profile(profile, self.vocab), [])
 
     def test_default_mood_packs_neutral_with_default_evidence(self):
@@ -1057,8 +1072,272 @@ class MoodProfileTests(unittest.TestCase):
         self.assertEqual(profile["pack_archon"], "neutral")
         self.assertEqual(profile["moods"], {})
         self.assertEqual(profile["evidence"]["pack_archon"]["level"], "default")
-        self.assertIn("none/neutral", profile["evidence"]["pack_archon"]["note"])
+        note = profile["evidence"]["pack_archon"]["note"]
+        self.assertIn("none/neutral", note)
+        self.assertIn("3 of 3 dialogue chunks agreed", note)
         self.assertEqual(validate_generated_profile(profile, self.vocab), [])
+
+
+def mood_answers(questions: dict, spec: dict) -> dict:
+    """One chunk's typed mood answer, shaped like a validated provider response."""
+    options = list(questions["mood.preset"]["criteria"])
+    distribution = spec.get("distribution")
+    if distribution is None:
+        probability = float(spec["probability"])
+        distribution = {
+            key: probability if key == spec["preset"] else (1.0 - probability) / (len(options) - 1)
+            for key in options
+        }
+    return {
+        "mood.preset": {
+            "type": "choice",
+            "choice": spec["preset"],
+            "probabilities": distribution,
+            "confidence": float(spec["confidence"]),
+        },
+        "mood.justified": {"type": "noul", "noul": float(spec["justified"])},
+    }
+
+
+class ScriptedChunkProvider(ClassifierProvider):
+    """Stands in for the local model: one scripted answer per chunk call."""
+
+    name = "stub"
+    model_id = "stub-1"
+    supports_chunks = True
+
+    def __init__(self, vocabulary: dict, script: list[dict]):
+        self.rules = RulesProvider(vocabulary)
+        self.script = script
+        self.asked: list[list[str]] = []
+        self.chunk_calls = 0
+
+    def classify(self, dossier, questions):
+        self.asked.append(sorted(questions))
+        return self.rules.classify(dossier, questions)
+
+    def classify_chunk(self, dossier, questions, chunk):
+        self.asked.append(sorted(questions))
+        spec = self.script[min(self.chunk_calls, len(self.script) - 1)]
+        self.chunk_calls += 1
+        return {
+            "model": self.model_id,
+            "answers": mood_answers(questions, spec),
+            "usage": {"input_tokens": 100, "output_tokens": 10},
+        }
+
+
+def synthetic_lines(count: int) -> list[dict]:
+    """Dialogue that fills all three length buckets (6 / 17 / 34 words)."""
+    shapes = (
+        "Jus' the two of us, then.",
+        "Ye may not believe it, but the ore speaks when the forge is quiet enough to hear it.",
+        "When the furnace roars and the hammer rings true, a smith learns more about the metal "
+        "than any scholar could teach him in a lifetime of reading, and that is the whole of it.",
+    )
+    return [
+        {
+            "text": shapes[index % len(shapes)],
+            "source": "quest",
+            "sheet": f"sheet_{index // 25}",
+            "signals": ["dialect:jus"] if index % 3 == 0 else [],
+        }
+        for index in range(count)
+    ]
+
+
+class ChunkedMoodTests(unittest.TestCase):
+    """Mood comes from in-game dialogue only: chunks in, one aggregate out."""
+
+    def setUp(self):
+        self.vocab = blueprint.load_vocabulary()
+        self.questions = build_questions(self.vocab)
+        self.policy = {**DEFAULT_THRESHOLDS, **self.vocab["classification"]["thresholds"]}
+        # Small windows keep the fixtures readable; the production value is
+        # exercised by the chunk planner test below.
+        self.small = {"mood_chunk_chars": 400, "mood_chunk_overlap": 0.1}
+
+    def _dossier(self, lines: int, pool: list[dict] | None = None) -> dict:
+        pool = pool if pool is not None else synthetic_lines(lines)
+        return {
+            "input_hash": "hash",
+            "identity": {
+                "canonical_id": "npc_10", "npc_id": 10, "name": "Test",
+                "resolution_status": "eligible", "has_se_voice_reference": False,
+                "identity_ambiguous": False, "sex": "male",
+            },
+            "statistics": {"dialogue_count": lines, "unique_line_count": lines},
+            "dialogue_analysis": {
+                "measurements": {"line_count": lines, "signal_line_rates": {"dialect_lines": 0.3}},
+                "interpretation": {
+                    "register": "formal", "vocabulary_complexity": "educated",
+                    "sentence_complexity": "complex", "colloquialism": "low",
+                    "rhetorical_style": "measured", "speech_habits": ["none_observed"],
+                },
+            },
+            "dialogue_samples": pool[:24],
+            "dialogue_pool": pool,
+        }
+
+    def test_below_the_floor_no_mood_question_is_asked(self):
+        floor = int(self.policy["min_dialogue_lines_for_mood"])
+        provider = ScriptedChunkProvider(
+            self.vocab,
+            [{"preset": "angry", "probability": 0.95, "confidence": 0.95, "justified": 0.95}],
+        )
+        result = classify_dossier(self._dossier(floor - 1), provider, self.vocab, thresholds=self.small)
+        self.assertEqual(provider.chunk_calls, 0)
+        self.assertTrue(all(not any(q.startswith("mood.") for q in asked) for asked in provider.asked))
+        self.assertEqual(result["pack_archon"], "neutral")
+        self.assertEqual(result["mood"]["blocked_by"], ["insufficient_volume"])
+        self.assertEqual(result["mood"]["method"], "default")
+
+    def test_dossier_without_a_pool_is_refused_not_single_chunked(self):
+        # A dossier built before the mood pool carries only the 24-line style
+        # sample. Judging that as the corpus is the single-scene guess chunking
+        # exists to prevent, so the refusal has to be explicit.
+        dossier = self._dossier(400)
+        dossier.pop("dialogue_pool")
+        provider = ScriptedChunkProvider(
+            self.vocab,
+            [{"preset": "angry", "probability": 0.95, "confidence": 0.95, "justified": 0.95}],
+        )
+        result = classify_dossier(dossier, provider, self.vocab, thresholds=self.small)
+        self.assertEqual(provider.chunk_calls, 0)
+        self.assertEqual(result["pack_archon"], "neutral")
+        self.assertEqual(result["mood"]["blocked_by"], ["insufficient_pool"])
+        self.assertTrue(any("re-run `dossiers`" in reason for reason in result["review_reasons"]))
+
+    def test_consistent_chunks_accept_the_preset(self):
+        provider = ScriptedChunkProvider(
+            self.vocab,
+            [{"preset": "angry", "probability": 0.80, "confidence": 0.85, "justified": 0.90}],
+        )
+        result = classify_dossier(self._dossier(200), provider, self.vocab, thresholds=self.small)
+        self.assertGreaterEqual(provider.chunk_calls, 3)
+        self.assertEqual(result["pack_archon"], "angry")
+        self.assertTrue(result["mood"]["accepted"])
+        self.assertEqual(result["mood"]["blocked_by"], [])
+        self.assertEqual(result["mood"]["method"], "stub_chunks")
+        self.assertEqual(result["mood"]["gate"]["chunks"], provider.chunk_calls)
+        self.assertEqual(result["mood"]["gate"]["agreeing_chunks"], provider.chunk_calls)
+        self.assertEqual(len(result["mood"]["chunks"]), provider.chunk_calls)
+        self.assertEqual(result["mood"]["chunking"]["chunks"], provider.chunk_calls)
+        self.assertAlmostEqual(
+            sum(result["mood"]["aggregate"]["mean_probabilities"].values()), 1.0, places=2
+        )
+
+    def test_one_loud_chunk_does_not_decide(self):
+        provider = ScriptedChunkProvider(
+            self.vocab,
+            [
+                {"preset": "angry", "probability": 0.95, "confidence": 0.95, "justified": 0.95},
+                {"preset": "calm", "probability": 0.95, "confidence": 0.95, "justified": 0.95},
+                {"preset": "happy", "probability": 0.95, "confidence": 0.95, "justified": 0.95},
+            ],
+        )
+        result = classify_dossier(self._dossier(200), provider, self.vocab, thresholds=self.small)
+        self.assertEqual(result["pack_archon"], "neutral")
+        self.assertIn("low_consistency", result["mood"]["blocked_by"])
+        self.assertLess(result["mood"]["gate"]["agreeing_chunks"], result["mood"]["gate"]["required_chunks"])
+
+    def test_flat_distributions_are_rejected_by_dispersion(self):
+        options = list(self.questions["mood.preset"]["criteria"])
+        flat = {key: 0.8 / (len(options) - 1) for key in options}
+        flat["angry"] = 0.2
+        provider = ScriptedChunkProvider(
+            self.vocab,
+            [{"preset": "angry", "confidence": 0.9, "justified": 0.9, "distribution": flat}],
+        )
+        result = classify_dossier(self._dossier(200), provider, self.vocab, thresholds=self.small)
+        self.assertEqual(result["pack_archon"], "neutral")
+        self.assertIn("high_dispersion", result["mood"]["blocked_by"])
+        self.assertIn("low_probability", result["mood"]["blocked_by"])
+
+    def test_every_rejection_names_a_gate(self):
+        cases = {
+            "mixed": [
+                {"preset": "angry", "probability": 0.95, "confidence": 0.95, "justified": 0.95},
+                {"preset": "calm", "probability": 0.95, "confidence": 0.95, "justified": 0.95},
+                {"preset": "happy", "probability": 0.95, "confidence": 0.95, "justified": 0.95},
+            ],
+            "unjustified": [{"preset": "angry", "probability": 0.9, "confidence": 0.9, "justified": 0.1}],
+            "unconfident": [{"preset": "angry", "probability": 0.9, "confidence": 0.5, "justified": 0.9}],
+            "none": [{"preset": "none", "probability": 0.97, "confidence": 0.97, "justified": 0.97}],
+        }
+        for name, script in cases.items():
+            with self.subTest(name):
+                provider = ScriptedChunkProvider(self.vocab, script)
+                result = classify_dossier(
+                    self._dossier(200), provider, self.vocab, thresholds=self.small
+                )
+                self.assertEqual(result["pack_archon"], "neutral")
+                self.assertTrue(result["mood"]["blocked_by"], name)
+                self.assertFalse(result["mood"]["accepted"], name)
+
+    def test_chunk_planner_scales_with_volume(self):
+        self.assertEqual(plan_chunk_count(8, self.policy), 0)
+        self.assertEqual(plan_chunk_count(39, self.policy), 0)
+        self.assertEqual(plan_chunk_count(40, self.policy), 1)
+        self.assertEqual(plan_chunk_count(119, self.policy), 2)
+        self.assertEqual(plan_chunk_count(300, self.policy), 4)
+        self.assertEqual(plan_chunk_count(466, self.policy), 4)
+        self.assertEqual(plan_chunk_count(1133, self.policy), 6)
+        self.assertEqual(plan_chunk_count(1552, self.policy), 7)
+        self.assertEqual(plan_chunk_count(5000, self.policy), 8)
+
+    def test_gerolt_scale_volume_produces_many_stratified_chunks(self):
+        pool = synthetic_lines(1600)
+        count = plan_chunk_count(1552, self.policy)
+        self.assertGreaterEqual(count, 5)
+        chunks = build_mood_chunks(pool, count, self.policy)
+        self.assertEqual(len(chunks), count)
+        for chunk in chunks:
+            self.assertLessEqual(chunk["chars"], self.policy["mood_chunk_chars"])
+            buckets = {length_bucket(str(line["text"])) for line in chunk["lines"]}
+            self.assertEqual(buckets, {"short", "medium", "long"}, chunk["index"])
+        # Consecutive chunks overlap, so a register at a window edge is seen twice.
+        first, second = chunks[0]["lines"], chunks[1]["lines"]
+        self.assertTrue({id(line) for line in first} & {id(line) for line in second})
+
+    def test_chunk_state_withholds_lore_and_keeps_global_aggregates(self):
+        dossier = self._dossier(200)
+        dossier["lore_quotes"] = [{"quote": "Known for her calm demeanour.", "source": "wiki", "field": "mood"}]
+        dossier["voice_evidence"] = [{"field": "pitch", "quote": "a deep voice"}]
+        samples = synthetic_lines(5)
+        chunk_state = compact_state(dossier, samples=samples, chunk={"index": 1, "count": 4, "chars": 400})
+        self.assertEqual(chunk_state["lore_quotes"], [])
+        self.assertNotIn("voice_evidence", chunk_state)
+        self.assertEqual(chunk_state["dialogue_chunk"]["index"], 1)
+        self.assertEqual(chunk_state["dialogue_chunk"]["count"], 4)
+        # A chunk carries the compact aggregates instead of the raw measurements:
+        # the same signal, a fraction of the tokens.
+        self.assertNotIn("dialogue_measurements", chunk_state)
+        self.assertEqual(
+            chunk_state["dialogue_aggregates"]["unique_lines"],
+            dossier["dialogue_analysis"]["measurements"]["line_count"],
+        )
+        self.assertIn("signal_line_rates", chunk_state["dialogue_aggregates"])
+        self.assertEqual(len(chunk_state["dialogue_samples"]), 5)
+        self.assertTrue(any("dialogue lines" in line for line in chunk_state["guardrails"]))
+        # The non-chunk state still carries lore for the identity and style path.
+        full_state = compact_state(dossier)
+        self.assertEqual(len(full_state["lore_quotes"]), 1)
+        self.assertIn("voice_evidence", full_state)
+
+    def test_aggregate_reports_per_chunk_evidence(self):
+        options = list(self.questions["mood.preset"]["criteria"])
+        answers = [
+            mood_answers(self.questions, {"preset": "calm", "probability": 0.7, "confidence": 0.8, "justified": 0.9}),
+            mood_answers(self.questions, {"preset": "calm", "probability": 0.8, "confidence": 0.9, "justified": 0.85}),
+        ]
+        mood = aggregate_mood(answers, self.policy, line_count=200, provider="stub", chunk_lines=[40, 40])
+        self.assertTrue(mood["accepted"])
+        self.assertEqual(mood["archon"], "calm")
+        self.assertEqual(mood["aggregate"]["agreeing_chunks"], 2)
+        self.assertEqual([item["chunk"] for item in mood["chunks"]], [0, 1])
+        self.assertEqual(set(mood["probabilities"]), set(options))
+        self.assertAlmostEqual(sum(mood["probabilities"].values()), 1.0, places=2)
 
 
 if __name__ == "__main__":

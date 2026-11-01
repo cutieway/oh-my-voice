@@ -1143,15 +1143,15 @@
       },
       "mood.preset": {
         "type": "choice",
-        "instructions": "Which single mood preset describes how this character sounds by DEFAULT across ordinary dialogue? Judge the baseline register, not the strongest scene. Choose none when the sampled lines do not show one consistent register or the volume is too small to tell; none is the correct answer far more often than not.",
+        "instructions": "Which single mood preset describes how this character sounds by DEFAULT across ordinary dialogue? Judge the baseline register across unrelated lines, never the strongest scene. Use only the dialogue lines in this state; lore or personality text is not mood evidence. Choose none when the lines do not show one consistent register, when they are mostly quest instructions, or when the volume is too small to tell; none is the correct answer far more often than not.",
         "values": "moods.archon_choice"
       },
       "mood.justified": {
         "type": "noul",
-        "instructions": "Does the evidence describe a default emotional register for this character, rather than the emotion of individual scenes?",
+        "instructions": "Does the dialogue itself show a default emotional register for this character, rather than the emotion of individual scenes?",
         "criteria": {
-          "true": "Sampled lines and/or source quotes show one register persisting across ordinary, unrelated lines.",
-          "false": "The register varies by scene, the samples are too few, or only source quotes about personality exist without supporting lines."
+          "true": "Lines from unrelated scenes share one register, and ordinary lines carry it as clearly as dramatic ones.",
+          "false": "The register varies by scene, the lines are mostly instructions or one-off exclamations, or there are too few lines to tell."
         }
       },
       "speech_style.register": {
@@ -1190,15 +1190,21 @@
       "min_dialogue_lines_for_review": 5,
       "mood_confidence": 0.7,
       "mood_probability": 0.5,
-      "min_dialogue_lines_for_mood": 120,
-      "min_dialogue_lines_for_style": 40
+      "min_dialogue_lines_for_mood": 40,
+      "min_dialogue_lines_for_style": 40,
+      "mood_consistency_ratio": 0.6,
+      "mood_consistency_margin": 0.05,
+      "mood_dispersion_limit": 0.55,
+      "mood_chunk_chars": 7000,
+      "mood_chunk_overlap": 0.15,
+      "mood_max_chunks": 8
     },
     "confidence_policy": [
       "Choice confidence and probability are both retained; low confidence routes to review or a shared archetype.",
       "Noul returns a yes probability, not a separate confidence field; interpret it with the configured yes/no thresholds.",
       "A Score carries its distribution, expected score, and confidence. A high signal is not proof of correctness.",
       "Thresholds are initial project settings and must be calibrated against manually reviewed examples.",
-      "A mood preset is accepted only when the choice clears the mood-specific confidence and probability thresholds, mood.justified is yes, and the dossier clears min_dialogue_lines_for_mood. Otherwise the pack archon is neutral.",
+      "A mood preset is decided from dialogue alone: the dossier must clear min_dialogue_lines_for_mood, the dialogue pool is split into chunk windows, and every window is asked the same typed questions. The preset is accepted only when the mean distribution clears mood_probability, mean confidence clears mood_confidence, the same preset leads at least mood_consistency_ratio of the chunks, the mean distribution stays under mood_dispersion_limit, and mean mood.justified clears noul_yes. Otherwise the pack archon is neutral and mood.blocked_by names every failed gate.",
       "Speech-style choices below min_dialogue_lines_for_style are recorded as insufficient rather than answered; the profile then carries no style and renders from identity alone."
     ],
     "acoustic_family_compatibility": "Primary and optional secondary timbres must use different acoustic families. Distinctive traits cannot repeat the selected primary family.",
