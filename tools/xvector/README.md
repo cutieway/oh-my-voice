@@ -21,6 +21,12 @@ docker compose -f compose.xvector.yaml run --rm xvector --speaker sphene --force
 
 ## Method
 
+> **One speaker only.** This tool averages every clip for a single
+> `speaker_token`. Do not feed it clips from several actors to synthesize a
+> race, clan, or gender archetype. Human listening on 2026-11-01 found those
+> cross-speaker means robotic and unusable. Use VoiceDesign/ICL for synthetic
+> voices instead.
+
 For each `data/game-voices/wav/<token>/`:
 
 1. Read every `*.wav`, mix to mono.

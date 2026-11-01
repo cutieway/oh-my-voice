@@ -264,6 +264,39 @@ unresolved the run warns and fingerprints use `unresolved:<repo-id>`.
 
 ## Average speaker x-vectors
 
+> **Same speaker only.** Average clips from one `speaker_token`, never from
+> several voice actors. A 2026-11-01 listening test mixed per-speaker x-vectors
+> into 27 race/clan archetypes; the results were uniformly robotic and unusable.
+> The mean of different actors is not a synthetic voice. For unvoiced NPCs use
+> VoiceDesign/ICL, not a cross-speaker average. Same-speaker averaging remains
+> the supported pack method.
+
+### Synthetic voices
+
+Unvoiced NPCs have no source speaker, so there is nothing valid to average.
+The evaluation path is VoiceDesign -> Base ICL: generate one reference clip per
+character from a blueprint, then clone with
+`create_voice_clone_prompt(..., x_vector_only_mode=False)`.
+
+Blueprints live in [`../blueprints/`](../blueprints/README.md): a closed
+vocabulary, a per-character selection file with evidence, and a renderer.
+`python3 tools/blueprint.py render <id>` prints the VoiceDesign instruct and
+`./scripts/voicebank.sh <id>` renders the reference plus sample lines into
+`data/samples/voicebank/<run>/` for audition. This is not yet wired into
+`generate.py` or pack storage.
+
+Mood references are archons: one clip per character, chosen once as
+`pack_archon` and used for every line. Listening on 2026-11-01 found the archons
+individually excellent but too different from each other to swap per dialogue
+line. Neutral is the pack-wide basis.
+
+Both mechanical links are done: a blueprint renders to an approved reference
+clip, and that clip clones dialogue lines deterministically — five draws of the
+same seed produced byte-identical audio. What is **not** built is the step that
+turns a wiki page or any other source into a blueprint; profiles are still
+authored by hand. `blueprints/characters/` is therefore empty and the hand-made
+examples sit in a gitignored `blueprints/archive/`.
+
 `tools/xvector/build_xvectors.py` is the recovered average-speaker method from
 the Sphene experiment. It is not training and not generation:
 

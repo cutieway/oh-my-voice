@@ -4,6 +4,7 @@ bin/
 *.user
 docs/advisor.md
 vendors/
+research/
 
 # oh-my-voice: voice-audio guard (Q6).
 # Raw game audio and derived embeddings must NEVER be committed. They live
@@ -27,3 +28,7 @@ __pycache__/
 
 # Local scratch notes.
 /todo.md
+
+# Example blueprints are local audition material, not shipped data. The
+# pipeline that will fill blueprints/characters/ does not exist yet.
+/blueprints/archive/
