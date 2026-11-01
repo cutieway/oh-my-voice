@@ -1,7 +1,7 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "kind": "voicebank_vocabulary",
-  "purpose": "Closed vocabulary for Qwen3-TTS synthetic voice blueprints. Every character profile selects from these values only; the renderer refuses unknown values. Values are acoustic specifications, not personality labels.",
+  "purpose": "Closed vocabulary for synthetic Qwen3-TTS blueprints. Acoustic identity and textual speech style are separately classified; every value is closed, evidenced, and rendered deterministically.",
   "models": {
     "design": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
     "clone": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
@@ -34,19 +34,19 @@
       "values": {
         "masculine": {
           "render": "masculine",
-          "notes": "Perceived male vocal production. Default for male characters."
+          "notes": "A deliberate synthetic vocal presentation; game sex metadata may inform a creative choice but is never acoustic evidence."
         },
         "feminine": {
           "render": "feminine",
-          "notes": "Perceived female vocal production. Default for female characters."
+          "notes": "A deliberate synthetic vocal presentation; game sex metadata may inform a creative choice but is never acoustic evidence."
         },
         "androgynous": {
           "render": "androgynous",
-          "notes": "Deliberately ambiguous. Requires explicit evidence; do not infer from an unknown sex field."
+          "notes": "Deliberately ambiguous presentation; choose only as a marked synthetic casting decision or when a source explicitly describes it."
         },
         "neutral": {
           "render": "gender-neutral",
-          "notes": "Minimal gender cue. Use for narrators, generic voices, and characters whose presentation is unstated."
+          "notes": "Minimal gender cue. Useful for narrators, generic voices, and characters whose vocal presentation is unstated."
         },
         "nonhuman": {
           "render": "nonhuman",
@@ -796,36 +796,37 @@
   },
   "evidence": {
     "values": {
-      "explicit": "The wiki states it directly (age, gender, race, or a described voice).",
-      "supported_inference": "Several wiki statements point the same way (consistently described as soft-spoken or formal).",
-      "creative_selection": "Chosen to differentiate the character within the vocabulary; no source claim.",
-      "default": "Project fallback applied because no information exists.",
-      "unknown": "No reliable information; field left null."
+      "explicit": "A source directly describes this audible quality or factual field; retain its exact supporting quote and provenance.",
+      "supported_inference": "Multiple attributed source statements support this value; retain the relevant source quotes and provenance.",
+      "creative_selection": "A deliberate synthetic casting decision, not a claim about an original recording or actor.",
+      "default": "A named project fallback from this vocabulary; not source evidence.",
+      "unknown": "Insufficient reliable information; optional fields remain null."
     },
     "rules": [
-      "Every non-null identity field carries an evidence entry with a level.",
-      "explicit and supported_inference require a source URL and a short quote.",
-      "creative_selection and default require neither, but must be self-evidently plausible.",
-      "unknown is only valid on nullable fields."
+      "Every non-null acoustic identity field has one evidence record.",
+      "explicit and supported_inference require source URL or game-data identifier, source type, and exact short quote.",
+      "creative_selection and default are clearly labelled and must not impersonate source facts.",
+      "unknown is valid only for nullable fields.",
+      "Race, clan, sex, body, occupation, and personality cannot be acoustic evidence."
     ]
   },
   "inference_policy": {
     "allowed": [
-      "Race and sex feed presentation and perceived_age.",
-      "Stated age or an age range feeds perceived_age.",
-      "Explicit voice description in prose feeds pitch, timbre, pace, or articulation.",
-      "Occupation and upbringing may feed articulation (refined, clipped, drawling) as supported_inference.",
-      "Social role may feed intonation (ceremonial, restrained) as supported_inference."
+      "An explicit source description of audible qualities can support the matching closed acoustic field.",
+      "Dialogue measurements can support speech-style classification only; they do not establish pitch, timbre, resonance, articulation, or accent.",
+      "Race, clan, sex, body, age appearance, occupation, and personality may be considered only as creative context and must be labeled creative_selection, never as acoustic fact.",
+      "A stated lore age may be recorded as lore metadata; do not convert species lifespan to perceived vocal age."
     ],
     "forbidden": [
-      "Race, height, build, or body mass as evidence for pitch or timbre.",
-      "Occupation as evidence for timbre or pitch (every blacksmith does not sound gravelly).",
-      "Personality as evidence for pitch, timbre, or age (every cheerful character does not get a high pitch).",
-      "Mood words as identity fields at all.",
-      "Adding emotion to the identity prompt because the character is usually emotional.",
-      "Inventing an age or accent for a character with no sourced information."
+      "Race, clan, sex, height, build, or body mass as evidence for pitch, timbre, resonance, articulation, pace, or accent.",
+      "Occupation as evidence for timbre or pitch (a craft role does not make a voice gravelly).",
+      "Personality as evidence for pitch, timbre, resonance, age, or accent (cheerfulness does not mean high pitch).",
+      "Dialogue-derived vocabulary complexity or sentence length as evidence of articulation, accent, pitch, or timbre.",
+      "Mood words as permanent identity fields.",
+      "Adding emotion to the identity prompt because a character is usually emotional.",
+      "Inventing lore facts, acoustic evidence, or source quotations."
     ],
-    "required_for_allowed_inferences": "Body-based or role-based choices are creative_selection, never explicit. A reviewer must be able to see that the value was a design choice."
+    "required_for_allowed_inferences": "Every audible selection without an exact source quote is creative_selection or default. Creative casting is not a claim about an original actor."
   },
   "profile_rules": [
     "One canonical profile per NPC id. Labels that resolve to the same NPC share the profile.",
@@ -841,5 +842,363 @@
       "identity_approved: a human listened and accepted the voice as the character.",
       "no_drift: two independent clone lines are recognisably the same speaker."
     ]
+  },
+  "speech_style": {
+    "purpose": "Closed classification of how text is written and phrased. Speech style is separate from acoustic identity and is never appended to the VoiceDesign identity prompt.",
+    "dimensions": {
+      "register": {
+        "question": "What register best describes the dialogue wording?",
+        "values": {
+          "formal": {
+            "render": "formal",
+            "classification_description": "Uses consistently formal constructions and formal signal words."
+          },
+          "neutral": {
+            "render": "neutral",
+            "classification_description": "Neither strongly formal nor strongly colloquial."
+          },
+          "conversational": {
+            "render": "conversational",
+            "classification_description": "Uses casual constructions, colloquial terms, or frequent contractions."
+          }
+        }
+      },
+      "vocabulary_complexity": {
+        "question": "How complex is the character’s vocabulary, based on the sampled text?",
+        "values": {
+          "plain": {
+            "render": "plain",
+            "classification_description": "Mostly common, short words and direct phrasing."
+          },
+          "ordinary": {
+            "render": "ordinary",
+            "classification_description": "Everyday vocabulary with a typical range."
+          },
+          "educated": {
+            "render": "educated",
+            "classification_description": "Frequent longer or less common vocabulary."
+          },
+          "specialized": {
+            "render": "specialized",
+            "classification_description": "Repeated technical or domain-specific vocabulary."
+          },
+          "poetic": {
+            "render": "poetic",
+            "classification_description": "Unusually figurative, image-rich, or lyrical word choice."
+          }
+        }
+      },
+      "sentence_complexity": {
+        "question": "How structurally complex are the sampled utterances?",
+        "values": {
+          "simple": {
+            "render": "simple",
+            "classification_description": "Mostly short utterances with few subordinate clauses."
+          },
+          "mixed": {
+            "render": "mixed",
+            "classification_description": "A mixture of short and multi-clause utterances."
+          },
+          "complex": {
+            "render": "complex",
+            "classification_description": "Frequently long utterances or multiple subordinate clauses."
+          }
+        }
+      },
+      "colloquialism": {
+        "question": "How often does the dialogue use colloquial wording?",
+        "values": {
+          "low": {
+            "render": "low",
+            "classification_description": "Rare colloquial signal words and informal constructions."
+          },
+          "moderate": {
+            "render": "moderate",
+            "classification_description": "Some colloquial wording mixed with neutral phrasing."
+          },
+          "high": {
+            "render": "high",
+            "classification_description": "Frequent colloquial words, contractions, or informal constructions."
+          }
+        }
+      },
+      "diction_style": {
+        "question": "Which wording style best fits the dialogue?",
+        "values": {
+          "precise": {
+            "render": "precise",
+            "classification_description": "Careful, exact word choice."
+          },
+          "relaxed": {
+            "render": "relaxed",
+            "classification_description": "Loose, casual word choice."
+          },
+          "plain": {
+            "render": "plain",
+            "classification_description": "Direct word choice without ornate phrasing."
+          },
+          "ornate": {
+            "render": "ornate",
+            "classification_description": "Frequent elaborate or embellished wording."
+          }
+        }
+      },
+      "rhetorical_style": {
+        "question": "What rhetorical pattern is most representative of the dialogue?",
+        "values": {
+          "measured": {
+            "render": "measured",
+            "classification_description": "Balanced, deliberate statements."
+          },
+          "direct": {
+            "render": "direct",
+            "classification_description": "Short, plain statements that get to the point."
+          },
+          "flowing": {
+            "render": "flowing",
+            "classification_description": "Long linked clauses and continuous phrasing."
+          },
+          "fragmented": {
+            "render": "fragmented",
+            "classification_description": "Many short fragments or interrupted phrases."
+          },
+          "inquisitive": {
+            "render": "inquisitive",
+            "classification_description": "Questions form a prominent recurring pattern."
+          },
+          "emphatic": {
+            "render": "emphatic",
+            "classification_description": "Exclamations or marked emphasis recur in the wording."
+          }
+        }
+      },
+      "contraction_frequency": {
+        "question": "How frequently does the dialogue use contractions?",
+        "values": {
+          "low": {
+            "render": "low",
+            "classification_description": "Contractions are rare in the sample."
+          },
+          "moderate": {
+            "render": "moderate",
+            "classification_description": "Contractions appear sometimes."
+          },
+          "high": {
+            "render": "high",
+            "classification_description": "Contractions appear frequently."
+          }
+        }
+      },
+      "speech_habits": {
+        "question": "Which repeated textual speech habits occur in the sample?",
+        "max_items": 5,
+        "values": {
+          "habitual_contractions": {
+            "render": "habitual contractions"
+          },
+          "honorific_address": {
+            "render": "honorific forms of address"
+          },
+          "rhetorical_questions": {
+            "render": "frequent questions"
+          },
+          "frequent_exclamations": {
+            "render": "frequent exclamations"
+          },
+          "short_utterances": {
+            "render": "short utterances"
+          },
+          "none_observed": {
+            "render": "no repeated speech habit observed"
+          }
+        }
+      }
+    },
+    "defaults": {
+      "register": "neutral",
+      "vocabulary_complexity": "ordinary",
+      "sentence_complexity": "mixed",
+      "colloquialism": "low",
+      "diction_style": "plain",
+      "rhetorical_style": "measured",
+      "contraction_frequency": "low",
+      "speech_habits": [
+        "none_observed"
+      ]
+    },
+    "signals": {
+      "formal_terms": [
+        "therefore",
+        "thus",
+        "hence",
+        "shall",
+        "whom",
+        "whilst",
+        "endeavour",
+        "pray tell"
+      ],
+      "colloquial_terms": [
+        "gonna",
+        "wanna",
+        "gotta",
+        "yeah",
+        "yep",
+        "nope",
+        "okay",
+        "kinda",
+        "sorta",
+        "ain’t"
+      ],
+      "habit_rules": {
+        "contractions_min": 5,
+        "honorifics_min": 3,
+        "question_ratio_min": 0.35,
+        "exclamations_min": 5
+      }
+    },
+    "measurement_rules": "All counters and rates are calculated from distinct voice_line_id samples. The interpretation is a deterministic rule mapping; retain measurements separately from interpretation."
+  },
+  "classification": {
+    "provider_contract": "RulesProvider works offline. JevProvider sends one structured System One request for independent decisions. Jev output selects from this vocabulary and never provides factual source citations.",
+    "defaults": {
+      "presentation": "neutral",
+      "perceived_age": null,
+      "pitch": "mid",
+      "pitch_range": null,
+      "timbre_primary": "clear",
+      "timbre_secondary": null,
+      "resonance": null,
+      "articulation": "relaxed",
+      "speaking_pace": "moderate",
+      "intonation": "natural",
+      "distinctive_traits": []
+    },
+    "questions": {
+      "identity_resolved": {
+        "type": "noul",
+        "instructions": "Is this dossier safely tied to one canonical FFXIV NPC identity with no known SE voice reference?",
+        "criteria": {
+          "true": "One resolved NPC identity and no voiced alias.",
+          "false": "Identity is ambiguous, unresolved, or has an SE voice reference."
+        }
+      },
+      "voice_evidence_present": {
+        "type": "noul",
+        "instructions": "Does the dossier contain a source quote that explicitly describes an audible voice quality?",
+        "criteria": {
+          "true": "At least one attributed source quote describes an audible quality.",
+          "false": "No source quote describes an audible voice quality."
+        }
+      },
+      "individual_design": {
+        "type": "score",
+        "instructions": "How strongly does the evidence justify a unique individual synthetic voice design instead of a shared archetype?",
+        "levels": [
+          "Generic or unresolved identity with too little evidence for a unique design.",
+          "Minor identity with sparse or repetitive dialogue and no distinctive source evidence.",
+          "Some distinctiveness, but a shared archetype remains a reasonable fit.",
+          "Distinctive character or rich dialogue supports an individual creative cast.",
+          "Strong, explicit voice description and substantial character-specific evidence justify an individual design."
+        ]
+      },
+      "speech_style.register": {
+        "type": "choice",
+        "instructions": "Which register best describes the actual wording in the sampled dialogue?",
+        "values": "speech_style.register"
+      },
+      "speech_style.vocabulary_complexity": {
+        "type": "choice",
+        "instructions": "How complex is the vocabulary in the sampled dialogue? Judge words, not the character’s intelligence or social class.",
+        "values": "speech_style.vocabulary_complexity"
+      },
+      "speech_style.sentence_complexity": {
+        "type": "choice",
+        "instructions": "How structurally complex are the sampled utterances? Judge the text only.",
+        "values": "speech_style.sentence_complexity"
+      },
+      "speech_style.colloquialism": {
+        "type": "choice",
+        "instructions": "How often does the sampled dialogue use colloquial wording?",
+        "values": "speech_style.colloquialism"
+      },
+      "speech_style.diction_style": {
+        "type": "choice",
+        "instructions": "Which wording style best fits the sampled dialogue?",
+        "values": "speech_style.diction_style"
+      },
+      "speech_style.rhetorical_style": {
+        "type": "choice",
+        "instructions": "What rhetorical pattern is most representative of the sampled dialogue?",
+        "values": "speech_style.rhetorical_style"
+      },
+      "speech_style.contraction_frequency": {
+        "type": "choice",
+        "instructions": "How frequently does the sample use contractions?",
+        "values": "speech_style.contraction_frequency"
+      },
+      "identity.presentation": {
+        "type": "choice",
+        "instructions": "Choose a deliberate synthetic vocal presentation. Do not claim it describes an original actor; game sex, race, clan, body, and personality are not acoustic evidence.",
+        "values": "identity.presentation"
+      },
+      "identity.pitch": {
+        "type": "choice",
+        "instructions": "Choose a plausible synthetic pitch category. Do not infer pitch from race, clan, sex, body, occupation, or personality; use explicit audible source evidence only when present.",
+        "values": "identity.pitch"
+      },
+      "identity.timbre_primary": {
+        "type": "choice",
+        "instructions": "Choose one deliberate synthetic primary timbre. Text style and character context do not establish acoustic timbre.",
+        "values": "identity.timbre_primary"
+      },
+      "identity.articulation": {
+        "type": "choice",
+        "instructions": "Choose a synthetic articulation style. Dialogue phrasing alone is not proof of audible articulation.",
+        "values": "identity.articulation"
+      },
+      "identity.speaking_pace": {
+        "type": "choice",
+        "instructions": "Choose a synthetic speaking pace; do not infer pace from emotion or personality.",
+        "values": "identity.speaking_pace"
+      },
+      "identity.intonation": {
+        "type": "choice",
+        "instructions": "Choose a stable synthetic intonation suitable for neutral dialogue. Do not choose a per-line emotion.",
+        "values": "identity.intonation"
+      }
+    },
+    "thresholds": {
+      "choice_confidence": 0.55,
+      "choice_probability": 0.35,
+      "noul_yes": 0.75,
+      "noul_no": 0.25,
+      "distinctiveness_score": 3.7,
+      "min_dialogue_lines_for_individual": 50,
+      "min_dialogue_lines_for_review": 5
+    },
+    "confidence_policy": [
+      "Choice confidence and probability are both retained; low confidence routes to review or a shared archetype.",
+      "Noul returns a yes probability, not a separate confidence field; interpret it with the configured yes/no thresholds.",
+      "A Score carries its distribution, expected score, and confidence. A high signal is not proof of correctness.",
+      "Thresholds are initial project settings and must be calibrated against manually reviewed examples."
+    ],
+    "acoustic_family_compatibility": "Primary and optional secondary timbres must use different acoustic families. Distinctive traits cannot repeat the selected primary family.",
+    "speech_style_separation": "Speech-style results stay out of the identity prompt and never become acoustic evidence."
+  },
+  "profile_lifecycle": {
+    "statuses": [
+      "draft",
+      "needs_review",
+      "ready_for_audition",
+      "auditioned",
+      "approved",
+      "rejected"
+    ],
+    "approval_rule": "Only a human review action may set approved. Classification confidence and human approval are separate fields.",
+    "default_status": "draft"
+  },
+  "schema_migrations": {
+    "1.0_to_1.1": "Adds speech-style classifications, lifecycle and classification provenance. Existing identity selections and the Qwen reference script keep their original meanings. Use the explicit blueprint migration command; old profiles are never silently rewritten.",
+    "reference_script_policy": "The schema 1.0 npc_reference_v1 script remains byte-for-byte unchanged."
   }
 }

@@ -1,13 +1,23 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://oh-my-voice/blueprints/schema.json",
-  "title": "Qwen3-TTS voice blueprint",
-  "description": "Structural schema for one character's synthetic voice blueprint. Value lists live in vocabulary.json; tools/blueprint.py validates enum membership, selection cardinality, acoustic-family conflicts, evidence levels, and prompt hygiene there. This schema only guarantees shape.",
+  "title": "Qwen3-TTS voice blueprint, schema 1.1",
+  "description": "Structural schema for synthetic voice profiles. Acoustic identity, speech style, classification provenance, and human approval are separate. tools/blueprint.py checks vocabulary membership, evidence, prompt rules, and lifecycle invariants.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "profile_version", "character", "identity", "evidence"],
+  "required": [
+    "schema_version",
+    "profile_version",
+    "profile_kind",
+    "character",
+    "identity",
+    "evidence",
+    "lifecycle"
+  ],
   "properties": {
-    "schema_version": {"const": "1.0"},
+    "schema_version": {
+      "const": "1.1"
+    },
     "profile_version": {
       "type": "integer",
       "minimum": 1,
@@ -16,20 +26,68 @@
     "character": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "name", "source_url"],
+      "required": [
+        "id",
+        "name",
+        "source_url"
+      ],
       "properties": {
-        "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_]*$"},
-        "name": {"type": "string"},
-        "npc_id": {"type": ["integer", "null"]},
-        "race": {"type": ["string", "null"]},
-        "clan": {"type": ["string", "null"]},
-        "sex": {"enum": ["male", "female", "unknown", null]},
-        "lore_age": {"type": ["integer", "string", "null"]},
-        "role": {"type": ["string", "null"], "description": "Free-text role or profession, for reviewers only. It never reaches the prompt."},
-        "source_url": {"type": "string", "description": "Wiki or reference page the profile was derived from."},
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_]*$"
+        },
+        "name": {
+          "type": "string"
+        },
+        "npc_id": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "race": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "clan": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sex": {
+          "enum": [
+            "male",
+            "female",
+            "unknown",
+            null
+          ]
+        },
+        "lore_age": {
+          "type": [
+            "integer",
+            "string",
+            "null"
+          ]
+        },
+        "role": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Free-text role or profession, for reviewers only. It never reaches the prompt."
+        },
+        "source_url": {
+          "type": "string",
+          "description": "Wiki or reference page the profile was derived from."
+        },
         "applies_to": {
           "type": "array",
-          "items": {"type": "string"},
+          "items": {
+            "type": "string"
+          },
           "description": "Speaker labels / npc keys that share this voice. Empty for a one-character profile."
         }
       }
@@ -37,30 +95,81 @@
     "identity": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["presentation", "pitch", "timbre_primary", "articulation", "speaking_pace", "intonation"],
+      "required": [
+        "presentation",
+        "pitch",
+        "timbre_primary",
+        "articulation",
+        "speaking_pace",
+        "intonation"
+      ],
       "properties": {
-        "presentation": {"type": "string"},
-        "perceived_age": {"type": ["string", "null"]},
-        "pitch": {"type": "string"},
-        "pitch_range": {"type": ["string", "null"]},
-        "timbre_primary": {"type": "string"},
-        "timbre_secondary": {"type": ["string", "null"]},
-        "resonance": {"type": ["string", "null"]},
-        "articulation": {"type": "string"},
-        "speaking_pace": {"type": "string"},
-        "intonation": {"type": "string"},
+        "presentation": {
+          "type": "string"
+        },
+        "perceived_age": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pitch": {
+          "type": "string"
+        },
+        "pitch_range": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timbre_primary": {
+          "type": "string"
+        },
+        "timbre_secondary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resonance": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "articulation": {
+          "type": "string"
+        },
+        "speaking_pace": {
+          "type": "string"
+        },
+        "intonation": {
+          "type": "string"
+        },
         "accent": {
-          "type": ["object", "null"],
+          "type": [
+            "object",
+            "null"
+          ],
           "additionalProperties": false,
-          "required": ["profile", "strength"],
+          "required": [
+            "profile",
+            "strength"
+          ],
           "properties": {
-            "profile": {"type": "string"},
-            "strength": {"type": "string"}
+            "profile": {
+              "type": "string"
+            },
+            "strength": {
+              "type": "string"
+            }
           }
         },
         "distinctive_traits": {
           "type": "array",
-          "items": {"type": "string"},
+          "items": {
+            "type": "string"
+          },
           "maxItems": 2,
           "uniqueItems": true
         }
@@ -69,17 +178,43 @@
     "archon_pin": {
       "type": "object",
       "description": "The pinned take per archon. The design seed fixes the reference clip, and the frozen reference fixes the voice for every dialogue line of that character.",
-      "propertyNames": {"enum": ["neutral", "calm", "happy", "sad", "angry", "fearful", "secretive"]},
+      "propertyNames": {
+        "enum": [
+          "neutral",
+          "calm",
+          "happy",
+          "sad",
+          "angry",
+          "fearful",
+          "secretive"
+        ]
+      },
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["design_seed", "reference_sha256"],
+        "required": [
+          "design_seed",
+          "reference_sha256"
+        ],
         "properties": {
-          "design_seed": {"type": "integer", "description": "VoiceDesign seed that produced the reference clip."},
-          "reference_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Hash of the reference WAV, so a regenerated take is provably the same one."},
-          "ref_seconds": {"type": "number"},
-          "ref_f0": {"type": "number"},
-          "pinned_on": {"type": "string"}
+          "design_seed": {
+            "type": "integer",
+            "description": "VoiceDesign seed that produced the reference clip."
+          },
+          "reference_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "Hash of the reference WAV, so a regenerated take is provably the same one."
+          },
+          "ref_seconds": {
+            "type": "number"
+          },
+          "ref_f0": {
+            "type": "number"
+          },
+          "pinned_on": {
+            "type": "string"
+          }
         }
       }
     },
@@ -91,18 +226,98 @@
     "moods": {
       "type": "object",
       "description": "Optional extra archons. Each key is a preset plus at most two overrides. Rendered and auditioned; at most one is chosen as pack_archon.",
-      "propertyNames": {"enum": ["neutral", "calm", "happy", "sad", "angry", "fearful", "secretive"]},
+      "propertyNames": {
+        "enum": [
+          "neutral",
+          "calm",
+          "happy",
+          "sad",
+          "angry",
+          "fearful",
+          "secretive"
+        ]
+      },
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "intensity": {"enum": ["subtle", "mild", "moderate", "strong", "extreme"]},
-          "energy": {"enum": ["very_low", "low", "moderate", "high", "very_high"]},
-          "projection": {"enum": ["very_soft", "soft", "conversational", "projected", "forceful", "shouting", "whispering"]},
-          "pace": {"enum": ["very_slow", "slow", "measured", "normal", "brisk", "fast", "rushed"]},
-          "pitch_movement": {"enum": ["restrained", "natural", "expressive", "wide", "unstable", "rising", "falling"]},
-          "articulation": {"enum": ["softened", "crisp", "firm", "clipped", "deliberate", "slurred", "breathy", "strained", "hesitant", "fluid"]},
-          "rhythm": {"enum": ["even", "measured", "conversational", "erratic", "hesitant", "staccato", "flowing", "dramatic"]}
+          "intensity": {
+            "enum": [
+              "subtle",
+              "mild",
+              "moderate",
+              "strong",
+              "extreme"
+            ]
+          },
+          "energy": {
+            "enum": [
+              "very_low",
+              "low",
+              "moderate",
+              "high",
+              "very_high"
+            ]
+          },
+          "projection": {
+            "enum": [
+              "very_soft",
+              "soft",
+              "conversational",
+              "projected",
+              "forceful",
+              "shouting",
+              "whispering"
+            ]
+          },
+          "pace": {
+            "enum": [
+              "very_slow",
+              "slow",
+              "measured",
+              "normal",
+              "brisk",
+              "fast",
+              "rushed"
+            ]
+          },
+          "pitch_movement": {
+            "enum": [
+              "restrained",
+              "natural",
+              "expressive",
+              "wide",
+              "unstable",
+              "rising",
+              "falling"
+            ]
+          },
+          "articulation": {
+            "enum": [
+              "softened",
+              "crisp",
+              "firm",
+              "clipped",
+              "deliberate",
+              "slurred",
+              "breathy",
+              "strained",
+              "hesitant",
+              "fluid"
+            ]
+          },
+          "rhythm": {
+            "enum": [
+              "even",
+              "measured",
+              "conversational",
+              "erratic",
+              "hesitant",
+              "staccato",
+              "flowing",
+              "dramatic"
+            ]
+          }
         }
       }
     },
@@ -112,12 +327,41 @@
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["level"],
+        "required": [
+          "level"
+        ],
         "properties": {
-          "level": {"enum": ["explicit", "supported_inference", "creative_selection", "default", "unknown"]},
-          "source": {"type": "string"},
-          "quote": {"type": "string"},
-          "note": {"type": "string"}
+          "level": {
+            "enum": [
+              "explicit",
+              "supported_inference",
+              "creative_selection",
+              "default",
+              "unknown"
+            ]
+          },
+          "source": {
+            "type": "string"
+          },
+          "quote": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "source_type": {
+            "type": "string"
+          },
+          "revision_id": {
+            "type": [
+              "string",
+              "integer",
+              "null"
+            ]
+          },
+          "field": {
+            "type": "string"
+          }
         }
       }
     },
@@ -125,13 +369,254 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "reference_duration_ok": {"type": "boolean"},
-        "reference_transcript_verified": {"type": "boolean"},
-        "no_reference_leak": {"type": "boolean"},
-        "identity_approved": {"type": "boolean"},
-        "no_drift": {"type": "boolean"}
+        "reference_duration_ok": {
+          "type": "boolean"
+        },
+        "reference_transcript_verified": {
+          "type": "boolean"
+        },
+        "no_reference_leak": {
+          "type": "boolean"
+        },
+        "identity_approved": {
+          "type": "boolean"
+        },
+        "no_drift": {
+          "type": "boolean"
+        }
       }
     },
-    "notes": {"type": "string"}
+    "notes": {
+      "type": "string"
+    },
+    "profile_kind": {
+      "enum": [
+        "character",
+        "archetype"
+      ]
+    },
+    "speech_style": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Closed-vocabulary textual style; it is separate from acoustic identity and is not rendered into the identity prompt.",
+      "properties": {
+        "register": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "vocabulary_complexity": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sentence_complexity": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "colloquialism": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "diction_style": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rhetorical_style": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "contraction_frequency": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "speech_habits": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 5,
+          "uniqueItems": true
+        }
+      }
+    },
+    "speech_style_analysis": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Reproducible dialogue measurements and classifier interpretations; not acoustic evidence.",
+      "additionalProperties": true
+    },
+    "classification": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "type": "string"
+        },
+        "model_id": {
+          "type": "string"
+        },
+        "dossier_hash": {
+          "type": "string"
+        },
+        "configuration_hash": {
+          "type": "string"
+        },
+        "source_audit_hash": {
+          "type": "string"
+        },
+        "timestamp": {
+          "type": "string"
+        }
+      }
+    },
+    "lifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "classification_confidence",
+        "manual_override",
+        "approval"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "draft",
+            "needs_review",
+            "ready_for_audition",
+            "auditioned",
+            "approved",
+            "rejected"
+          ]
+        },
+        "classification_confidence": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "manual_override": {
+          "type": "boolean"
+        },
+        "approval": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "required": [
+            "approved_by",
+            "approved_at",
+            "reference_sha256"
+          ],
+          "properties": {
+            "approved_by": {
+              "type": "string",
+              "minLength": 1
+            },
+            "approved_at": {
+              "type": "string",
+              "minLength": 1
+            },
+            "reference_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        },
+        "rejection_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "manual_history": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "action",
+          "timestamp"
+        ],
+        "properties": {
+          "action": {
+            "enum": [
+              "edit",
+            "audition",
+              "approve",
+              "reject",
+              "reset"
+            ]
+          },
+          "timestamp": {
+            "type": "string"
+          },
+          "by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "changes": {
+            "type": "object"
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "archetype_metadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "catalog_version": {
+          "type": "string"
+        },
+        "design_reason": {
+          "type": "string"
+        },
+        "audition_status": {
+          "enum": [
+            "draft",
+            "auditioned",
+            "approved",
+            "rejected"
+          ]
+        }
+      }
+    }
   }
 }

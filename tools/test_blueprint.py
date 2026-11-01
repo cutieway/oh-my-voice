@@ -169,7 +169,7 @@ class VocabularyRuleTests(unittest.TestCase):
     def test_emotion_word_in_identity_is_rejected(self):
         vocab = copy.deepcopy(self.vocab)
         vocab["identity"]["timbre_primary"]["values"]["warm"]["render"] = "cheerful warm"
-        data = profile("godbert")
+        data = blueprint.migrate_profile_1_0(profile("godbert"))
         errors = blueprint.validate_profile(data, vocab, "test")
         self.assertTrue(any("emotion words" in error for error in errors), errors)
 

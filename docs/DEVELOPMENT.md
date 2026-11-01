@@ -63,7 +63,8 @@ tools/
   roster.py                # per-speaker workload from dialogue.db (run order, CSV)
   progress.py              # corpus size + generation progress from dialogue.db
   voice-map.json           # NPC -> xvector name
-  xivdata/                 # offline dialogue DB + cutscene SCD extractor
+  xivdata/                 # offline DB, SCD extractor, Lumina NPC index
+  blueprint_pipeline/      # read-only Phase 2 inventory, dossiers, classifiers, review
   xvector/                 # average speaker embedding builder
 data/                      # gitignored runtime root (see below)
 docs/
@@ -86,6 +87,7 @@ data/cache/         HF/Torch/MIOpen caches
 data/game-voices/   xivdata output: scd/ + wav/ per speaker_token
 data/dialogue.db    xivdata dialogue/worklist DB (SQLite, WAL)
 data/xvectors/      one .npy + .json per speaker_token, manifest.json
+data/blueprints/    Phase 2 caches, reports, assignments, generated draft profiles
 data/out/           generated multi-voice pack root (one folder per voice)
 data/samples/       one-off prompt samples
 data/backup/        retired packs, logs, and artifacts moved here, never deleted
@@ -104,6 +106,8 @@ automatic CI workflow. Run the checks locally:
 
 ```bash
 bash scripts/check-refs.sh
+python3 -m unittest discover -s tools
+python3 tools/blueprint.py check
 python3 -m unittest discover -s tools/qwen
 python3 -m unittest tools/test_roster.py   # queue views; skipped without dotnet
 python3 tools/progress.py                 # corpus/generation snapshot
@@ -124,6 +128,39 @@ Raw game audio (`data/game-voices/`) and derived x-vectors (`data/xvectors/`)
 stay local and gitignored. No single-reference/ICL transcript path is used for
 packs. `scripts/check-refs.sh` rejects `references/` paths, audio blobs, and
 files over 2 MiB.
+
+## Synthetic blueprint workflow (Phase 2)
+
+Phase 2 is separate from `voice.sh`, its speaker selection, x-vector
+construction, and the Qwen Base generation path. `tools/blueprint_pipeline`
+opens `dialogue.db` read-only, collapses `dialog_speakers` aliases by canonical
+NPC ID, excludes any identity with an SE-voiced alias, and routes ambiguous or
+unresolved identities to review. `xivdata npc-index` exports optional race,
+tribe/clan, and game sex metadata from Lumina without changing the DB.
+
+```bash
+dotnet run --project tools/xivdata -- npc-index --lang en > /tmp/game-npc-index.json
+python3 tools/blueprint_pipeline/cli.py inventory --game-index /tmp/game-npc-index.json
+python3 tools/blueprint_pipeline/cli.py dossiers --game-index /tmp/game-npc-index.json --limit 25
+python3 tools/blueprint_pipeline/cli.py classify --provider rules --limit 25
+python3 tools/blueprint_pipeline/cli.py enrich --allow-network --limit 25
+python3 tools/blueprint_pipeline/cli.py classify --provider jev --allow-network --limit 25
+python3 tools/blueprint_pipeline/cli.py inspect npc_1003075 --review-report
+python3 tools/blueprint_pipeline/cli.py validate
+python3 tools/blueprint_pipeline/cli.py report
+```
+
+Rules classification is offline. Wiki fetches and Jev calls require
+`--allow-network`; Jev also requires `TYPESAFE_API_KEY` in the environment and
+defaults to 25 dossiers per run. Larger batches require `--allow-bulk` and
+print a request, token, and approximate cost estimate first. Cached outputs are
+immutable under gitignored `data/blueprints/`, so unchanged dossiers and
+classifier settings resume without duplicate API work. Jev cannot process
+audio or provide citations; exact source evidence is collected independently.
+Race, clan, and sex describe identity and are not acoustic evidence. Synthetic
+profiles remain drafts until a human auditions a VoiceDesign clip, pins its
+hash, and approves it. This task does not wire those references into the
+runtime or alter Phase 1.
 Distributed packs use game-derived or consented voices only. `voiceId` in the
 line ID makes clean packs a distinct namespace by construction.
 

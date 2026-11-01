@@ -7,7 +7,14 @@ every later step reproducible.
 
 ```mermaid
 flowchart LR
-  wiki[wiki page] --> bp["blueprints/characters/x.json"]
+  db["dialogue.db<br/>read-only"] --> inv["canonical identity inventory"]
+  game["Lumina NPC index"] --> inv
+  inv --> dossier["character dossier<br/>dialogue + provenance"]
+  dossier --> wiki["MediaWiki API<br/>cached + revisioned"]
+  dossier --> classifier["rules or Jev<br/>typed decisions"]
+  wiki --> classifier
+  classifier --> assign{"individual design<br/>or shared archetype"}
+  assign --> bp["draft profile / registry"]
   bp --> render["tools/blueprint.py<br/>validate + render"]
   render --> vd["VoiceDesign<br/>neutral archon"]
   render --> vdm["VoiceDesign<br/>mood archons"]
@@ -24,42 +31,47 @@ no mood block, no emotion.
 
 ## Status
 
-Two of the three links are solved and measured; one is not.
+Phase 1 remains the existing in-game voice cloning path and is not changed by
+the synthetic pipeline. Phase 2 now builds a conservative candidate inventory,
+dialogue dossiers, cached wiki enrichment, offline rules and optional Jev
+classification, reusable archetype assignments, draft profiles, review reports,
+and human audition/approval records. The pipeline stops before runtime pack
+generation; approval remains a human action.
 
 | Link | State |
 |---|---|
 | blueprint → reference clip | **solved.** `tools/blueprint.py` renders and validates the instruct; VoiceDesign turns it into a clip. |
 | reference clip → dialogue lines | **solved and deterministic.** Every line is cloned from one frozen clip; same seed reproduces byte-identical audio, five draws verified. |
-| wiki (or any other source) → blueprint | **NOT solved.** Profiles are still authored by hand. |
+| game/dialogue/lore → synthetic blueprint draft | **implemented.** `tools/blueprint_pipeline/cli.py` creates dossiers, enriches from MediaWiki, classifies with local rules or opt-in Jev, and routes to a draft profile or shared archetype. |
+| draft → approved reference | **human-gated.** Review commands record edits, audition WAV hashes, and approval; no classifier can approve a voice. |
 
-`blueprints/characters/` is intentionally empty. The four profiles that proved
-the pipeline out (gerolt, godbert, momodi, nashu_mhakaracca) were written by an
-agent reading a wiki page and hand-selecting values against this vocabulary.
-They were consistent only because a human read them afterwards; at 9,208 labels
-that process does not scale and cannot be audited. They now live in the
-gitignored `blueprints/archive/` as evidence, not as data.
+`blueprints/characters/` contains only intentional reviewed profiles. The four
+hand-written examples (gerolt, godbert, momodi, nashu_mhakaracca) remain in the
+gitignored `blueprints/archive/` as renderer fixtures. Six initial shared
+archetypes live in `archetypes/`; all are drafts until a human auditions and
+approves a pinned reference.
 
 ### The intended pipeline
 
 ```mermaid
 flowchart LR
-  db["dialogue.db label"] --> wiki["wiki page"]
-  wiki --> facts["infobox facts<br/>gender / age / race / clan"]
-  wiki --> prose["lore prose"]
-  facts --> det["deterministic mapping<br/>presentation + perceived_age"]
-  prose --> rules["constraint pass<br/>accent / articulation hints"]
-  det --> draft[blueprint draft]
-  rules --> draft
-  bank["bank archetype<br/>no wiki page"] --> draft
-  draft --> val{"blueprint.py check"}
-  val -->|errors| draft
-  val -->|clean| audition["voicebank.sh<br/>seed sweep"]
-  audition --> human{"human picks one take"}
-  human --> pin["archon_pin<br/>reference_sha256"]
-  pin --> pack["dialogue lines"]
+  db["dialogue.db<br/>read-only"] --> inv["inventory + identity gates"]
+  lumina["Lumina ENpcResident / ENpcBase"] --> inv
+  inv --> dossier["canonical dossier<br/>dialogue stats + samples"]
+  dossier --> wiki["MediaWiki API<br/>quotes + revision IDs"]
+  dossier --> classifier["rules or Jev<br/>closed questions"]
+  wiki --> classifier
+  classifier --> route{"evidence and<br/>confidence thresholds"}
+  route -->|distinctive| individual["individual draft"]
+  route -->|ordinary / sparse| archetype["shared archetype assignment"]
+  individual --> val{"blueprint.py check"}
+  archetype --> val
+  val --> audition["voicebank.sh<br/>seed sweep"]
+  audition --> human{"human reviews take"}
+  human --> pin["reference hash + approval"]
 ```
 
-What the survey already showed, on the 25 highest-line unvoiced speakers:
+The earlier survey of the 25 highest-line unvoiced speakers found:
 
 - 22/25 resolve to a wiki page; 3 have none (`QIB`, `wandering minstrel`,
   `BEATINE`). Those are narration/announcer labels, not characters, and must
@@ -68,19 +80,16 @@ What the survey already showed, on the 25 highest-line unvoiced speakers:
 - Infobox data is dirty: `race=Hyune` typo, a disambiguation page with an empty
   infobox, a 230-year-old Padjal, a race with no gender. The converter needs an
   explicit rule per case, not a scraper with a shrug.
-- Only `presentation` and `perceived_age` are derivable from facts. Pitch,
-  timbre, resonance, articulation, pace, and intonation are **not in the wiki** —
-  it describes personality, not acoustics. That gap is a design decision per
-  character, and it is the reason an LLM writes the draft and a human approves
-  the take.
+- The wiki can contain useful character facts, but its descriptions are not
+  proof of pitch or timbre. The pipeline keeps source-backed voice claims
+  separate from deliberate synthetic casting decisions.
 - The MediaWiki API returns an empty body without a `User-Agent`; a fetcher must
   send one or it will silently report "no page".
 
-Unresolved design question, deliberately left open: whether the ~7,000 named
-NPCs with a page but no voice description each get a full LLM-authored profile,
-or get a bank archetype (race × clan × sex × age) that only distinctive
-characters upgrade from. Cost and auditability differ by orders of magnitude
-between those two.
+The initial policy uses a small shared archetype catalog for ordinary or sparse
+identities and reserves an individual draft for high distinctiveness scores
+with adequate evidence. Archetype choice is deterministic and does not use
+race, clan, or sex to infer acoustic qualities.
 
 ## Files
 
@@ -88,9 +97,11 @@ between those two.
 |---|---|
 | `vocabulary.json` | Every allowed value, its render phrase, its acoustic family, the selection rules, the mood presets, and the shared reference script. |
 | `schema.json` | Structural JSON Schema. Enum membership and the rules live in the vocabulary. |
-| `characters/<id>.json` | One character profile: selections plus an evidence record per field. Empty until the wiki pipeline exists. |
+| `characters/<id>.json` | Intentional character profiles; generated drafts remain under gitignored `data/blueprints/profiles/`. |
+| `archetypes/*.json` | Six shared synthetic profiles, all initially marked draft. |
 | `archive/characters/*.json` | Gitignored hand-written examples that proved the pipeline out. |
 | `tools/blueprint.py` | Validates a profile and renders the VoiceDesign instruct. |
+| `tools/blueprint_pipeline/` | Read-only inventory, dossiers, wiki, Jev, rules, archetypes, generation, review, and reporting components. |
 | `tools/voicebank/run.py` | Container-side renderer: reference, N sample lines, report, audition page. |
 | `scripts/voicebank.sh` | Host wrapper that runs it inside the `tts-qwen` image. |
 
@@ -146,32 +157,74 @@ Every non-null field carries an evidence record:
 The point is auditability: after 9,000 profiles, "why does this character sound
 like this" must have an answer that is not "the model felt like it".
 
-## What an agentic wiki pass must do
+## Phase 2 operations
 
-1. Read the wiki page and fill only fields the vocabulary offers.
-2. Set required fields; leave optional fields null rather than guessing.
-3. Attach an evidence record to every field it sets, with a quote when claiming
-   `explicit` or `supported_inference`.
-4. Keep identity emotional-free. Personality belongs to mood.
-5. Run `python3 tools/blueprint.py check <profile>` and fix every error before
-   returning the file.
-6. Never rename or translate the reference script.
-7. One profile per NPC id; list every speaker label that shares it in
-   `applies_to`.
-8. Rewritten `profile_version` when a value changes, so old audio stays
-   traceable to the voice that produced it.
+The inventory and dossier commands open SQLite read-only. `dialog_speakers`
+associations collapse aliases under one `npc_id`; identities with a voiced
+alias, ambiguous links, or a normalized-name collision are review-blocked.
+Unresolved labels remain review records and never become fabricated NPCs.
+Only `dialogue` and `narration` rows enter the dossier. Statistics are
+deterministic, and sample selection is stable across runs.
 
-And never:
+```bash
+# Optional localized Lumina metadata. The command prints JSON and does not
+# modify the dialogue DB; store the export outside the repository/data tree.
+dotnet run --project tools/xivdata -- npc-index --lang en > /tmp/game-npc-index.json
 
-- derive pitch or timbre from race, height, build, occupation, or personality;
-- turn a famous temper, cheerfulness, or drunkenness into an identity clause;
-- invent an age or accent that the source does not support;
-- add a mood outside `allowed_presets`;
-- write free-form values, synonyms, or extra adjectives into the profile.
+python3 tools/blueprint_pipeline/cli.py inventory --game-index /tmp/game-npc-index.json
+python3 tools/blueprint_pipeline/cli.py dossiers --game-index /tmp/game-npc-index.json --limit 25
+python3 tools/blueprint_pipeline/cli.py enrich --allow-network --limit 25
+python3 tools/blueprint_pipeline/cli.py classify --provider rules --limit 25
 
-Race and sex are allowed to drive `presentation` and `perceived_age`. Body and
-role are allowed to suggest choices only as `creative_selection`, visibly
-labelled as design, not as fact.
+# Jev is opt-in. Configure the key in the environment and begin with a pilot.
+export TYPESAFE_API_KEY
+python3 tools/blueprint_pipeline/cli.py classify --provider jev --allow-network --limit 25
+
+python3 tools/blueprint_pipeline/cli.py inspect npc_1003075 --review-report
+python3 tools/blueprint_pipeline/cli.py validate
+python3 tools/blueprint_pipeline/cli.py report
+```
+
+Wiki lookups and Jev calls require `--allow-network`; Jev defaults to at most 25
+records per invocation. Larger batches require `--allow-bulk`, and the CLI
+prints request count, approximate input tokens, and a rough cost estimate
+before sending. `--resume` reuses matching dossier/config/model results;
+`--force` reruns classification and explicitly permits a generated result to
+replace a manually reviewed profile. API credentials are read from the named
+environment variable and never saved in a profile or cache.
+
+Jev uses TypeSafe System One with `jev-latest` by default. Its `choice`,
+`score`, and `noul` answers are retained with probability distributions,
+confidence where provided, model version, token usage, and input/config hashes.
+Noul is a yes-probability and has no separate confidence field. Thresholds are
+initial project settings, not accuracy guarantees; low-confidence decisions
+route to review or an archetype. Jev reads text/JSON only: it cannot hear
+audition clips or supply citations. Factual citations come from the separate
+wiki/game-data evidence collector.
+
+Game race, clan, and sex are identity metadata, never acoustic evidence.
+Rules-only presentation defaults to neutral. Every non-null acoustic field is
+marked `explicit`, `supported_inference`, `creative_selection`, or `default`;
+synthetic choices do not claim what a nonexistent original actor sounded like.
+Speech-style measurements and classifications are stored separately and do
+not enter the acoustic identity prompt. The neutral reference script remains
+unchanged.
+
+Use the review command to preserve a human audit trail:
+
+```bash
+python3 tools/blueprint_pipeline/cli.py review edit npc_123456 --by reviewer \
+  --changes /tmp/voice-edits.json
+python3 tools/blueprint_pipeline/cli.py review audition archetype_neutral_clear_mid \
+  --by reviewer --reference /path/to/audition.wav --seed 20261101
+python3 tools/blueprint_pipeline/cli.py review approve archetype_neutral_clear_mid \
+  --by reviewer --archon neutral
+```
+
+An identity edit retires old pins into the history and returns the profile to
+`ready_for_audition`. Only human review can set `approved`; generation lookup
+reports a profile as usable only after that approval. Draft profiles and
+assignment registries are immutable snapshots under gitignored `data/`.
 
 ## Archons, not per-line moods
 

@@ -1,0 +1,95 @@
+{
+  "schema_version": "1.1",
+  "profile_version": 1,
+  "profile_kind": "archetype",
+  "character": {
+    "id": "archetype_neutral_silvery_mid_high",
+    "name": "Archetype Neutral Silvery Mid High",
+    "npc_id": null,
+    "race": null,
+    "clan": null,
+    "sex": "unknown",
+    "lore_age": null,
+    "role": null,
+    "source_url": "project:blueprints/archetypes",
+    "applies_to": []
+  },
+  "identity": {
+    "presentation": "neutral",
+    "perceived_age": null,
+    "pitch": "mid_high",
+    "pitch_range": null,
+    "timbre_primary": "silvery",
+    "timbre_secondary": null,
+    "resonance": null,
+    "articulation": "crisp",
+    "speaking_pace": "moderate",
+    "intonation": "natural",
+    "accent": {
+      "profile": "general_british_english",
+      "strength": "light"
+    },
+    "distinctive_traits": []
+  },
+  "speech_style": null,
+  "speech_style_analysis": null,
+  "classification": null,
+  "lifecycle": {
+    "status": "draft",
+    "classification_confidence": null,
+    "manual_override": false,
+    "approval": null
+  },
+  "pack_archon": "neutral",
+  "evidence": {
+    "presentation": {
+      "level": "creative_selection",
+      "field": "presentation",
+      "note": "Project-designed synthetic archetype; this is not a claim about an original recording."
+    },
+    "pitch": {
+      "level": "creative_selection",
+      "field": "pitch",
+      "note": "Project-designed synthetic archetype; this is not a claim about an original recording."
+    },
+    "timbre_primary": {
+      "level": "creative_selection",
+      "field": "timbre_primary",
+      "note": "Project-designed synthetic archetype; this is not a claim about an original recording."
+    },
+    "articulation": {
+      "level": "creative_selection",
+      "field": "articulation",
+      "note": "Project-designed synthetic archetype; this is not a claim about an original recording."
+    },
+    "speaking_pace": {
+      "level": "creative_selection",
+      "field": "speaking_pace",
+      "note": "Project-designed synthetic archetype; this is not a claim about an original recording."
+    },
+    "intonation": {
+      "level": "creative_selection",
+      "field": "intonation",
+      "note": "Project-designed synthetic archetype; this is not a claim about an original recording."
+    },
+    "accent": {
+      "level": "default",
+      "field": "accent",
+      "note": "Project-wide accent fallback; this is not source evidence."
+    }
+  },
+  "qc": {
+    "reference_duration_ok": false,
+    "reference_transcript_verified": false,
+    "no_reference_leak": false,
+    "identity_approved": false,
+    "no_drift": false
+  },
+  "notes": "Shared synthetic VoiceDesign archetype. Draft until a human auditions a reference clip and records approval.",
+  "archetype_metadata": {
+    "catalog_version": "1.0",
+    "design_reason": "Lighter and brighter neutral option, with clearly shaped consonants.",
+    "audition_status": "draft"
+  },
+  "manual_history": []
+}

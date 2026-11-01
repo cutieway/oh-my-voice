@@ -63,6 +63,9 @@ internal static class Program
         if (args.Length > 0 && args[0].Equals("migrate", StringComparison.OrdinalIgnoreCase))
             return MigrateCommand.Run(args[1..]);
 
+        if (args.Length > 0 && args[0].Equals("npc-index", StringComparison.OrdinalIgnoreCase))
+            return NpcIndexCommand.Run(args[1..]);
+
         if (args.Length > 0 && args[0].Equals("pin", StringComparison.OrdinalIgnoreCase))
         {
             Console.WriteLine(Sanitizer.Pin);
@@ -286,6 +289,7 @@ internal static class Program
 
             Usage:
               xivdata export --db FILE --speaker ID [--out FILE]
+              xivdata npc-index [--sqpack DIR] [--lang en|de|fr|ja] > npc-index.json
               xivdata pin
               xivdata [--sqpack DIR] [--out DIR] [--db FILE] [--source LIST]
                       [--limit N] [--sheet FILTER] [--speaker TOKEN]
@@ -313,7 +317,7 @@ internal static class Program
               --extract writes SCD/WAV for cutscene rows that have game audio.
               The DB is the source of truth; dialogue.csv is cutscene-only.
 
-            Commands: harvest (default), export, migrate, pin
+            Commands: harvest (default), export, npc-index, migrate, pin
             Tables/views:
               dialogs, dialog_speakers, speakers, harvest_runs
               v_generation_queue, v_generation_candidates, v_speaker_workload,

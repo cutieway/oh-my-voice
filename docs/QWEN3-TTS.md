@@ -274,28 +274,67 @@ unresolved the run warns and fingerprints use `unresolved:<repo-id>`.
 ### Synthetic voices
 
 Unvoiced NPCs have no source speaker, so there is nothing valid to average.
-The evaluation path is VoiceDesign -> Base ICL: generate one reference clip per
-character from a blueprint, then clone with
-`create_voice_clone_prompt(..., x_vector_only_mode=False)`.
+Phase 2 now implements the source-to-draft pipeline and its audition handoff:
+read-only SQLite inventory, canonical identity gates, dialogue dossiers,
+optional cached MediaWiki evidence, offline rules or opt-in Jev classification,
+shared synthetic archetypes, generated drafts, and human review lifecycle.
+It stops before the runtime plugin or pack-generation path; no Phase 1 code was
+changed.
 
-Blueprints live in [`../blueprints/`](../blueprints/README.md): a closed
-vocabulary, a per-character selection file with evidence, and a renderer.
-`python3 tools/blueprint.py render <id>` prints the VoiceDesign instruct and
-`./scripts/voicebank.sh <id>` renders the reference plus sample lines into
-`data/samples/voicebank/<run>/` for audition. This is not yet wired into
-`generate.py` or pack storage.
+The evaluation path remains VoiceDesign -> Base ICL: render one standard
+reference clip for an approved blueprint, then clone with
+`create_voice_clone_prompt(..., x_vector_only_mode=False)`. The renderer is
+`tools/blueprint.py`; the classification code is under
+`tools/blueprint_pipeline/`.
+
+```bash
+# Optional canonical race/clan metadata from installed Lumina sheets.
+dotnet run --project tools/xivdata -- npc-index --lang en > /tmp/game-npc-index.json
+python3 tools/blueprint_pipeline/cli.py inventory --game-index /tmp/game-npc-index.json
+python3 tools/blueprint_pipeline/cli.py dossiers --game-index /tmp/game-npc-index.json --limit 25
+python3 tools/blueprint_pipeline/cli.py classify --provider rules --limit 25
+
+# Network use is explicit. Set TYPESAFE_API_KEY in the shell for Jev.
+python3 tools/blueprint_pipeline/cli.py enrich --allow-network --limit 25
+python3 tools/blueprint_pipeline/cli.py classify --provider jev --allow-network --limit 25
+
+python3 tools/blueprint.py render archetype_neutral_clear_mid
+./scripts/voicebank.sh archetype_neutral_clear_mid
+```
+
+Wiki enrichment and Jev require `--allow-network`; rules need no credentials.
+The Jev preflight prints a workload and approximate token-cost estimate, and
+requests are capped at 25 dossiers unless `--allow-bulk` is supplied. Jev
+accepts text/structured state only: it cannot hear WAV files and does not
+provide citations. The evidence collector records wiki revision IDs, URLs,
+and quotes independently. Jev's probabilities and confidence are useful
+routing signals, not proof; low-confidence choices go to review or a shared
+archetype.
+
+The six initial archetypes under `blueprints/archetypes/` are deliberately
+hand-curated drafts, not approved voices. Generated character profiles,
+dossiers, classification results, wiki responses, and assignment registries
+live under gitignored `data/blueprints/`. Use `cli.py inspect <id>
+--review-report` to see the dossier, evidence, distributions, assignment, and
+rendered neutral instruction. Run `./scripts/voicebank.sh <profile-id>` to
+audition a draft. `cli.py review audition` hashes a valid reference WAV and
+`cli.py review approve` records the human approval. Assignments are not usable
+for future generation until the resolved profile is human-approved.
 
 Mood references are archons: one clip per character, chosen once as
 `pack_archon` and used for every line. Listening on 2026-11-01 found the archons
 individually excellent but too different from each other to swap per dialogue
 line. Neutral is the pack-wide basis.
 
-Both mechanical links are done: a blueprint renders to an approved reference
-clip, and that clip clones dialogue lines deterministically — five draws of the
-same seed produced byte-identical audio. What is **not** built is the step that
-turns a wiki page or any other source into a blueprint; profiles are still
-authored by hand. `blueprints/characters/` is therefore empty and the hand-made
-examples sit in a gitignored `blueprints/archive/`.
+The prior reference and ICL pipeline remains the tested mechanical path. The
+new classification pipeline has been exercised on a three-character local
+rules pilot, which assigned candidates to shared draft archetypes. A single
+archetype audition rendered `archetype_neutral_clear_mid`: its reference is
+11.28 seconds and one ICL sample is 5.84 seconds, under
+`data/samples/voicebank/20261101T131313Z/`. This verifies the rendering path;
+the draft archetype still needs a human listen and approval. Synthetic
+blueprints are not yet consumed by `generate.py` or installed in plugin packs;
+that remains a later integration step requiring human-approved references.
 
 `tools/xvector/build_xvectors.py` is the recovered average-speaker method from
 the Sphene experiment. It is not training and not generation:

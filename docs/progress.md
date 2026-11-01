@@ -1,7 +1,7 @@
 # Progress
 
 Snapshot of `data/dialogue.db` (English, harvest 2026-10-21) after linking the
-packs in `data/out/`, on 2026-10-31. Refresh the tables before committing when
+packs in `data/out/`, on 2026-11-01. Refresh the tables before committing when
 the database, generation output, or bucket definitions change:
 
 ```bash
@@ -58,15 +58,16 @@ have unvoiced lines; the other 345 are fully voiced by SE.
 
 | Measure | Done | Total | Percent | Left |
 |---|---:|---:|---:|---:|
-| Phase 1: cloned | 29,394 | 48,200 | 61.0% | 18,806 |
+| Phase 1: cloned | 30,880 | 48,200 | 64.1% | 17,320 |
 | Phase 2: synthetic | 0 | 166,559 | 0.0% | 166,559 |
-| Project lines (1+2) | 29,394 | 214,759 | 13.7% | 185,365 |
-| All dialogue (incl. SE VO) | 54,499 | 239,864 | 22.7% | 185,365 |
+| Project lines (1+2) | 30,880 | 214,759 | 14.4% | 183,879 |
+| All dialogue (incl. SE VO) | 55,985 | 239,864 | 23.3% | 183,879 |
 
-- **Phase 1** is the current cloned-voice work. 29,394 unique lines are
-  generated (`v_generation_candidates`), 18,806 are queued, and every speaker
+- **Phase 1** is the current cloned-voice work. 30,880 unique lines are
+  generated (`v_generation_candidates`), 17,320 are queued, and every speaker
   with remaining work has an x-vector.
-- **Phase 2** has not started. Synthetic speakers are absent from
+- **Phase 2** classification and audition handoff are implemented. Audio
+  generation remains at 0 lines; synthetic speakers are absent from
   `v_generation_candidates` by design because it requires `has_scd = 1`.
 - **Project lines** excludes the 25,105 lines already voiced by SE. It is the
   real remaining workload for the project.
@@ -109,6 +110,27 @@ Unique IDs overlap across sources, so only the overall total is additive.
 - Only 69 labels / 380 rows share an NPC id or normalized name with a voiced
   label; the rest need a genuinely new voice assignment.
 
+### Canonical synthetic identity audit
+
+The Phase 2 inventory also joins every dialogue identity association and the
+read-only Lumina NPC index. On 2026-11-01 it found:
+
+| Inventory measure | Count |
+|---|---:|
+| Unvoiced speaker labels in the database | 9,288 |
+| Canonical NPC groups with at least one unvoiced label | 4,202 |
+| Eligible synthetic NPC identities | 4,057 |
+| Identity groups routed to review | 145 |
+| Unresolved labels routed to review | 4,632 |
+
+The groups are not interchangeable with labels. Review groups include voiced
+aliases, ambiguous speaker links, and normalized-name collisions. Unresolved
+labels stay labels in the review queue; the pipeline does not invent NPC IDs
+or named character profiles for them. The game index exported 30,989
+`ENpcResident` rows; race and tribe names remain null where Lumina has no
+matching base-sheet metadata. See [blueprints/README.md](../blueprints/README.md)
+for the inventory and classifier commands.
+
 ## Phase 3: speakerless text
 
 128,332 rows have no speaker and no `voice_line_id`, so the current pack format
@@ -141,7 +163,7 @@ ID, so this records scope rather than work in progress.
   sentences, 3 skipped).
 - Database unique IDs: 239,867 raw; 239,864 planned.
 - Referenced labels with unvoiced lines: 322 of 667.
-- Referenced labels with queued lines: 302.
+- Referenced labels with queued lines: 297.
 
 ## Caveats
 

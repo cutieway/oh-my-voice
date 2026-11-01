@@ -2,7 +2,7 @@
 # Render blueprint references and one cloned test line per voice.
 #
 #   ./scripts/voicebank.sh gerolt godbert        # two blueprints
-#   ./scripts/voicebank.sh                       # every blueprint
+#   ./scripts/voicebank.sh                       # every character + archetype
 #   ./scripts/voicebank.sh --moods neutral nashu_mhakaracca
 #
 # Each run writes data/samples/voicebank/<utc timestamp>/, which holds the
@@ -24,8 +24,8 @@ usage() {
 usage: ./scripts/voicebank.sh [--moods neutral|all|neutral,happy] [--samples N]
                              [--seeds N] [--out DIR] [blueprint ...]
 
-Blueprint ids are file names under blueprints/characters (or explicit paths).
-The default is --moods neutral: the identity prompt alone, no emotion.
+Blueprint ids are file names under blueprints/characters and blueprints/archetypes
+(or explicit paths). The default is --moods neutral: identity prompt alone.
 Pass --moods all to render every mood the blueprint declares.
 --seeds N draws N references per archon. With --repeat-seed every draw reuses
 the SAME seed, which is a repeatability test; without it each draw advances the
@@ -35,6 +35,7 @@ EOF
 
 moods="neutral"
 out=""
+explicit_out=0
 samples=3
 seeds=1
 repeat="0"
@@ -45,7 +46,7 @@ while [[ $# -gt 0 ]]; do
     --samples) samples="${2:-3}"; shift 2 ;;
     --seeds) seeds="${2:-1}"; shift 2 ;;
     --repeat-seed) repeat=1; shift ;;
-    --out) out="${2:-}"; shift 2 ;;
+    --out) out="${2:-}"; explicit_out=1; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) targets+=("$1"); shift ;;
   esac
@@ -56,12 +57,35 @@ command -v docker >/dev/null 2>&1 || { echo "docker not found" >&2; exit 1; }
 [[ -f "$BASE/model.safetensors" ]] || { echo "missing base model: $BASE" >&2; exit 1; }
 
 if [[ ${#targets[@]} -eq 0 ]]; then
-  mapfile -t targets < <(find "$ROOT/blueprints/characters" -maxdepth 1 -name '*.json' -printf '%f\n' | sed 's/\.json$//' | sort)
+  mapfile -t targets < <(
+    for dir in "$ROOT/blueprints/characters" "$ROOT/blueprints/archetypes"; do
+      for path in "$dir"/*.json; do
+        [[ -f "$path" ]] || continue
+        basename "${path%.json}"
+      done
+    done | sort -u
+  )
 fi
 [[ ${#targets[@]} -gt 0 ]] || { echo "no blueprints found" >&2; exit 1; }
 
-OUT="${out:-$SAMPLES/$(date -u +%Y%m%dT%H%M%SZ)}"
-mkdir -p "$OUT" "$CACHE"
+if [[ "$explicit_out" == "1" ]]; then
+  OUT="$out"
+  [[ "$OUT" = /* ]] || OUT="$PWD/$OUT"
+  [[ ! -e "$OUT" ]] || { echo "refusing to reuse existing output directory: $OUT" >&2; exit 1; }
+  mkdir -p "$(dirname "$OUT")"
+  mkdir "$OUT"
+else
+  mkdir -p "$SAMPLES"
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  OUT="$SAMPLES/$stamp"
+  suffix=1
+  while [[ -e "$OUT" ]]; do
+    OUT="$SAMPLES/$stamp.$suffix"
+    suffix=$((suffix + 1))
+  done
+  mkdir "$OUT"
+fi
+mkdir -p "$CACHE"
 PLANS="$(mktemp -d)"
 trap 'rm -rf "$PLANS"' EXIT
 

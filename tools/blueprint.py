@@ -26,6 +26,9 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DEFAULT_VOCABULARY = ROOT / "blueprints" / "vocabulary.json"
 DEFAULT_CHARACTERS = ROOT / "blueprints" / "characters"
+DEFAULT_ARCHETYPES = ROOT / "blueprints" / "archetypes"
+DEFAULT_GENERATED = ROOT / "data" / "blueprints" / "profiles"
+LEGACY_VOCABULARY = ROOT / "blueprints" / "migrations" / "vocabulary-1.0.json"
 
 REQUIRED_IDENTITY = (
     "presentation",
@@ -80,6 +83,14 @@ def load_json(path: pathlib.Path):
 
 def load_vocabulary(path: pathlib.Path = DEFAULT_VOCABULARY) -> dict:
     return load_json(path)
+
+
+def vocabulary_for_profile(profile: dict, fallback: dict | None = None) -> dict:
+    """Keep schema 1.0 meaning pinned to its recorded vocabulary."""
+    version = profile.get("schema_version")
+    if version == "1.0" and LEGACY_VOCABULARY.is_file():
+        return load_vocabulary(LEGACY_VOCABULARY)
+    return fallback or load_vocabulary()
 
 
 def _values(vocab: dict, field: str) -> dict:
@@ -212,6 +223,8 @@ def render_instructs(profile: dict, vocab: dict) -> dict:
 
 
 def validate_profile(profile: dict, vocab: dict, name: str = "<profile>") -> list[str]:
+    profile_vocab = vocabulary_for_profile(profile, vocab)
+    vocab = profile_vocab
     errors: list[str] = []
 
     def err(message: str) -> None:
@@ -219,6 +232,11 @@ def validate_profile(profile: dict, vocab: dict, name: str = "<profile>") -> lis
 
     if profile.get("schema_version") != vocab["schema_version"]:
         err(f"schema_version must be {vocab['schema_version']!r}")
+    if profile.get("schema_version") not in {"1.0", "1.1"}:
+        err("schema_version must be a supported profile version (1.0 or 1.1)")
+    is_v11 = profile.get("schema_version") == "1.1"
+    if is_v11 and profile.get("profile_kind") not in {"character", "archetype"}:
+        err("profile_kind must be character or archetype")
     version = profile.get("profile_version")
     if not isinstance(version, int) or version < 1:
         err("profile_version must be a positive integer")
@@ -316,6 +334,70 @@ def validate_profile(profile: dict, vocab: dict, name: str = "<profile>") -> lis
             err(f"evidence.{field} is missing")
     if accent is not None and "accent" not in evidence:
         err("evidence.accent is missing")
+
+    # Textual speech style is a separate, closed classification. It never
+    # reaches render_identity and therefore cannot change acoustic identity.
+    if is_v11 and profile.get("speech_style") is not None:
+        style = profile.get("speech_style") or {}
+        dimensions = vocab.get("speech_style", {}).get("dimensions", {})
+        for field, value in style.items():
+            if field not in dimensions:
+                err(f"speech_style.{field} is not in the vocabulary")
+                continue
+            if value is None:
+                continue
+            allowed = dimensions[field]["values"]
+            values = value if isinstance(value, list) else [value]
+            for item in values:
+                if item not in allowed:
+                    err(f"speech_style.{field} = {item!r} is not in the vocabulary")
+            if field == "speech_habits":
+                if len(values) > dimensions[field].get("max_items", 5):
+                    err("speech_style.speech_habits has too many values")
+                if len(set(values)) != len(values):
+                    err("speech_style.speech_habits contains duplicates")
+
+    if is_v11:
+        lifecycle = profile.get("lifecycle") or {}
+        allowed_statuses = set(vocab.get("profile_lifecycle", {}).get("statuses", []))
+        status = lifecycle.get("status")
+        if status not in allowed_statuses:
+            err(f"lifecycle.status {status!r} is not valid")
+        confidence = lifecycle.get("classification_confidence")
+        if confidence is not None and (
+            isinstance(confidence, bool)
+            or not isinstance(confidence, (int, float))
+            or not 0 <= confidence <= 1
+        ):
+            err("lifecycle.classification_confidence must be null or between 0 and 1")
+        if not isinstance(lifecycle.get("manual_override"), bool):
+            err("lifecycle.manual_override must be boolean")
+        approval = lifecycle.get("approval")
+        if status == "approved":
+            if not isinstance(approval, dict):
+                err("approved profiles require human lifecycle.approval details")
+            else:
+                for field in ("approved_by", "approved_at", "reference_sha256"):
+                    if not approval.get(field):
+                        err(f"lifecycle.approval.{field} is required for approval")
+                archons = profile.get("archon_pin") or {}
+                hashes = {item.get("reference_sha256") for item in archons.values() if isinstance(item, dict)}
+                if approval.get("reference_sha256") not in hashes:
+                    err("approved reference_sha256 must match a pinned archon reference")
+        elif approval is not None:
+            err("unapproved profiles may not carry human lifecycle.approval details")
+        if profile.get("profile_kind") == "archetype":
+            if status == "approved" and not approval:
+                err("an archetype cannot be marked approved without human audition approval")
+            metadata = profile.get("archetype_metadata") or {}
+            if metadata.get("audition_status") == "approved" and status != "approved":
+                err("archetype_metadata cannot claim approval before lifecycle approval")
+        if lifecycle.get("manual_override") and not any(
+            row.get("action") in {"edit", "audition", "approve", "reject"}
+            for row in profile.get("manual_history", [])
+            if isinstance(row, dict)
+        ):
+            err("manual_override requires a human action in manual_history")
 
     for field, values in EVIDENCE_SENSITIVE.items():
         current = identity.get(field)
@@ -431,16 +513,44 @@ def resolve_profile(target: str) -> pathlib.Path:
     path = pathlib.Path(target)
     if path.is_file():
         return path
-    candidate = DEFAULT_CHARACTERS / f"{target}.json"
-    if candidate.is_file():
-        return candidate
-    raise BlueprintError(f"no blueprint named {target!r} ({candidate} does not exist)")
+    roots = (DEFAULT_CHARACTERS, DEFAULT_ARCHETYPES, DEFAULT_GENERATED)
+    matches = []
+    for root in roots:
+        candidate = root / f"{target}.json"
+        if candidate.is_file():
+            profile_paths = [candidate]
+        else:
+            profile_paths = []
+        if root.exists():
+            profile_paths.extend(sorted(root.glob("*.json")))
+        for profile_path in set(profile_paths):
+            try:
+                profile = load_json(profile_path)
+            except (OSError, json.JSONDecodeError):
+                continue
+            if profile.get("character", {}).get("id") == target:
+                history = profile.get("manual_history") or []
+                last_human_action = max(
+                    (str(row.get("timestamp") or "") for row in history if isinstance(row, dict)),
+                    default="",
+                )
+                timestamp = last_human_action or str(
+                    (profile.get("classification") or {}).get("timestamp") or ""
+                )
+                matches.append((timestamp, int(profile.get("profile_version", 1)), profile_path.stat().st_mtime_ns, profile_path))
+    if matches:
+        matches.sort(key=lambda row: row[:3])
+        return matches[-1][3]
+    raise BlueprintError(f"no blueprint named {target!r} in characters, archetypes, or generated profiles")
 
 
 def load_profiles(targets: list[str]) -> list[pathlib.Path]:
     if targets:
         return [resolve_profile(target) for target in targets]
-    return sorted(DEFAULT_CHARACTERS.glob("*.json"))
+    return sorted(
+        list(DEFAULT_CHARACTERS.glob("*.json"))
+        + list(DEFAULT_ARCHETYPES.glob("*.json"))
+    )
 
 
 # --------------------------------------------------------------------------
@@ -463,8 +573,8 @@ def cmd_check(args) -> int:
             print(f"{path}: invalid JSON: {exc}", file=sys.stderr)
             failures += 1
             continue
-        errors = validate_profile(profile, vocab, path.stem)
-        if path.stem != profile.get("character", {}).get("id"):
+        errors = validate_profile(profile, vocab, profile.get("character", {}).get("id", path.stem))
+        if path.parent in {DEFAULT_CHARACTERS, DEFAULT_ARCHETYPES} and path.stem != profile.get("character", {}).get("id"):
             errors.append(f"{path.stem}: file name does not match character.id")
         profiles.append(profile)
         if errors:
@@ -486,6 +596,7 @@ def cmd_check(args) -> int:
 def cmd_render(args) -> int:
     vocab = load_vocabulary(args.vocabulary)
     profile = load_json(resolve_profile(args.target))
+    vocab = vocabulary_for_profile(profile, vocab)
     errors = validate_profile(profile, vocab, profile.get("character", {}).get("id", args.target))
     if errors:
         for error in errors:
@@ -507,6 +618,7 @@ def cmd_render(args) -> int:
 def cmd_plan(args) -> int:
     vocab = load_vocabulary(args.vocabulary)
     profile = load_json(resolve_profile(args.target))
+    vocab = vocabulary_for_profile(profile, vocab)
     errors = validate_profile(profile, vocab, profile.get("character", {}).get("id", args.target))
     if errors:
         for error in errors:
@@ -518,10 +630,59 @@ def cmd_plan(args) -> int:
         out = pathlib.Path(args.out)
         out.mkdir(parents=True, exist_ok=True)
         path = out / f"{plan['profile_id']}.plan.json"
-        path.write_text(text, encoding="utf-8")
+        if path.exists():
+            if path.read_text(encoding="utf-8") != text:
+                raise BlueprintError(f"refusing to overwrite existing plan: {path}")
+        else:
+            path.write_text(text, encoding="utf-8")
         print(path)
     else:
         print(text, end="")
+    return 0
+
+
+def migrate_profile_1_0(profile: dict) -> dict:
+    if profile.get("schema_version") != "1.0":
+        raise BlueprintError("only schema 1.0 profiles can use this migration")
+    migrated = json.loads(json.dumps(profile))
+    migrated["schema_version"] = "1.1"
+    migrated["profile_kind"] = "character"
+    migrated["speech_style"] = None
+    migrated["speech_style_analysis"] = None
+    migrated["classification"] = {
+        "provider": "schema-migration",
+        "model_id": "not-classified",
+        "dossier_hash": "",
+        "configuration_hash": "",
+        "source_audit_hash": "",
+        "timestamp": "",
+    }
+    migrated["lifecycle"] = {
+        "status": "draft",
+        "classification_confidence": None,
+        "manual_override": False,
+        "approval": None,
+    }
+    # A schema 1.0 QC flag cannot prove who approved the reference. Preserve
+    # every pin, but require a fresh human approval in the new lifecycle.
+    if isinstance(migrated.get("qc"), dict):
+        migrated["qc"]["identity_approved"] = False
+    note = "Explicitly migrated from schema 1.0; identity values and reference text were preserved without reinterpretation. Approval must be recorded again by a human."
+    migrated["notes"] = (migrated.get("notes", "").strip() + "\n\n" + note).strip()
+    return migrated
+
+
+def cmd_migrate(args) -> int:
+    from blueprint_pipeline.cache import write_immutable_json
+
+    source_path = resolve_profile(args.target)
+    profile = load_json(source_path)
+    migrated = migrate_profile_1_0(profile)
+    destination = pathlib.Path(args.out) if args.out else (
+        ROOT / "data" / "blueprints" / "profiles" / f"{profile['character']['id']}.json"
+    )
+    written = write_immutable_json(destination, migrated)
+    print(written)
     return 0
 
 
@@ -545,6 +706,11 @@ def main(argv: list[str] | None = None) -> int:
     plan.add_argument("target")
     plan.add_argument("--out", type=pathlib.Path)
     plan.set_defaults(func=cmd_plan)
+
+    migrate = sub.add_parser("migrate-1.0", help="explicitly migrate one schema 1.0 profile to 1.1")
+    migrate.add_argument("target")
+    migrate.add_argument("--out", type=pathlib.Path)
+    migrate.set_defaults(func=cmd_migrate)
 
     args = parser.parse_args(argv)
     try:

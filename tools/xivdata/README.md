@@ -17,6 +17,12 @@ The runtime plugin never reads this DB. A pack is exported from it later.
 ## Quick start
 
 ```bash
+# Export canonical NPC, race, tribe/clan, and sex metadata as JSON. This is
+# read-only and does not open or modify dialogue.db.
+dotnet run --project tools/xivdata -- npc-index \
+  --sqpack "$HOME/Public/xlcore/ffxiv/game/sqpack" --lang en \
+  > /tmp/game-npc-index.json
+
 # Full corpus, one DB. This is the normal command.
 dotnet run --project tools/xivdata -- \
   --source all \
@@ -45,6 +51,12 @@ dotnet run --project tools/xivdata -- \
 Defaults: `--sqpack ~/Public/xlcore/ffxiv/game/sqpack`,
 `--db ./data/dialogue.db`, `--out ./xivdata-out`,
 `--xvectors ./data/xvectors`, `--lang en`, `--source cutscene`.
+
+`npc-index` reads `ENpcResident`, `ENpcBase`, `Race`, and `Tribe` through
+Lumina and prints a JSON `npcs` array with row ID, localized name, race ID/name,
+tribe ID/name, and game gender. Missing sheet links remain null/unknown. The
+export is optional; the blueprint pipeline can run without it and does not
+infer race or clan names from numeric IDs.
 
 ## Sources
 
