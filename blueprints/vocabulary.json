@@ -641,7 +641,8 @@
         "pace": "normal",
         "pitch_movement": "natural",
         "articulation": "crisp",
-        "rhythm": "conversational"
+        "rhythm": "conversational",
+        "classification_description": "No distinct default register: ordinary, unforced delivery. Choose this only when the character genuinely reads as neutral; choose none when the evidence is too thin to tell the difference."
       },
       "calm": {
         "phrase": "settled calm",
@@ -651,7 +652,8 @@
         "pace": "measured",
         "pitch_movement": "restrained",
         "articulation": "softened",
-        "rhythm": "even"
+        "rhythm": "even",
+        "classification_description": "Habitually settled and unhurried, with steady volume even when the scene is tense."
       },
       "happy": {
         "phrase": "warm happiness",
@@ -661,7 +663,8 @@
         "pace": "brisk",
         "pitch_movement": "expressive",
         "articulation": "fluid",
-        "rhythm": "flowing"
+        "rhythm": "flowing",
+        "classification_description": "Habitually warm and upbeat; the good humour is part of the character, not one reaction."
       },
       "sad": {
         "phrase": "quiet sadness",
@@ -671,7 +674,8 @@
         "pace": "slow",
         "pitch_movement": "restrained",
         "articulation": "softened",
-        "rhythm": "even"
+        "rhythm": "even",
+        "classification_description": "Habitually subdued and low-energy; a persistent melancholy in ordinary talk."
       },
       "angry": {
         "phrase": "controlled anger",
@@ -681,7 +685,8 @@
         "pace": "measured",
         "pitch_movement": "restrained",
         "articulation": "firm",
-        "rhythm": "staccato"
+        "rhythm": "staccato",
+        "classification_description": "Habitually forceful and clipped; irritation or command is the baseline, not an outburst."
       },
       "fearful": {
         "phrase": "nervous fear",
@@ -691,7 +696,8 @@
         "pace": "rushed",
         "pitch_movement": "unstable",
         "articulation": "strained",
-        "rhythm": "erratic"
+        "rhythm": "erratic",
+        "classification_description": "Habitually nervous and rushed; anxiety shows in ordinary lines, not only in danger."
       },
       "secretive": {
         "phrase": "conspiratorial secrecy",
@@ -701,7 +707,8 @@
         "pace": "slow",
         "pitch_movement": "restrained",
         "articulation": "softened",
-        "rhythm": "hesitant"
+        "rhythm": "hesitant",
+        "classification_description": "Habitually hushed and conspiratorial; speaks as if someone may be listening."
       }
     },
     "allowed_presets": [
@@ -742,6 +749,10 @@
         "ref_f0",
         "pinned_on"
       ]
+    },
+    "archon_none": {
+      "render": "none",
+      "classification_description": "Not enough evidence for any default emotional register. Packs the neutral archon."
     }
   },
   "render": {
@@ -1056,7 +1067,34 @@
         "honorifics_min": 3,
         "question_ratio_min": 0.35,
         "exclamations_min": 5
-      }
+      },
+      "dialect_terms": [
+        "aye",
+        "nay",
+        "ye",
+        "yer",
+        "fer",
+        "nae",
+        "dinnae",
+        "cannae",
+        "willnae",
+        "'tis",
+        "thou",
+        "thee",
+        "thy",
+        "thine",
+        "mayhap",
+        "perchance",
+        "forsooth",
+        "verily",
+        "ere",
+        "whence",
+        "hither",
+        "thither",
+        "pray",
+        "'pon"
+      ],
+      "dialect_note": "Dialect and archaic address forms. They weight which lines are sampled and are counted for the model, but they are deliberately NOT part of the formal/colloquial rate: 'ye' and 'pray' are archaic, not informal, and folding them into the register measurement would corrupt it."
     },
     "measurement_rules": "All counters and rates are calculated from distinct voice_line_id samples. The interpretation is a deterministic rule mapping; retain measurements separately from interpretation."
   },
@@ -1095,31 +1133,6 @@
           "Strong, explicit voice description and substantial character-specific evidence justify an individual design."
         ]
       },
-      "speech_style.colloquialism": {
-        "type": "choice",
-        "instructions": "How often does the sampled dialogue use colloquial wording?",
-        "values": "speech_style.colloquialism"
-      },
-      "speech_style.register": {
-        "type": "choice",
-        "instructions": "Which register best describes the actual wording in the sampled dialogue?",
-        "values": "speech_style.register"
-      },
-      "speech_style.rhetorical_style": {
-        "type": "choice",
-        "instructions": "What rhetorical pattern is most representative of the sampled dialogue?",
-        "values": "speech_style.rhetorical_style"
-      },
-      "speech_style.sentence_complexity": {
-        "type": "choice",
-        "instructions": "How structurally complex are the sampled utterances? Judge the text only.",
-        "values": "speech_style.sentence_complexity"
-      },
-      "speech_style.vocabulary_complexity": {
-        "type": "choice",
-        "instructions": "How complex is the vocabulary in the sampled dialogue? Judge words, not the character’s intelligence or social class.",
-        "values": "speech_style.vocabulary_complexity"
-      },
       "voice_evidence_present": {
         "type": "noul",
         "instructions": "Does the dossier contain a source quote that explicitly describes an audible voice quality?",
@@ -1127,6 +1140,44 @@
           "true": "At least one attributed source quote describes an audible quality.",
           "false": "No source quote describes an audible voice quality."
         }
+      },
+      "mood.preset": {
+        "type": "choice",
+        "instructions": "Which single mood preset describes how this character sounds by DEFAULT across ordinary dialogue? Judge the baseline register, not the strongest scene. Choose none when the sampled lines do not show one consistent register or the volume is too small to tell; none is the correct answer far more often than not.",
+        "values": "moods.archon_choice"
+      },
+      "mood.justified": {
+        "type": "noul",
+        "instructions": "Does the evidence describe a default emotional register for this character, rather than the emotion of individual scenes?",
+        "criteria": {
+          "true": "Sampled lines and/or source quotes show one register persisting across ordinary, unrelated lines.",
+          "false": "The register varies by scene, the samples are too few, or only source quotes about personality exist without supporting lines."
+        }
+      },
+      "speech_style.register": {
+        "type": "choice",
+        "instructions": "Which register best describes the actual wording in the sampled dialogue?",
+        "values": "speech_style.register"
+      },
+      "speech_style.vocabulary_complexity": {
+        "type": "choice",
+        "instructions": "How complex is the vocabulary in the sampled dialogue? Judge words, not the character’s intelligence or social class.",
+        "values": "speech_style.vocabulary_complexity"
+      },
+      "speech_style.sentence_complexity": {
+        "type": "choice",
+        "instructions": "How structurally complex are the sampled utterances? Judge the text only.",
+        "values": "speech_style.sentence_complexity"
+      },
+      "speech_style.colloquialism": {
+        "type": "choice",
+        "instructions": "How often does the sampled dialogue use colloquial wording?",
+        "values": "speech_style.colloquialism"
+      },
+      "speech_style.rhetorical_style": {
+        "type": "choice",
+        "instructions": "What rhetorical pattern is most representative of the sampled dialogue?",
+        "values": "speech_style.rhetorical_style"
       }
     },
     "thresholds": {
@@ -1136,13 +1187,19 @@
       "noul_no": 0.25,
       "distinctiveness_score": 3.7,
       "min_dialogue_lines_for_individual": 50,
-      "min_dialogue_lines_for_review": 5
+      "min_dialogue_lines_for_review": 5,
+      "mood_confidence": 0.7,
+      "mood_probability": 0.5,
+      "min_dialogue_lines_for_mood": 120,
+      "min_dialogue_lines_for_style": 40
     },
     "confidence_policy": [
       "Choice confidence and probability are both retained; low confidence routes to review or a shared archetype.",
       "Noul returns a yes probability, not a separate confidence field; interpret it with the configured yes/no thresholds.",
       "A Score carries its distribution, expected score, and confidence. A high signal is not proof of correctness.",
-      "Thresholds are initial project settings and must be calibrated against manually reviewed examples."
+      "Thresholds are initial project settings and must be calibrated against manually reviewed examples.",
+      "A mood preset is accepted only when the choice clears the mood-specific confidence and probability thresholds, mood.justified is yes, and the dossier clears min_dialogue_lines_for_mood. Otherwise the pack archon is neutral.",
+      "Speech-style choices below min_dialogue_lines_for_style are recorded as insufficient rather than answered; the profile then carries no style and renders from identity alone."
     ],
     "acoustic_family_compatibility": "Primary and optional secondary timbres must use different acoustic families. Distinctive traits cannot repeat the selected primary family.",
     "speech_style_separation": "Speech-style results stay out of the identity prompt and never become acoustic evidence."

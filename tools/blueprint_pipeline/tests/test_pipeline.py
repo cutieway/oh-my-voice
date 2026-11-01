@@ -28,7 +28,12 @@ from blueprint_pipeline import evaluation
 from blueprint_pipeline.cache import object_hash, read_json
 from blueprint_pipeline.classifier import RulesProvider, classify_dossier
 from blueprint_pipeline.dossier import build_dossiers
-from blueprint_pipeline.dialogue import analyze_dialogue, select_representative_samples
+from blueprint_pipeline.dialogue import (
+    _length_bucket as length_bucket,
+    analyze_dialogue,
+    select_representative_samples,
+    split_speaker_label,
+)
 from blueprint_pipeline.casting import cast_identity
 from blueprint_pipeline.generator import build_individual_profile, validate_generated_profile
 from blueprint_pipeline.inventory import build_inventory
@@ -37,6 +42,7 @@ from blueprint_pipeline.jev import (
     JevProvider,
     JevResponseError,
     build_questions,
+    compact_state,
     validate_response,
 )
 from blueprint_pipeline.review import (
@@ -45,7 +51,7 @@ from blueprint_pipeline.review import (
     mark_auditioned,
     preserve_manual_profile,
 )
-from blueprint_pipeline.wiki import MediaWikiProvider, parse_infobox
+from blueprint_pipeline.wiki import MediaWikiProvider, parse_infobox, plain_text
 
 
 def make_database(path: Path) -> None:
@@ -219,6 +225,86 @@ class WikiTests(unittest.TestCase):
                 raise HTTPError(request.full_url, 304, "Not Modified", {}, io.BytesIO())
             cached = MediaWikiProvider("https://wiki.test/api.php", cache_dir=Path(tmp), opener=not_modified, sleeper=lambda _: None)
             self.assertEqual(cached._lookup_title("Example A")["pageid"], 7)
+
+    def test_npc_infobox_template_and_wikitext_prose_without_extracts(self):
+        # ffxiv.consolegameswiki.com has no TextExtracts extension: `extract` is
+        # empty for every page, and the infobox template is `{{NPC infobox`.
+        fields = parse_infobox(
+            "{{NPC infobox\n| name = Hildibrand\n| race = Hyur\n| clan = Midlander\n"
+            "| occupation = Inspector\n| description = Known for his calm demeanour.\n}}"
+        )
+        self.assertEqual(fields["race"], "Hyur")
+        self.assertEqual(fields["occupation"], "Inspector")
+        self.assertEqual(parse_infobox("{{Infobox character\n| race = Lalafell\n}}")["race"], "Lalafell")
+
+        wikitext = (
+            "{{NPC infobox\n| name = Test NPC\n| description = Known for her calm demeanour under fire.\n}}\n"
+            "__NOTOC__\n"
+            "'''Test NPC''' is a [[Hyur]] of the [[Goldsmith's Guild]].\n"
+            "{| class=\"wikitable\"\n! Locations\n|}\n==Dialogue==\n[[File:Test full.jpeg|thumb]]\n"
+        )
+        self.assertNotIn("NOTOC", plain_text(wikitext))
+        self.assertNotIn("File:", plain_text(wikitext))
+
+        def opener(request, timeout):
+            return FakeResponse({"query": {"pages": [{
+                "pageid": 3, "title": "Test NPC", "fullurl": "https://wiki.test/wiki/Test_NPC",
+                "extract": "", "pageprops": {},
+                "revisions": [{"revid": 5, "timestamp": "2026-10-20T00:00:00Z",
+                               "slots": {"main": {"content": wikitext}}}],
+            }]}})
+        with tempfile.TemporaryDirectory() as tmp:
+            provider = MediaWikiProvider("https://wiki.test/api.php", cache_dir=Path(tmp), opener=opener, sleeper=lambda _: None)
+            result = provider.resolve_page({"identity": {"name": "Test NPC"}})
+            self.assertEqual(result["status"], "resolved")
+            self.assertIn("Goldsmith's Guild", result["extract"])
+            enriched = provider.enrich_dossier({"identity": {"canonical_id": "npc_3", "npc_id": 3, "name": "Test NPC"}})
+            self.assertIn("calm demeanour", enriched["lore_quotes"][0]["quote"])
+            self.assertIn("Goldsmith's Guild", enriched["wiki_page"]["plain_text_excerpt"])
+
+    def test_template_disambiguation_is_not_resolved_as_identity(self):
+        pages = {
+            "Gerolt": {
+                "pageid": 10, "title": "Gerolt", "fullurl": "https://wiki.test/wiki/Gerolt",
+                "extract": "", "pageprops": {"notoc": ""},
+                "revisions": [{"revid": 1, "slots": {"main": {"content": (
+                    "{{disambig}}\n[[Gerolt]] appears in several expansions.\n"
+                    "* [[Gerolt (ARR)]]\n* [[Gerolt (Eureka Anemos)]]\n"
+                )}}}],
+            },
+            "Gerolt (ARR)": {
+                "pageid": 11, "title": "Gerolt (ARR)", "fullurl": "https://wiki.test/wiki/Gerolt_(ARR)",
+                "extract": "", "pageprops": {},
+                "revisions": [{"revid": 2, "slots": {"main": {"content": (
+                    "{{NPC infobox\n| name = Gerolt (ARR)\n}}\nGerolt runs the relic forge in Revenant's Toll."
+                )}}}],
+            },
+            "Gerolt (Eureka Anemos)": {
+                "pageid": 12, "title": "Gerolt (Eureka Anemos)", "fullurl": "https://wiki.test/wiki/Gerolt_(Eureka_Anemos)",
+                "extract": "", "pageprops": {},
+                "revisions": [{"revid": 3, "slots": {"main": {"content": (
+                    "{{NPC infobox\n| name = Gerolt (Eureka Anemos)\n}}\nGerolt handles Anemos relic stages."
+                )}}}],
+            },
+        }
+
+        def opener(request, timeout):
+            query = dict(__import__("urllib.parse", fromlist=["parse_qsl"]).parse_qsl(request.full_url.split("?", 1)[1]))
+            title = query.get("titles") or ""
+            page = pages.get(title) or {"title": title, "missing": True}
+            return FakeResponse({"query": {"pages": [page]}})
+
+        with tempfile.TemporaryDirectory() as tmp:
+            provider = MediaWikiProvider("https://wiki.test/api.php", cache_dir=Path(tmp), opener=opener, sleeper=lambda _: None)
+            ambiguous = provider.resolve_page({"identity": {"name": "Gerolt", "aliases": []}})
+            self.assertEqual(ambiguous["status"], "ambiguous")
+
+            located = provider.resolve_page({"identity": {
+                "name": "Gerolt", "aliases": [], "location": "Eureka Anemos",
+            }})
+            self.assertEqual(located["status"], "resolved")
+            self.assertEqual(located["title"], "Gerolt (Eureka Anemos)")
+            self.assertEqual(located["reason"], "disambiguation_link")
 
     def test_ambiguous_aliases_need_context_or_review_and_missing_user_agent_is_rejected(self):
         def opener(request, timeout):
@@ -632,6 +718,347 @@ class SpeechStyleBenchmarkProtocolTests(unittest.TestCase):
             }), encoding="utf-8")
             self.assertEqual(sorted(evaluation._expected_annotation_items(root, "pilot")[0]), ["B2"])
             self.assertEqual(sorted(evaluation._expected_annotation_items(root, "full")[0]), ["B1", "B2"])
+
+
+class WikiLoreQuoteTests(unittest.TestCase):
+    def test_disposition_sentences_become_mood_quotes(self):
+        provider = MediaWikiProvider("https://wiki.test/api.php", cache_dir=Path(tempfile.mkdtemp()))
+        page = {
+            "status": "resolved",
+            "title": "Test NPC",
+            "url": "https://wiki.test/wiki/Test_NPC",
+            "revision_id": 42,
+            "reason": "title match",
+            "extract": (
+                "She is known for her calm demeanour even under fire. "
+                "Her voice is low and quiet. "
+                "She sells fish in the market. "
+                "The townsfolk say her temper is short after a bad catch."
+            ),
+            "wikitext": "{{Infobox NPC|Race=Hyur|Gender=Female}}",
+        }
+        provider.resolve_page = lambda dossier: page
+        dossier = {"identity": {"canonical_id": "npc_5", "npc_id": 5, "name": "Test NPC", "race": "Hyur"}}
+        result = provider.enrich_dossier(dossier)
+        quotes = [record["quote"] for record in result["lore_quotes"]]
+        self.assertEqual(len(quotes), 2)
+        self.assertIn("calm demeanour", quotes[0])
+        self.assertIn("temper", quotes[1])
+        self.assertTrue(all(record["field"] == "mood" for record in result["lore_quotes"]))
+        self.assertTrue(all(record["source"] == page["url"] for record in result["lore_quotes"]))
+        # Voice quotes stay in their own field; the acoustic and mood audits do not mix.
+        self.assertTrue(all(record["field"] == "voice_description" for record in result["voice_evidence"]))
+        state = compact_state(result)
+        self.assertEqual(len(state["lore_quotes"]), 2)
+        self.assertEqual(state["lore_quotes"][0]["field"], "mood")
+
+    def test_wiki_lore_quotes_reach_the_model_request_body(self):
+        # A quote is only evidence if it is actually sent: assert on the wire
+        # body the Jev provider posts, not on the intermediate state dict.
+        bodies = []
+
+        def opener(request, timeout):
+            bodies.append(json.loads(request.data.decode("utf-8")))
+            return FakeResponse({
+                "model": "stub-1",
+                "answers": {"mood.preset": {
+                    "type": "choice",
+                    "choice": "none",
+                    "probabilities": {"none": 0.9, "calm": 0.1},
+                    "confidence": 0.9,
+                }},
+            })
+
+        provider = JevProvider(
+            model="stub-1",
+            endpoint="http://127.0.0.1:18081/v1/systemone",
+            opener=opener,
+            sleeper=lambda _: None,
+        )
+        dossier = {
+            "identity": {"canonical_id": "npc_9", "npc_id": 9, "name": "Test NPC"},
+            "statistics": {"unique_line_count": 200},
+            "dialogue_samples": [],
+            "lore_quotes": [{
+                "field": "mood",
+                "source": "wiki_lore",
+                "quote": "She is known for her calm demeanour even under fire.",
+            }],
+        }
+        provider.classify(dossier, {"mood.preset": {
+            "type": "choice",
+            "criteria": ["none", "calm"],
+        }})
+        self.assertEqual(len(bodies), 1)
+        self.assertIn(
+            "She is known for her calm demeanour even under fire.",
+            json.dumps(bodies[0]["state"], ensure_ascii=False),
+        )
+
+
+class MoodAndVolumeGateTests(unittest.TestCase):
+    """Mood is an archon decision with three independent gates; style has a floor."""
+
+    def setUp(self):
+        self.vocab = blueprint.load_vocabulary()
+        self.questions = build_questions(self.vocab)
+
+    def _provider(self, *, preset: str, probability: float, confidence: float, justified: float):
+        class StubMood(RulesProvider):
+            name = "stub"
+            model_id = "stub-1"
+
+            def classify(self, dossier, questions):
+                result = super().classify(dossier, questions)
+                options = list(questions["mood.preset"]["criteria"])
+                result["answers"]["mood.preset"] = {
+                    "type": "choice",
+                    "choice": preset,
+                    "confidence": confidence,
+                    "probabilities": {
+                        key: probability if key == preset
+                        else (1.0 - probability) / (len(options) - 1)
+                        for key in options
+                    },
+                }
+                result["answers"]["mood.justified"] = {"type": "noul", "noul": justified}
+                return result
+
+        return StubMood(self.vocab)
+
+    def _dossier(self, lines: int, *, name: str = "Test") -> dict:
+        return {
+            "input_hash": "hash",
+            "identity": {
+                "canonical_id": "npc_10", "npc_id": 10, "name": name,
+                "resolution_status": "eligible", "has_se_voice_reference": False,
+                "identity_ambiguous": False, "sex": "male",
+            },
+            "statistics": {"dialogue_count": lines, "unique_line_count": lines},
+            "dialogue_analysis": {
+                "measurements": {"line_count": lines},
+                "interpretation": {
+                    "register": "formal", "vocabulary_complexity": "educated",
+                    "sentence_complexity": "complex", "colloquialism": "low",
+                    "rhetorical_style": "measured", "speech_habits": ["none_observed"],
+                },
+            },
+        }
+
+    def test_mood_options_are_presets_plus_none_only(self):
+        options = list(self.questions["mood.preset"]["criteria"])
+        self.assertEqual(options[0], "none")
+        self.assertEqual(
+            set(options[1:]), set(self.vocab["moods"]["allowed_presets"])
+        )
+        self.assertEqual(len(options), len(self.vocab["moods"]["allowed_presets"]) + 1)
+        for option in options:
+            self.assertTrue(self.questions["mood.preset"]["criteria"][option].strip())
+
+    def test_strong_mood_on_a_rich_character_is_accepted(self):
+        provider = self._provider(preset="angry", probability=0.9, confidence=0.9, justified=0.95)
+        result = classify_dossier(self._dossier(400), provider, self.vocab)
+        self.assertEqual(result["pack_archon"], "angry")
+        self.assertTrue(result["mood"]["accepted"])
+        self.assertEqual(result["mood"]["blocked_by"], [])
+        self.assertEqual(result["mood"]["gate"]["line_count"], 400)
+
+    def test_low_volume_blocks_a_mood_that_the_model_would_accept(self):
+        provider = self._provider(preset="angry", probability=0.9, confidence=0.9, justified=0.95)
+        floor = self.vocab["classification"]["thresholds"]["min_dialogue_lines_for_mood"]
+        result = classify_dossier(self._dossier(floor - 1), provider, self.vocab)
+        self.assertEqual(result["pack_archon"], "neutral")
+        self.assertEqual(result["mood"]["preset"], "none")
+        self.assertTrue(any("below the mood floor" in reason for reason in result["mood"]["blocked_by"]))
+
+    def test_justification_and_confidence_gates_block_a_mood(self):
+        unjustified = self._provider(preset="calm", probability=0.9, confidence=0.9, justified=0.10)
+        result = classify_dossier(self._dossier(400), unjustified, self.vocab)
+        self.assertEqual(result["pack_archon"], "neutral")
+        self.assertTrue(any("justified" in reason for reason in result["mood"]["blocked_by"]))
+
+        weak = self._provider(preset="calm", probability=0.40, confidence=0.60, justified=0.95)
+        result = classify_dossier(self._dossier(400), weak, self.vocab)
+        self.assertEqual(result["pack_archon"], "neutral")
+        self.assertTrue(any("thresholds" in reason for reason in result["mood"]["blocked_by"]))
+
+    def test_none_answer_keeps_neutral_even_with_volume_and_justification(self):
+        provider = self._provider(preset="none", probability=0.97, confidence=0.97, justified=0.99)
+        result = classify_dossier(self._dossier(400), provider, self.vocab)
+        self.assertEqual(result["pack_archon"], "neutral")
+        self.assertTrue(any("none/neutral" in reason for reason in result["mood"]["blocked_by"]))
+
+    def test_sparse_character_records_no_style_but_keeps_the_estimate(self):
+        floor = self.vocab["classification"]["thresholds"]["min_dialogue_lines_for_style"]
+        result = classify_dossier(self._dossier(floor - 1), RulesProvider(self.vocab), self.vocab)
+        register = result["speech_style"]["register"]
+        self.assertIsNone(register["value"])
+        self.assertEqual(register["method"], "insufficient_dialogue_volume")
+        self.assertEqual(register["deterministic_estimate"], "formal")
+        self.assertTrue(any("style floor" in reason for reason in result["review_reasons"]))
+
+        rich = classify_dossier(self._dossier(floor + 1), RulesProvider(self.vocab), self.vocab)
+        self.assertEqual(rich["speech_style"]["register"]["value"], "formal")
+        self.assertEqual(rich["speech_style"]["register"]["method"], "rules_choice")
+
+
+class CompactStateAndSampleTests(unittest.TestCase):
+    def setUp(self):
+        self.vocab = blueprint.load_vocabulary()
+
+    def test_state_carries_measurements_coverage_and_no_rules_labels(self):
+        dossier = {
+            "identity": {"canonical_id": "npc_1", "npc_id": 1, "name": "N"},
+            "statistics": {"dialogue_count": 900, "unique_line_count": 800,
+                           "source_distribution": {"quest": {"rows": 900, "unique_line_ids": 800}}},
+            "dialogue_analysis": {
+                "measurements": {"line_count": 800, "signal_line_rates": {"dialect_lines": 0.4}},
+                "interpretation": {"register": "formal"},
+            },
+            "dialogue_samples": [{"text": "Hello.", "source": "quest", "sheet": "s", "signals": ["question"]}],
+            "lore_quotes": [{"quote": "Known for her calm demeanour.", "source": "wiki", "field": "mood"}],
+        }
+        state = compact_state(dossier)
+        self.assertIn("dialogue_measurements", state)
+        self.assertNotIn("interpretation", json.dumps(state))
+        self.assertEqual(state["dialogue_measurements"]["signal_line_rates"]["dialect_lines"], 0.4)
+        self.assertEqual(state["dialogue_coverage"]["sampled_lines"], 1)
+        self.assertEqual(round(state["dialogue_coverage"]["coverage_of_unique_lines"], 3), 0.001)
+        self.assertIn("signal-weighted subset", state["dialogue_coverage"]["warning"])
+        self.assertEqual(state["lore_quotes"][0]["field"], "mood")
+        self.assertEqual(state["dialogue_samples"][0]["signals"], ["question"])
+        self.assertTrue(any("archon" in rule for rule in state["guardrails"]))
+
+    def test_state_drops_samples_before_it_drops_evidence(self):
+        dossier = {
+            "identity": {"canonical_id": "npc_2"},
+            "statistics": {"dialogue_count": 50, "unique_line_count": 50},
+            "dialogue_analysis": {"measurements": {"line_count": 50}},
+            "dialogue_samples": [{"text": "x" * 400, "source": "quest"} for _ in range(20)],
+        }
+        state = compact_state(dossier, max_bytes=4000)
+        self.assertLess(len(state["dialogue_samples"]), 20)
+        self.assertEqual(state["dialogue_coverage"]["sampled_lines"], len(state["dialogue_samples"]))
+
+    def test_speaker_labels_are_stage_directions_not_dialogue(self):
+        self.assertEqual(
+            split_speaker_label("(-Zombibrand-)Urrrgggh... Hurrrggghhh...!"),
+            ("Urrrgggh... Hurrrggghhh...!", "Zombibrand"),
+        )
+        self.assertEqual(split_speaker_label("Plain line."), ("Plain line.", None))
+
+        labelled = [{"voice_line_id": "1", "text": "(-Fuath-)Calm yourself, friend."}]
+        plain = [{"voice_line_id": "1", "text": "Calm yourself, friend."}]
+        self.assertEqual(
+            analyze_dialogue(labelled, self.vocab)["measurements"]["word_count"],
+            analyze_dialogue(plain, self.vocab)["measurements"]["word_count"],
+        )
+        sample = select_representative_samples("npc_3", labelled, vocabulary=self.vocab)[0]
+        self.assertEqual(sample["text"], "Calm yourself, friend.")
+        self.assertEqual(sample["speaker_label"], "Fuath")
+
+    def test_sample_selection_prefers_stylistically_distinctive_lines(self):
+        lines = [
+            {"voice_line_id": f"g{i}", "text": f"The road is long and the sky is grey number {i}.", "source": "quest", "sheet": "s"}
+            for i in range(12)
+        ] + [
+            {"voice_line_id": "d1", "text": "Aye, I've not seen yer like here before, an' that's the truth of it.", "source": "quest", "sheet": "s"},
+        ]
+        samples = select_representative_samples("npc_4", lines, max_count=3, vocabulary=self.vocab)
+        self.assertEqual(samples[0]["voice_line_id"], "d1")
+        self.assertTrue(any(signal.startswith("dialect:") for signal in samples[0]["signals"]))
+
+    def test_many_sheets_do_not_starve_medium_and_long_buckets(self):
+        # Gerolt's shape: 200+ quest sheets, 181 short / 953 medium / 947 long
+        # lines. Taking one line per sheet inside a bucket filled all 24 slots
+        # with short lines before the loop ever reached `medium`.
+        import random
+
+        pool = [f"word{index}" for index in range(400)]
+        lines = []
+        for sheet in range(60):
+            rng = random.Random(sheet)
+            lines.append({
+                "voice_line_id": f"s{sheet}",
+                "text": "Hm. " + " ".join(rng.sample(pool, 2)),
+                "source": "quest", "sheet": f"quest/{sheet:03d}",
+            })
+            lines.append({
+                "voice_line_id": f"m{sheet}",
+                "text": " ".join(rng.sample(pool, 14)),
+                "source": "quest", "sheet": f"quest/{sheet:03d}",
+            })
+            lines.append({
+                "voice_line_id": f"l{sheet}",
+                "text": " ".join(rng.sample(pool, 30)),
+                "source": "quest", "sheet": f"quest/{sheet:03d}",
+            })
+        samples = select_representative_samples("npc_5", lines, max_count=24, vocabulary=self.vocab)
+        buckets = [length_bucket(sample["text"]) for sample in samples]
+        self.assertEqual(len(samples), 24)
+        self.assertGreaterEqual(buckets.count("medium"), 7)
+        self.assertGreaterEqual(buckets.count("long"), 7)
+        self.assertLessEqual(buckets.count("short"), 9)
+
+    def test_whole_word_matching_does_not_count_ye_inside_yes(self):
+        lines = [{"voice_line_id": f"l{i}", "text": "Yes, there were many of them."} for i in range(10)]
+        rates = analyze_dialogue(lines, self.vocab)["measurements"]["signal_line_rates"]
+        self.assertEqual(rates["dialect_lines"], 0.0)
+
+
+class MoodProfileTests(unittest.TestCase):
+    def setUp(self):
+        self.vocab = blueprint.load_vocabulary()
+        self.dossier = {
+            "input_hash": "hash",
+            "identity": {
+                "canonical_id": "npc_10", "npc_id": 10, "name": "Test",
+                "race": "Hyur", "clan": "Midlander", "sex": "male",
+                "resolution_status": "eligible", "speaker_ids": [],
+            },
+            "statistics": {"dialogue_count": 400, "unique_line_count": 400},
+            "dialogue_analysis": {"measurements": {}},
+            "dialogue_samples": [],
+        }
+
+    def _classification(self, archon: str) -> dict:
+        accepted = archon != "neutral"
+        return {
+            "canonical_id": "npc_10",
+            "provider": "jev",
+            "model_id": "nimble",
+            "speech_style": {
+                "register": {"value": "formal", "method": "jev_choice", "confidence": 0.8},
+            },
+            "answers": {"speech_style.register": {"type": "choice", "confidence": 0.8}},
+            "mood": {
+                "preset": archon if accepted else "none",
+                "archon": archon,
+                "accepted": accepted,
+                "gate": {"confidence": 0.9, "selected_probability": 0.88, "line_count": 400},
+                "blocked_by": [] if accepted else ["answer was none/neutral: no consistent default register"],
+            },
+        }
+
+    def test_accepted_mood_becomes_a_declared_archon_with_creative_evidence(self):
+        profile = build_individual_profile(
+            self.dossier, self._classification("calm"), cast_identity(self.dossier["identity"]), self.vocab,
+        )
+        self.assertEqual(profile["pack_archon"], "calm")
+        self.assertEqual(profile["moods"], {"calm": {}})
+        self.assertEqual(profile["evidence"]["pack_archon"]["level"], "creative_selection")
+        self.assertIn("calm", profile["evidence"]["pack_archon"]["note"])
+        self.assertEqual(validate_generated_profile(profile, self.vocab), [])
+
+    def test_default_mood_packs_neutral_with_default_evidence(self):
+        profile = build_individual_profile(
+            self.dossier, self._classification("neutral"), cast_identity(self.dossier["identity"]), self.vocab,
+        )
+        self.assertEqual(profile["pack_archon"], "neutral")
+        self.assertEqual(profile["moods"], {})
+        self.assertEqual(profile["evidence"]["pack_archon"]["level"], "default")
+        self.assertIn("none/neutral", profile["evidence"]["pack_archon"]["note"])
+        self.assertEqual(validate_generated_profile(profile, self.vocab), [])
 
 
 if __name__ == "__main__":

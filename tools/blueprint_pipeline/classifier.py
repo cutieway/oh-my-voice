@@ -145,6 +145,58 @@ def _score(answer: dict, thresholds: dict) -> dict:
     }
 
 
+def _mood_decision(
+    selected: str | None,
+    choice_check: dict,
+    justified_check: dict,
+    answer: dict,
+    policy: dict,
+    line_count: int,
+    provider: str,
+) -> dict:
+    """Decide the one archon a pack uses, defaulting to neutral.
+
+    Three independent gates must all pass before a non-neutral preset is
+    proposed: the choice cleared the mood thresholds, `mood.justified` is yes,
+    and the character has enough dialogue for a baseline register to exist.
+    """
+    floor = int(policy["min_dialogue_lines_for_mood"])
+    justified = justified_check.get("decision") == "yes"
+    preset = selected if selected not in (None, "none", "neutral") else None
+    blocked_by = []
+    if selected is None:
+        blocked_by.append("mood choice fell below the mood confidence and probability thresholds")
+    elif preset is None:
+        blocked_by.append("answer was none/neutral: no consistent default register")
+    if not justified:
+        blocked_by.append("mood.justified is not yes")
+    if line_count < floor:
+        blocked_by.append(f"{line_count} unique lines is below the mood floor {floor}")
+    accepted = not blocked_by
+    return {
+        "preset": preset if accepted else "none",
+        "archon": preset if accepted else "neutral",
+        "accepted": accepted,
+        "justified": justified,
+        "gate": {
+            "selected": selected,
+            "confidence": choice_check.get("confidence"),
+            "selected_probability": choice_check.get("selected_probability"),
+            "choice_accepted": bool(choice_check.get("accepted")),
+            "yes_probability": justified_check.get("yes_probability"),
+            "line_count": line_count,
+            "min_dialogue_lines": floor,
+            "thresholds": {
+                "confidence": policy["mood_confidence"],
+                "probability": policy["mood_probability"],
+            },
+        },
+        "blocked_by": blocked_by,
+        "probabilities": answer.get("probabilities"),
+        "method": f"{provider}_choice" if accepted else "default",
+    }
+
+
 def classify_dossier(
     dossier: dict,
     provider: ClassifierProvider,
@@ -187,9 +239,18 @@ def classify_dossier(
     answers = response["answers"]
     decision_checks = {}
     accepted_choices = {}
+    # Mood is held to its own, stricter bar: a wrong default archon changes how
+    # every line of a pack sounds, while a wrong style word only changes wording.
+    mood_policy = {
+        **policy,
+        "choice_confidence": policy["mood_confidence"],
+        "choice_probability": policy["mood_probability"],
+    }
     for question_id, answer in answers.items():
         if answer["type"] == "choice":
-            selected, check = _choice(answer, policy)
+            selected, check = _choice(
+                answer, mood_policy if question_id == "mood.preset" else policy
+            )
             decision_checks[question_id] = check
             if selected is not None:
                 accepted_choices[question_id] = selected
@@ -234,15 +295,38 @@ def classify_dossier(
     )
     speech_style = {}
     analysis = (dossier.get("dialogue_analysis") or {}).get("interpretation") or {}
+    line_count = int(
+        (dossier.get("statistics") or {}).get("unique_line_count")
+        or (dossier.get("statistics") or {}).get("dialogue_count")
+        or 0
+    )
+    style_floor = policy["min_dialogue_lines_for_style"]
+    style_sufficient = line_count >= style_floor
     for field in speech_fields:
         question_id = f"speech_style.{field}"
+        if not style_sufficient:
+            # Too few lines to describe a register. The deterministic estimate is
+            # kept for the audit, but it never reaches a profile: a six-line NPC
+            # renders from identity alone rather than a confident guess.
+            speech_style[field] = {
+                "value": None,
+                "method": "insufficient_dialogue_volume",
+                "deterministic_estimate": analysis.get(field),
+                "line_count": line_count,
+                "confidence": None,
+                "probabilities": None,
+            }
+            continue
         value = accepted_choices.get(question_id)
         if value is None:
             value = analysis.get(field)
         if value is not None:
             speech_style[field] = {
                 "value": value,
-                "method": "jev" if question_id in accepted_choices else "deterministic_dialogue_analysis",
+                "method": (
+                    f"{provider.name}_choice" if question_id in accepted_choices
+                    else "deterministic_dialogue_analysis"
+                ),
                 "confidence": decision_checks.get(question_id, {}).get("confidence"),
                 "probabilities": (answers.get(question_id) or {}).get("probabilities"),
             }
@@ -252,7 +336,21 @@ def classify_dossier(
         "confidence": None,
     }
 
+    mood = _mood_decision(
+        accepted_choices.get("mood.preset"),
+        decision_checks.get("mood.preset") or {},
+        decision_checks.get("mood.justified") or {},
+        answers.get("mood.preset") or {},
+        policy,
+        line_count,
+        provider.name,
+    )
+
     review_reasons = []
+    if not style_sufficient:
+        review_reasons.append(
+            f"dialogue volume {line_count} is below the style floor {style_floor}; no style recorded"
+        )
     if not score.get("accepted"):
         review_reasons.append("distinctiveness score is below the confidence threshold")
     if score.get("score", 0) < policy["distinctiveness_score"]:
@@ -297,6 +395,8 @@ def classify_dossier(
         "answers": answers,
         "decision_checks": decision_checks,
         "distinctive": distinctive,
+        "mood": mood,
+        "pack_archon": mood["archon"],
         "speech_style": speech_style,
         "voice_claims": [
             {

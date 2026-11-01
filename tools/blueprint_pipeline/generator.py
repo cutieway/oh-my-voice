@@ -146,6 +146,30 @@ def build_individual_profile(
         (dossier.get("wiki_page") or {}).get("url")
         or f"game:ENpcResident/{identity_context.get('npc_id')}"
     )
+    mood = classification.get("mood") or {}
+    pack_archon = str(mood.get("archon") or "neutral")
+    if pack_archon != "neutral":
+        moods = {pack_archon: {}}
+        evidence["pack_archon"] = creative_evidence(
+            "pack_archon",
+            "Default archon chosen by the classification model: "
+            f"preset `{pack_archon}`, confidence {mood.get('gate', {}).get('confidence')}, "
+            f"p={mood.get('gate', {}).get('selected_probability')}, "
+            f"{mood.get('gate', {}).get('line_count')} unique lines. "
+            "Audition it against neutral before packing; it is a proposal, not canon.",
+            source="blueprint_pipeline.classifier:mood",
+        )
+    else:
+        moods = {}
+        evidence["pack_archon"] = make_evidence(
+            "pack_archon",
+            "default",
+            note=(
+                "Neutral archon. "
+                + ("; ".join(mood.get("blocked_by") or []) or "no mood evidence recorded")
+                + ". Neutral is the project default until a source justifies another archon."
+            ),
+        )
     profile = {
         "schema_version": vocabulary["schema_version"],
         "profile_version": 1,
@@ -173,13 +197,14 @@ def build_individual_profile(
             "source_audit_hash": object_hash(classification),
             "timestamp": classification.get("timestamp", ""),
         },
+        "moods": moods,
         "lifecycle": {
             "status": "draft",
             "classification_confidence": confidence,
             "manual_override": False,
             "approval": None,
         },
-        "pack_archon": "neutral",
+        "pack_archon": pack_archon,
         "evidence": evidence,
         "qc": {
             "reference_duration_ok": False,

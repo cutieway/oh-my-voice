@@ -72,10 +72,79 @@ def _resolve_values(vocabulary: dict, path: str) -> dict:
     if path.startswith("speech_style."):
         field = path.split(".", 1)[1]
         return vocabulary["speech_style"]["dimensions"][field]["values"]
+    if path == "moods.archon_choice":
+        # Exactly the presets plus `none`, so the option list cannot drift from
+        # allowed_presets and no free-form mood name can be answered.
+        moods = vocabulary["moods"]
+        choices = {"none": moods["archon_none"]}
+        for preset in moods["allowed_presets"]:
+            entry = moods["presets"].get(preset)
+            if entry is None:
+                raise ValueError(f"allowed preset {preset!r} has no entry in moods.presets")
+            choices[preset] = entry
+        return choices
     raise ValueError(f"unsupported question vocabulary path: {path}")
 
 
+# What the model is told about its own evidence base. A 24-line sample of 1,552
+# lines is 1.5%; saying so is what keeps a confident-sounding answer honest.
+GUARDRAILS = (
+    "This is synthetic casting; there is no original recording to discover.",
+    "Race, clan, sex, body, occupation, and personality are not acoustic evidence.",
+    "Dialogue text can support speech style, but cannot establish pitch or timbre.",
+    "dialogue_coverage says how much of the corpus you actually see; never claim more than it supports.",
+    "A mood is one archon chosen for the whole character, never a per-line emotion. Neutral is the default.",
+    "Never invent source facts or citations.",
+)
+
+
+def _coverage(statistics: dict, samples: list[dict]) -> dict:
+    unique = int(statistics.get("unique_line_count") or statistics.get("dialogue_count") or 0)
+    sampled = len(samples)
+    return {
+        "rows": statistics.get("dialogue_count"),
+        "unique_lines": unique,
+        "sampled_lines": sampled,
+        "sampled_words": sum(len(str(sample.get("text") or "").split()) for sample in samples),
+        "coverage_of_unique_lines": round(sampled / unique, 4) if unique else None,
+        "source_distribution": statistics.get("source_distribution") or {},
+        "warning": (
+            "The samples are a small, signal-weighted subset. Treat them as examples, "
+            "not as the full range of this character."
+            if unique and sampled / unique < 0.25 else None
+        ),
+    }
+
+
+def _lore_quotes(dossier: dict) -> list[dict]:
+    quotes = []
+    for record in dossier.get("lore_quotes") or []:
+        text = str(record.get("quote") or "").strip()
+        if text:
+            quotes.append({"text": text, "source": record.get("source"), "field": record.get("field")})
+    for record in dossier.get("lore_evidence") or []:
+        # Infobox records are structured values ("Race: Hyur"), not prose about
+        # the character; the identity block already carries them.
+        if str(record.get("field") or "").startswith("identity."):
+            continue
+        text = str(record.get("quote") or "").strip()
+        if text:
+            quotes.append({"text": text, "source": record.get("source"), "field": record.get("field")})
+    return quotes[:24]
+
+
 def compact_state(dossier: dict, *, max_bytes: int = MAX_STATE_BYTES) -> dict:
+    statistics = dossier.get("statistics") or {}
+    analysis = dossier.get("dialogue_analysis") or {}
+    samples = [
+        {
+            "text": sample.get("text", ""),
+            "source": sample.get("source"),
+            "sheet": sample.get("sheet"),
+            "signals": sample.get("signals") or [],
+        }
+        for sample in dossier.get("dialogue_samples") or []
+    ]
     state = {
         "identity": {
             key: (dossier.get("identity") or {}).get(key)
@@ -85,32 +154,24 @@ def compact_state(dossier: dict, *, max_bytes: int = MAX_STATE_BYTES) -> dict:
                 "has_se_voice_reference", "identity_ambiguous",
             )
         },
-        "statistics": dossier.get("statistics") or {},
-        "dialogue_analysis": dossier.get("dialogue_analysis") or {},
-        "dialogue_samples": [
-            {
-                "text": sample.get("text", ""),
-                "source": sample.get("source"),
-                "sheet": sample.get("sheet"),
-            }
-            for sample in dossier.get("dialogue_samples") or []
-        ],
-        "lore_evidence": dossier.get("lore_evidence") or [],
+        # Measurements only. The rules-derived interpretation is deliberately
+        # withheld: showing the model its own baseline's labels turns the answer
+        # into an echo and destroys the independence the benchmark needs.
+        "dialogue_measurements": analysis.get("measurements") or {},
+        "dialogue_coverage": _coverage(statistics, samples),
+        "dialogue_samples": samples,
+        "lore_quotes": _lore_quotes(dossier),
         "voice_evidence": dossier.get("voice_evidence") or [],
         "wiki_resolution": dossier.get("wiki_resolution") or {},
         "fact_conflicts": dossier.get("fact_conflicts") or [],
-        "classification_guardrails": [
-            "This is synthetic casting; there is no original recording to discover.",
-            "Race, clan, sex, body, occupation, and personality are not acoustic evidence.",
-            "Dialogue text can support speech style, but cannot establish pitch or timbre.",
-            "Never invent source facts or citations.",
-        ],
+        "guardrails": list(GUARDRAILS),
     }
     while len(json.dumps(state, ensure_ascii=False).encode("utf-8")) > max_bytes:
         samples = state["dialogue_samples"]
         if not samples:
             raise ValueError("dossier state exceeds configured Jev request limit")
         samples.pop()
+        state["dialogue_coverage"]["sampled_lines"] = len(samples)
     return state
 
 

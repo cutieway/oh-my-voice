@@ -18,6 +18,10 @@ CLAUSE_RE = re.compile(
     r"\b(?:although|because|before|if|since|that|though|unless|until|when|where|while|which|who)\b",
     re.IGNORECASE,
 )
+ALL_CAPS_RE = re.compile(r"\b[A-Z]{3,}\b")
+ELLIPSIS_RE = re.compile(r"\.\.\.|…")
+DASH_RE = re.compile(r"\s[—–]\s")
+
 STOP_WORDS = {
     "a", "an", "and", "are", "as", "at", "be", "been", "but", "by", "for",
     "from", "had", "has", "have", "he", "her", "hers", "him", "his", "i",
@@ -26,6 +30,22 @@ STOP_WORDS = {
     "to", "was", "we", "were", "what", "when", "where", "which", "who",
     "will", "with", "you", "your",
 }
+
+
+_TERM_CACHE: dict[str, re.Pattern[str]] = {}
+
+
+def _term_pattern(term: str) -> re.Pattern[str]:
+    pattern = _TERM_CACHE.get(term)
+    if pattern is None:
+        pattern = re.compile(r"(?<!\w)" + re.escape(term) + r"(?!\w)", re.IGNORECASE)
+        _TERM_CACHE[term] = pattern
+    return pattern
+
+
+def terms_in(text: str, terms) -> list[str]:
+    """Terms from a closed list that appear as whole words in `text`."""
+    return [str(term) for term in terms or [] if _term_pattern(str(term)).search(text)]
 
 
 def words(text: str) -> list[str]:
@@ -52,6 +72,23 @@ def _distribution(values: list[int]) -> dict[str, int | float | None]:
     }
 
 
+SPEAKER_LABEL_RE = re.compile(r"^\(-([^-]{1,60})-\)\s*")
+
+
+def split_speaker_label(text: str) -> tuple[str, str | None]:
+    """Separate a `(-Label-)` stage direction from the spoken text.
+
+    8,149 English lines carry such a label (aliases, `???`, crowd descriptions).
+    It names who speaks, not what is said, so it must not reach the analysis or
+    the model as if it were dialogue.
+    """
+    value = text or ""
+    match = SPEAKER_LABEL_RE.match(value)
+    if match is None:
+        return value, None
+    return value[match.end():], match.group(1)
+
+
 def analyze_dialogue(lines: list[dict], vocabulary: dict | None = None) -> dict[str, Any]:
     distinct = {}
     for line in lines:
@@ -59,7 +96,9 @@ def analyze_dialogue(lines: list[dict], vocabulary: dict | None = None) -> dict[
         if line_id is None:
             line_id = hashlib.sha256((line.get("text") or "").encode()).hexdigest()
         distinct.setdefault(str(line_id), line)
-    texts = [str(line.get("text") or "") for line in distinct.values()]
+    texts = [
+        split_speaker_label(str(line.get("text") or ""))[0] for line in distinct.values()
+    ]
     tokenized = [words(text) for text in texts]
     flat = [token for row in tokenized for token in row]
     sentence_lengths = [len(row) for row in tokenized if row]
@@ -72,11 +111,10 @@ def analyze_dialogue(lines: list[dict], vocabulary: dict | None = None) -> dict[
     statements = max(0, len(texts) - questions - exclamations)
     vocab = (vocabulary or {}).get("speech_style", {})
     signals = vocab.get("signals", {})
-    lower_text = "\n".join(text.casefold() for text in texts)
     colloquial_terms = [str(term).casefold() for term in signals.get("colloquial_terms", [])]
     formal_terms = [str(term).casefold() for term in signals.get("formal_terms", [])]
-    colloquial_hits = sum(lower_text.count(term) for term in colloquial_terms)
-    formal_hits = sum(lower_text.count(term) for term in formal_terms)
+    colloquial_hits = sum(len(terms_in(text, colloquial_terms)) for text in texts)
+    formal_hits = sum(len(terms_in(text, formal_terms)) for text in texts)
     total_words = max(1, len(flat))
     colloquial_rate = colloquial_hits / total_words
     formal_rate = formal_hits / total_words
@@ -151,6 +189,29 @@ def analyze_dialogue(lines: list[dict], vocabulary: dict | None = None) -> dict[
         if left not in STOP_WORDS and right not in STOP_WORDS
     )
     formal_consistency = round(max(formal_rate, colloquial_rate, 1 - min(1, formal_rate + colloquial_rate)), 3)
+
+    # Text-only cues a listener would actually hear read aloud. They are counts
+    # over the whole corpus, never a label, so the model can weigh them itself.
+    line_total = max(1, len(texts))
+    length_share = {
+        bucket: round(sum(_length_bucket(text) == bucket for text in texts) / line_total, 4)
+        for bucket in ("short", "medium", "long")
+    }
+    dialect_terms = list(signals.get("dialect_terms") or [])
+    signal_lines = {
+        "dialect": sum(bool(terms_in(text, dialect_terms)) for text in texts),
+        "colloquial": sum(bool(terms_in(text, colloquial_terms)) for text in texts),
+        "formal": sum(bool(terms_in(text, formal_terms)) for text in texts),
+        "contraction": sum(bool(CONTRACTION_RE.search(text)) for text in texts),
+        "honorific": sum(bool(HONORIFIC_RE.search(text)) for text in texts),
+        "question": sum("?" in text for text in texts),
+        "exclamation": sum("!" in text for text in texts),
+        "all_caps": sum(bool(ALL_CAPS_RE.search(text)) for text in texts),
+        "ellipsis": sum(bool(ELLIPSIS_RE.search(text)) for text in texts),
+    }
+    per_line_rates = {
+        f"{name}_lines": round(count / line_total, 4) for name, count in signal_lines.items()
+    }
     measurements = {
         "line_count": len(texts),
         "word_count": len(flat),
@@ -170,6 +231,9 @@ def analyze_dialogue(lines: list[dict], vocabulary: dict | None = None) -> dict[
         "statement_count": statements,
         "exclamation_count": exclamations,
         "honorific_and_form_of_address_count": honorifics,
+        "utterance_length_share": length_share,
+        "signal_line_counts": signal_lines,
+        "signal_line_rates": per_line_rates,
         "stylistic_consistency": {
             "formal_or_colloquial_signal_dominance": formal_consistency,
             "method": "deterministic rate comparison over the closed signal lists in vocabulary.json",
@@ -218,6 +282,13 @@ def _rank(canonical_id: str, line: dict) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+NEAR_DUPLICATE_JACCARD = 0.82
+# SE reuses quest templates and swaps one noun ("...the contours jus' right" /
+# "...the texture jus' right"). Trigram Jaccard sits at 0.70 there, so word
+# containment catches the template and the truncated re-recording too.
+NEAR_DUPLICATE_CONTAINMENT = 0.80
+
+
 def _near_duplicate(left: str, right: str) -> bool:
     left_words, right_words = words(left), words(right)
     if not left_words or not right_words:
@@ -228,7 +299,73 @@ def _near_duplicate(left: str, right: str) -> bool:
         return left_words == right_words
     intersection = len(left_grams & right_grams)
     union = max(1, len(left_grams | right_grams))
-    return intersection / union >= 0.82
+    if intersection / union >= NEAR_DUPLICATE_JACCARD:
+        return True
+    left_set, right_set = set(left_words), set(right_words)
+    containment = len(left_set & right_set) / max(1, min(len(left_set), len(right_set)))
+    length_ratio = min(len(left_words), len(right_words)) / max(len(left_words), len(right_words))
+    return containment >= NEAR_DUPLICATE_CONTAINMENT and length_ratio >= 0.5
+
+
+BUCKETS = ("short", "medium", "long")
+
+
+def _bucket_quotas(counts: dict[str, int], max_count: int) -> dict[str, int]:
+    """Split `max_count` across the buckets that exist, by corpus share.
+
+    Every present bucket gets at least one slot, so a character with any long
+    lines is never judged on short ones alone.
+    """
+    present = {bucket: counts.get(bucket, 0) for bucket in BUCKETS if counts.get(bucket, 0)}
+    total = sum(present.values())
+    if not total:
+        return {}
+    quotas = {bucket: max(1, round(max_count * count / total)) for bucket, count in present.items()}
+    while sum(quotas.values()) > max_count:
+        largest = max(sorted(quotas), key=lambda bucket: quotas[bucket])
+        quotas[largest] -= 1
+        if not quotas[largest]:
+            del quotas[largest]
+    order = sorted(present, key=lambda bucket: -present[bucket])
+    index = 0
+    while sum(quotas.values()) < max_count:
+        quotas[order[index % len(order)]] += 1
+        index += 1
+    return quotas
+
+
+def _signal_hits(text: str, signals: dict) -> list[str]:
+    """Name the closed-vocabulary signals a line actually contains.
+
+    These names travel with the sample, so a style or mood answer can be traced
+    back to the lines that supported it instead of an opaque "the model read
+    something".
+    """
+    hits = []
+    for label in ("colloquial", "formal", "dialect"):
+        for term in terms_in(text, signals.get(f"{label}_terms") or []):
+            hits.append(f"{label}:{term}")
+    if CONTRACTION_RE.search(text):
+        hits.append("contraction")
+    if HONORIFIC_RE.search(text):
+        hits.append("honorific")
+    if "?" in text:
+        hits.append("question")
+    if "!" in text:
+        hits.append("exclamation")
+    if ALL_CAPS_RE.search(text):
+        hits.append("all_caps")
+    if ELLIPSIS_RE.search(text):
+        hits.append("ellipsis")
+    return hits
+
+
+def _signal_weight(hits: list[str]) -> int:
+    weights = {
+        "colloquial": 3, "formal": 3, "dialect": 3, "all_caps": 2, "honorific": 2,
+        "exclamation": 1, "question": 1, "ellipsis": 1, "contraction": 1,
+    }
+    return sum(weights.get(hit.split(":", 1)[0], 0) for hit in hits)
 
 
 def select_representative_samples(
@@ -237,6 +374,7 @@ def select_representative_samples(
     *,
     max_count: int = 24,
     max_chars: int = 6000,
+    vocabulary: dict | None = None,
 ) -> list[dict]:
     by_id = {}
     for line in lines:
@@ -246,16 +384,25 @@ def select_representative_samples(
         text = str(line.get("text") or "")
         if not text.strip():
             continue
+        text, speaker_label = split_speaker_label(text)
         current = by_id.get(key)
         if current is None:
-            by_id[key] = dict(line)
+            entry = dict(line)
+            entry["text"] = text
+            if speaker_label:
+                entry["speaker_label"] = speaker_label
+            by_id[key] = entry
         else:
             provenance = current.setdefault("provenance", [])
             provenance.extend(line.get("provenance", []))
     unique = list(by_id.values())
+    signals = ((vocabulary or {}).get("speech_style") or {}).get("signals") or {}
     for line in unique:
-        line["_bucket"] = _length_bucket(str(line.get("text") or ""))
+        text = str(line.get("text") or "")
+        line["_bucket"] = _length_bucket(text)
         line["_rank"] = _rank(canonical_id, line)
+        line["signals"] = _signal_hits(text, signals)
+        line["_weight"] = _signal_weight(line["signals"])
         line.setdefault("provenance", [{
             "dialog_id": line.get("dialog_id"),
             "source": line.get("source"),
@@ -267,7 +414,9 @@ def select_representative_samples(
     for line in unique:
         groups[(str(line.get("source") or "unknown"), str(line.get("sheet") or "unknown"))].append(line)
     for rows in groups.values():
-        rows.sort(key=lambda line: line["_rank"])
+        # Strongest stylistic evidence first, then a stable per-NPC order, so the
+        # same dossier always yields the same sample set.
+        rows.sort(key=lambda line: (-line["_weight"], line["_rank"]))
 
     selected = []
     consumed = set()
@@ -287,24 +436,44 @@ def select_representative_samples(
         consumed_chars += len(text)
         return True
 
-    ordered_groups = sorted(groups)
-    for bucket in ("short", "medium", "long"):
-        for group in ordered_groups:
-            for line in groups[group]:
-                if line["_bucket"] == bucket and consider(line):
-                    break
-            if len(selected) >= max_count:
-                return selected
+    # Bucket coverage is allocated by corpus share, not by iteration order.
+    # Taking one line per (source, sheet) group inside a bucket saturates the
+    # quota from the first bucket whenever an NPC has many sheets: Gerolt has
+    # 200+ sheets and 181 short / 953 medium / 947 long lines, and the old loop
+    # filled all 24 slots with short lines before reaching `medium`.
+    by_bucket = {bucket: [] for bucket in BUCKETS}
+    for line in unique:
+        by_bucket[line["_bucket"]].append(line)
+    for rows in by_bucket.values():
+        rows.sort(key=lambda line: (-line["_weight"], line["_rank"]))
+    quotas = _bucket_quotas({bucket: len(rows) for bucket, rows in by_bucket.items()}, max_count)
 
-    while len(selected) < max_count:
-        changed = False
-        for group in ordered_groups:
-            for line in groups[group]:
-                if consider(line):
-                    changed = True
+    for bucket, quota in quotas.items():
+        grouped = defaultdict(list)
+        for line in by_bucket[bucket]:
+            grouped[(str(line.get("source") or "unknown"), str(line.get("sheet") or "unknown"))].append(line)
+        cursors = {group: 0 for group in sorted(grouped)}
+        taken = 0
+        while taken < quota and len(selected) < max_count:
+            progressed = False
+            for group in sorted(grouped):
+                rows = grouped[group]
+                while cursors[group] < len(rows):
+                    line = rows[cursors[group]]
+                    cursors[group] += 1
+                    if consider(line):
+                        taken += 1
+                        progressed = True
+                        break
+                if taken >= quota or len(selected) >= max_count:
                     break
-            if len(selected) >= max_count:
+            if not progressed:
                 break
-        if not changed:
+
+    # Leftover slots (dedupe blocked, or a bucket ran dry) come from the
+    # strongest lines overall, so the sample still fills up on rich characters.
+    for line in sorted(unique, key=lambda item: (-item["_weight"], item["_rank"])):
+        if len(selected) >= max_count:
             break
+        consider(line)
     return selected

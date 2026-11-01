@@ -33,7 +33,8 @@ def _utcnow() -> str:
 
 def parse_infobox(wikitext: str) -> dict[str, str]:
     """Read the first Infobox template, respecting nested templates and links."""
-    start_match = re.search(r"\{\{\s*Infobox\b", wikitext, re.IGNORECASE)
+    # The wiki uses both `{{Infobox ...}}` and `{{NPC infobox ...}}`.
+    start_match = re.search(r"\{\{\s*[A-Za-z ]{0,24}?infobox\b", wikitext, re.IGNORECASE)
     if not start_match:
         return {}
     start = start_match.start()
@@ -90,12 +91,68 @@ def parse_infobox(wikitext: str) -> dict[str, str]:
     return fields
 
 
+DISAMBIG_TEMPLATE_RE = re.compile(r"\{\{\s*(?:disambig|disambiguation|dab|dmbox|hndis)\b", re.IGNORECASE)
+LINK_RE = re.compile(r"\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|([^\]]+))?\]\]")
+
+
+def _revision_wikitext(page: dict) -> str:
+    revision = (page.get("revisions") or [{}])[0]
+    slots = revision.get("slots") or {}
+    main = slots.get("main") or {}
+    return main.get("content") or main.get("*") or revision.get("content") or ""
+
+
+def is_disambiguation_page(page: dict) -> bool:
+    """The wiki flags disambiguation with a template, not with pageprops."""
+    if (page.get("pageprops") or {}).get("disambiguation") is not None:
+        return True
+    return bool(DISAMBIG_TEMPLATE_RE.search(_revision_wikitext(page)))
+
+
+def plain_text(wikitext: str) -> str:
+    """Render wikitext as prose when the wiki has no TextExtracts extension.
+
+    ffxiv.consolegameswiki.com returns an empty `extract` for every page, so the
+    quote and infobox paths have to read the wikitext itself. Tables, templates,
+    refs, files and categories are dropped; link labels and prose survive.
+    """
+    text = re.sub(r"<!--.*?-->", " ", wikitext or "", flags=re.S)
+    text = re.sub(r"<ref\b[^>]*>.*?</ref\s*>", " ", text, flags=re.I | re.S)
+    text = re.sub(r"<ref\b[^/]*/\s*>", " ", text, flags=re.I)
+    text = re.sub(r"\{\|.*?\|\}", " ", text, flags=re.S)
+    previous = None
+    while previous != text:
+        previous = text
+        text = re.sub(r"\{\{[^{}]*\}\}", " ", text)
+    text = re.sub(r"\[\[(?:file|image|category):[^\]]*\]\]", " ", text, flags=re.I)
+    text = LINK_RE.sub(lambda match: match.group(2) or match.group(1), text)
+    text = re.sub(r"\[(?:https?:)?//[^\]\s]+\s+([^\]]+)\]", r"\1", text)
+    text = re.sub(r"\[(?:https?:)?//[^\]]+\]", " ", text)
+    text = re.sub(r"'{2,}", "", text)
+    text = re.sub(r"^\s*=+\s*(.*?)\s*=+\s*$", r"\1", text, flags=re.M)
+    text = re.sub(r"^\s*[*#:;]+\s*", "", text, flags=re.M)
+    text = re.sub(r"<br\s*/?>", " ", text, flags=re.I)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"__[A-Z]+__", " ", text)
+    text = re.sub(r"\|\}|\{\|", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def _page_list(payload: dict) -> list[dict]:
     query = payload.get("query") or {}
     pages = query.get("pages") or []
     if isinstance(pages, dict):
         return list(pages.values())
     return list(pages)
+
+
+DISPOSITION_RE = re.compile(
+    r"\b(?:demeanou?r|disposition|temperament|temper|personality|cheerful|calm|"
+    r"stern|gentle|kind-hearted|brusque|gruff|anxious|nervous|timid|shy|"
+    r"secretive|sly|mischievous|solemn|melancholic|gloomy|hot[- ]headed|"
+    r"short[- ]tempered|soft[- ]spoken|good[- ]natured|stoic)\b",
+    re.IGNORECASE,
+)
 
 
 class MediaWikiProvider:
@@ -230,6 +287,7 @@ class MediaWikiProvider:
             "exchars": "30000",
             "rvprop": "ids|timestamp|content",
             "rvslots": "main",
+            "redirects": "1",
         })
         pages = _page_list(payload)
         for page in pages:
@@ -271,14 +329,16 @@ class MediaWikiProvider:
         exact_titles = list(dict.fromkeys([canonical_name] + aliases))
         exact_pages = []
         disambiguation_titles = []
+        disambiguation_pages: list[dict] = []
         for title in exact_titles:
             if not title:
                 continue
             page = self._lookup_title(title)
             if page is None:
                 continue
-            if (page.get("pageprops") or {}).get("disambiguation") is not None:
+            if is_disambiguation_page(page):
                 disambiguation_titles.append(page.get("title", title))
+                disambiguation_pages.append(page)
                 continue
             title_norm = normalize_name(page.get("title") or "")
             if title_norm in {normalize_name(t) for t in exact_titles}:
@@ -306,6 +366,14 @@ class MediaWikiProvider:
                 ],
             }
 
+        # A disambiguation page is a link index, not an identity: follow its
+        # links and accept a candidate only when the dossier context singles one
+        # out. Gerolt is such a page (ARR/HW/SB/Eureka/ShB/EW/DT instances).
+        if disambiguation_pages:
+            linked = self._resolve_disambiguation_links(disambiguation_pages, context, canonical_name)
+            if linked is not None:
+                return linked
+
         search_candidates = []
         for query in exact_titles[:4]:
             if not query:
@@ -322,7 +390,7 @@ class MediaWikiProvider:
             if title in disambiguation_titles:
                 continue
             page = self._lookup_title(title)
-            if page is None or (page.get("pageprops") or {}).get("disambiguation") is not None:
+            if page is None or is_disambiguation_page(page):
                 continue
             score = self._context_score(page, context)
             if normalize_name(page.get("title") or title) in exact_norms:
@@ -346,12 +414,47 @@ class MediaWikiProvider:
             "disambiguation_pages": disambiguation_titles,
         }
 
+    def _resolve_disambiguation_links(
+        self, pages: list[dict], context: list[str], canonical_name: str
+    ) -> dict | None:
+        """Resolve a disambiguation page to one linked instance, or nothing."""
+        links: list[str] = []
+        for page in pages:
+            for target, _display in LINK_RE.findall(_revision_wikitext(page)):
+                target = target.strip()
+                if not target or target.casefold().startswith(("file:", "image:", "category:")):
+                    continue
+                if target not in links:
+                    links.append(target)
+        canonical_norm = normalize_name(canonical_name)
+        scored = []
+        for target in links[:12]:
+            page = self._lookup_title(target)
+            if page is None or is_disambiguation_page(page):
+                continue
+            text = " ".join([
+                str(page.get("title") or ""),
+                page.get("extract") or plain_text(_revision_wikitext(page)),
+            ])
+            score = self._context_score({"title": page.get("title"), "extract": text}, context)
+            if canonical_norm and normalize_name(str(page.get("title") or "")).startswith(canonical_norm):
+                score += 5
+            scored.append((score, page))
+        if not scored:
+            return None
+        scored.sort(key=lambda item: (-item[0], str(item[1].get("title") or "")))
+        top_score = scored[0][0]
+        plausible = [item for item in scored if item[0] == top_score]
+        # 5 for the canonical-name title prefix, 1 per context term matched in
+        # the linked page's own prose (infobox values are stripped from it).
+        if len(plausible) == 1 and top_score >= 6:
+            return self._page_result(plausible[0][1], "disambiguation_link")
+        return None
+
     @staticmethod
     def _page_result(page: dict, reason: str) -> dict:
         revision = ((page.get("revisions") or [{}])[0])
-        slots = revision.get("slots") or {}
-        main = slots.get("main") or {}
-        wikitext = main.get("content") or main.get("*") or revision.get("content") or ""
+        wikitext = _revision_wikitext(page)
         return {
             "status": "resolved",
             "reason": reason,
@@ -360,7 +463,7 @@ class MediaWikiProvider:
             "url": page.get("fullurl"),
             "revision_id": revision.get("revid"),
             "revision_timestamp": revision.get("timestamp"),
-            "extract": page.get("extract") or "",
+            "extract": page.get("extract") or plain_text(wikitext),
             "wikitext": wikitext,
         }
 
@@ -373,6 +476,10 @@ class MediaWikiProvider:
             result["inventory"] = dict(result.get("inventory") or {})
             result["inventory"]["wiki_review_required"] = page.get("status") == "ambiguous"
             result["inventory"]["wiki_resolution_reason"] = page.get("reason")
+            result["lore_quotes"] = list(result.get("lore_quotes") or [])
+            result["lore_evidence"] = list(result.get("lore_evidence") or [])
+            result["voice_evidence"] = list(result.get("voice_evidence") or [])
+            result["fact_conflicts"] = list(result.get("fact_conflicts") or [])
             result["input_hash"] = None
             return result
 
@@ -437,8 +544,12 @@ class MediaWikiProvider:
             r"gravelly|breathy|deep[- ]voiced|high[- ]pitched|accent|drawl)\b",
             re.IGNORECASE,
         )
+        # The wiki's infobox description is the editors' own one-line
+        # characterization, so it counts as lore alongside the page prose.
+        description = str(infobox.get("description") or "").strip()
+        quote_pool = " ".join(part for part in (description, extract) if part)
         quotes = [
-            sentence.strip() for sentence in re.split(r"(?<=[.!?])\s+", extract)
+            sentence.strip() for sentence in re.split(r"(?<=[.!?])\s+", quote_pool)
             if voice_terms.search(sentence) and len(sentence.strip()) <= 300
         ][:12]
         voice_evidence = list(result.get("voice_evidence") or [])
@@ -446,7 +557,20 @@ class MediaWikiProvider:
             voice_evidence.append(source_evidence(
                 "voice_description", "wiki_lore", source_url, revision_id, quote_text
             ))
+        # Disposition sentences are what can justify a default mood archon: they
+        # describe the character's baseline temperament, not one scene. Kept as
+        # quotes so a mood proposal is traceable to a page revision.
+        disposition_quotes = [
+            sentence.strip() for sentence in re.split(r"(?<=[.!?])\s+", quote_pool)
+            if DISPOSITION_RE.search(sentence) and len(sentence.strip()) <= 300
+        ][:8]
+        lore_quotes = list(result.get("lore_quotes") or [])
+        for quote_text in disposition_quotes:
+            lore_quotes.append(source_evidence(
+                "mood", "wiki_lore", source_url, revision_id, quote_text
+            ))
         result["identity"] = identity
+        result["lore_quotes"] = lore_quotes
         result["lore_evidence"] = evidence
         result["voice_evidence"] = voice_evidence
         result["fact_conflicts"] = conflicts

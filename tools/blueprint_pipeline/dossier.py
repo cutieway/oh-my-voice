@@ -13,7 +13,7 @@ except ModuleNotFoundError:
 from .cache import object_hash, read_json, safe_component, write_content_addressed
 from .config import DEFAULT_CACHE, DEFAULT_DB, MAX_DIALOGUE_SAMPLE_CHARS, MAX_DIALOGUE_SAMPLE_COUNT
 from .database import iter_dialogue_rows, read_db, speaker_rows
-from .dialogue import analyze_dialogue, select_representative_samples
+from .dialogue import analyze_dialogue, select_representative_samples, split_speaker_label
 from .game_data import game_metadata
 from .identity import unresolved_id
 from .inventory import build_inventory
@@ -62,17 +62,21 @@ def _merge_line(target: dict[str, dict], row: dict, voice_id: str) -> None:
         "npc_id": row.get("associated_npc_id") or row.get("npc_id"),
     }
     if existing is None:
-        target[dialog_id] = {
+        text, speaker_label = split_speaker_label(row.get("text_clean") or "")
+        line = {
             "dialog_id": dialog_id,
             "voice_line_id": row.get("voice_line_id"),
             "source": row["source"],
             "sheet": row["sheet"],
             "row_id": row["row_id"],
-            "text": row.get("text_clean") or "",
+            "text": text,
             "text_kind": row["text_kind"],
             "speaker_ids": [voice_id],
             "provenance": [provenance],
         }
+        if speaker_label:
+            line["speaker_label"] = speaker_label
+        target[dialog_id] = line
         return
     if voice_id not in existing["speaker_ids"]:
         existing["speaker_ids"].append(voice_id)
@@ -154,7 +158,8 @@ def build_dossiers(
                 source_counts[source]["unique_line_ids"].add(line["voice_line_id"])
 
         samples = select_representative_samples(
-            key, lines, max_count=sample_count, max_chars=sample_chars
+            key, lines, max_count=sample_count, max_chars=sample_chars,
+            vocabulary=vocabulary,
         )
         for sample in samples:
             sample.pop("_rank", None)
