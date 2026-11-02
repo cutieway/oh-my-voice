@@ -3,7 +3,7 @@
 #
 #   ./scripts/voicebank.sh gerolt godbert        # two blueprints
 #   ./scripts/voicebank.sh                       # every character + archetype
-#   ./scripts/voicebank.sh --moods neutral nashu_mhakaracca
+#   ./scripts/voicebank.sh nashu_mhakaracca
 #
 # Each run writes data/samples/voicebank/<utc timestamp>/, which holds the
 # VoiceDesign reference WAVs, the cloned test lines, report.json, and an
@@ -21,34 +21,28 @@ BASE="$MODELS/qwen3-tts/Qwen3-TTS-12Hz-1.7B-Base"
 
 usage() {
   cat >&2 <<'EOF'
-usage: ./scripts/voicebank.sh [--moods neutral|all|neutral,happy] [--samples N]
-                             [--seeds N] [--with-style] [--out DIR] [blueprint ...]
+usage: ./scripts/voicebank.sh [--samples N] [--seeds N] [--out DIR] [blueprint ...]
 
 Blueprint ids are file names under blueprints/characters and blueprints/archetypes
-(or explicit paths). The default is --moods neutral: identity prompt alone.
-Pass --with-style to append the profile's classified speech_style clause to the
-identity instruct. Pass --moods all to render every mood the blueprint declares.
---seeds N draws N references per archon. With --repeat-seed every draw reuses
-the SAME seed, which is a repeatability test; without it each draw advances the
-seed, which gives N voice options to choose from.
+(or explicit paths). Every plan is one instruct: the identity sentence plus the
+profile's speech-style clause when it has one.
+--seeds N draws N references from the same instruct. With --repeat-seed every
+draw reuses the SAME seed, which is a repeatability test; without it each draw
+advances the seed, which gives N voice options to choose from.
 EOF
 }
 
-moods="neutral"
 out=""
 explicit_out=0
 samples=3
 seeds=1
 repeat="0"
-with_style=0
 targets=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --moods) moods="${2:-}"; shift 2 ;;
     --samples) samples="${2:-3}"; shift 2 ;;
     --seeds) seeds="${2:-1}"; shift 2 ;;
     --repeat-seed) repeat=1; shift ;;
-    --with-style) with_style=1; shift ;;
     --out) out="${2:-}"; explicit_out=1; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) targets+=("$1"); shift ;;
@@ -123,8 +117,7 @@ PLANS="$(mktemp -d)"
 trap 'rm -rf "$PLANS"' EXIT
 
 for target in "${targets[@]}"; do
-  "$PYTHON" "$ROOT/tools/blueprint.py" plan "$target" --out "$PLANS" \
-    $( [ "$with_style" = "1" ] && echo --with-style ) >/dev/null
+  "$PYTHON" "$ROOT/tools/blueprint.py" plan "$target" --out "$PLANS" >/dev/null
 done
 # Ship the profiles next to their plans so the audition page can show the
 # decisions behind each voice (identity evidence, style probabilities).
@@ -145,8 +138,7 @@ for target in sys.argv[2:]:
     destination = plans / f"{profile_id}.profile.json"
     destination.write_text(json.dumps(profile, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 PYEOF
-if [[ "$moods" == "all" ]]; then moods=""; fi
-echo "plans: $(find "$PLANS" -name '*.plan.json' | wc -l), moods: ${moods:-all}, samples: $samples, seeds: $seeds"
+echo "plans: $(find "$PLANS" -name '*.plan.json' | wc -l), samples: $samples, seeds: $seeds"
 echo "out:   $OUT"
 
 docker run --rm \
@@ -170,7 +162,6 @@ docker run --rm \
   --out /out \
   --design-model "/models/qwen3-tts/$(basename "$DESIGN")" \
   --base-model "/models/qwen3-tts/$(basename "$BASE")" \
-  ${moods:+--moods "$moods"} \
   --samples "$samples" \
   --seeds "$seeds" \
   $( [ "$repeat" = "1" ] && echo --repeat-seed )

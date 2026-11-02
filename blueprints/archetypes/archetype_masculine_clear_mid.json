@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.1",
+  "schema_version": "1.2",
   "profile_version": 1,
   "profile_kind": "archetype",
   "character": {
@@ -9,7 +9,6 @@
     "race": null,
     "clan": null,
     "sex": "unknown",
-    "lore_age": null,
     "role": null,
     "source_url": "project:blueprints/archetypes",
     "applies_to": []
@@ -40,7 +39,6 @@
     "manual_override": false,
     "approval": null
   },
-  "pack_archon": "neutral",
   "evidence": {
     "presentation": {
       "level": "creative_selection",

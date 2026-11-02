@@ -1,8 +1,8 @@
-"""Blueprint validation rules: what an agentic wiki-to-voice pass may not do.
+"""Blueprint validation rules: what an agentic voice-design pass may not do.
 
-These exercise the real vocabulary and, when present, the archived example
-blueprints. blueprints/characters/ is empty until the wiki pipeline exists, so
-the fixture falls back to a synthetic profile built from the vocabulary.
+These exercise the real vocabulary and the archived/archetype example
+blueprints. blueprints/characters/ is empty until a curated character exists, so
+the fixture falls back to an archetype profile.
 """
 import copy
 import importlib.util
@@ -25,8 +25,11 @@ def load_blueprint():
 blueprint = load_blueprint()
 
 
+ARCHETYPES = ROOT / "blueprints" / "archetypes"
+
+
 def _fixture_path(name):
-    for root in (CHARACTERS, ARCHIVE):
+    for root in (CHARACTERS, ARCHIVE, ARCHETYPES):
         path = root / f"{name}.json"
         if path.is_file():
             return path
@@ -57,31 +60,28 @@ class ShippedBlueprintTests(unittest.TestCase):
             with self.subTest(path.stem):
                 self.assertTrue(low <= words <= high, words)
 
-    def test_mood_instruct_keeps_the_identity_prefix(self):
-        data = profile()
-        instructs = blueprint.render_instructs(data, self.vocab)
-        neutral = instructs["neutral"]
-        calm = instructs["calm"]
-        self.assertEqual(neutral, blueprint.render_identity(data, self.vocab))
-        self.assertTrue(calm.startswith(neutral + " "))
-        self.assertNotIn("settled calm", neutral)
+    def test_instruct_without_style_is_the_identity_sentence(self):
+        data = profile("archetype_masculine_clear_mid")
+        self.assertEqual(
+            blueprint.render_instruct(data, self.vocab),
+            blueprint.render_identity(data, self.vocab),
+        )
 
-    def test_pack_archon_defaults_to_neutral(self):
-        data = profile()
-        data.pop("pack_archon", None)
-        self.assertEqual(blueprint.pack_archon(data), "neutral")
-
-    def test_pack_archon_must_have_a_declared_archon(self):
-        data = profile("godbert")
-        data["pack_archon"] = "sad"
-        errors = blueprint.validate_profile(data, self.vocab, "test")
-        self.assertTrue(any("has no archon declared" in error for error in errors), errors)
-
-    def test_pack_archon_may_be_a_declared_mood(self):
-        data = profile("godbert")
-        data["pack_archon"] = "happy"
-        self.assertEqual(blueprint.validate_profile(data, self.vocab, "test"), [])
-        self.assertEqual(blueprint.build_plan(data, self.vocab)["pack_archon"], "happy")
+    def test_style_clause_is_appended_by_default(self):
+        data = profile("archetype_masculine_clear_mid")
+        data["speech_style"] = {
+            "register": "formal",
+            "vocabulary_complexity": "educated",
+            "sentence_complexity": "complex",
+            "colloquialism": "low",
+            "rhetorical_style": "measured",
+        }
+        data["speech_style_analysis"] = None
+        instruct = blueprint.render_instruct(data, self.vocab)
+        identity = blueprint.render_identity(data, self.vocab)
+        self.assertTrue(instruct.startswith(identity + " "))
+        self.assertIn("formal in register", instruct)
+        self.assertIn("rhetorical shape", instruct)
 
     def test_render_is_deterministic(self):
         data = profile()
@@ -156,22 +156,31 @@ class VocabularyRuleTests(unittest.TestCase):
         data["identity"]["accent"] = {"profile": "scottish"}
         self.assert_rejected("needs exactly profile and strength", data)
 
-    def test_unknown_mood_is_rejected(self):
-        data = profile()
-        data["moods"]["excited"] = {}
-        self.assert_rejected("is not a preset", data)
-
-    def test_three_mood_overrides_are_rejected(self):
-        data = profile()
-        data["moods"]["sad"] = {"intensity": "strong", "energy": "very_low", "pace": "slow"}
-        self.assert_rejected("at most 2 are allowed", data)
-
     def test_emotion_word_in_identity_is_rejected(self):
         vocab = copy.deepcopy(self.vocab)
         vocab["identity"]["timbre_primary"]["values"]["warm"]["render"] = "cheerful warm"
-        data = blueprint.migrate_profile_1_0(profile("godbert"))
+        data = profile("archetype_masculine_warm_low_mid")
         errors = blueprint.validate_profile(data, vocab, "test")
         self.assertTrue(any("emotion words" in error for error in errors), errors)
+
+    def test_removed_mood_layer_is_rejected_in_schema_1_2(self):
+        data = profile("archetype_masculine_clear_mid")
+        data["moods"] = {"calm": {}}
+        data["pack_archon"] = "calm"
+        errors = blueprint.validate_profile(data, self.vocab, "test")
+        self.assertTrue(any("removed in schema 1.2" in error for error in errors), errors)
+
+    def test_unvalidated_style_fields_are_rejected_in_schema_1_2(self):
+        data = profile("archetype_masculine_clear_mid")
+        data["speech_style"] = {"register": "formal", "diction_style": "plain"}
+        errors = blueprint.validate_profile(data, self.vocab, "test")
+        self.assertTrue(any("diction_style is not a schema 1.2 field" in error for error in errors), errors)
+
+    def test_lore_age_is_rejected_in_schema_1_2(self):
+        data = profile("archetype_masculine_clear_mid")
+        data["character"]["lore_age"] = 30
+        errors = blueprint.validate_profile(data, self.vocab, "test")
+        self.assertTrue(any("lore_age was removed" in error for error in errors), errors)
 
     def test_unknown_field_is_not_silently_ignored(self):
         data = profile()
@@ -183,21 +192,25 @@ class PlanTests(unittest.TestCase):
     def setUp(self):
         self.vocab = blueprint.load_vocabulary()
 
-    def test_seed_is_stable_and_distinct_per_mood(self):
+    def test_seed_is_stable_and_distinct_per_voice(self):
         self.assertEqual(
-            blueprint.seed_for("gerolt", "neutral"),
-            blueprint.seed_for("gerolt", "neutral"),
+            blueprint.seed_for("gerolt"),
+            blueprint.seed_for("gerolt"),
         )
         self.assertNotEqual(
-            blueprint.seed_for("gerolt", "neutral"),
-            blueprint.seed_for("gerolt", "calm"),
+            blueprint.seed_for("gerolt"),
+            blueprint.seed_for("godbert"),
         )
 
     def test_plan_carries_the_shared_reference_script(self):
         data = profile()
         plan = blueprint.build_plan(data, self.vocab)
         self.assertEqual(plan["reference"]["text"], self.vocab["reference"]["text"])
-        self.assertEqual(len(plan["variants"]), len(data["moods"]))
+        self.assertEqual(
+            plan["instruct"],
+            blueprint.render_instruct(data, self.vocab),
+        )
+        self.assertNotIn("variants", plan)
 
 
 class CollisionTests(unittest.TestCase):

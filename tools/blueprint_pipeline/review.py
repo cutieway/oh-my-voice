@@ -44,7 +44,6 @@ def mark_auditioned(
     reference_file: pathlib.Path | str,
     design_seed: int,
     by: str,
-    archon: str = "neutral",
     note: str | None = None,
 ) -> dict:
     if not by.strip():
@@ -52,14 +51,14 @@ def mark_auditioned(
     details = reference_details(reference_file)
     updated = copy.deepcopy(profile)
     timestamp = utc_timestamp()
-    previous_pin = copy.deepcopy((updated.get("archon_pin") or {}).get(archon))
+    previous_pin = copy.deepcopy(updated.get("reference_pin"))
     new_pin = {
         "design_seed": int(design_seed),
         "reference_sha256": details["sha256"],
         "ref_seconds": details["seconds"],
         "pinned_on": timestamp,
     }
-    updated.setdefault("archon_pin", {})[archon] = new_pin
+    updated["reference_pin"] = new_pin
     updated.setdefault("lifecycle", {})["status"] = "auditioned"
     updated["lifecycle"]["approval"] = None
     updated["lifecycle"]["manual_override"] = True
@@ -72,7 +71,7 @@ def mark_auditioned(
         "action": "audition",
         "timestamp": timestamp,
         "by": by,
-        "changes": {"archon_pin": {archon: {"from": previous_pin, "to": new_pin}}},
+        "changes": {"reference_pin": {"from": previous_pin, "to": new_pin}},
         "note": note,
     })
     return updated
@@ -83,16 +82,15 @@ def approve_profile(
     *,
     by: str,
     reference_sha256: str | None = None,
-    archon: str = "neutral",
 ) -> dict:
     if not by.strip():
         raise ReviewError("human approver name is required")
     lifecycle = profile.get("lifecycle") or {}
     if lifecycle.get("status") != "auditioned":
         raise ReviewError("a profile must be auditioned before it can be approved")
-    pin = (profile.get("archon_pin") or {}).get(archon)
+    pin = profile.get("reference_pin")
     if not pin or not pin.get("reference_sha256"):
-        raise ReviewError("the selected archon has no pinned reference clip")
+        raise ReviewError("the profile has no pinned reference clip")
     expected = pin["reference_sha256"]
     if reference_sha256 is not None and reference_sha256 != expected:
         raise ReviewError("approval hash does not match the pinned reference clip")
@@ -192,14 +190,14 @@ def apply_manual_changes(
     )
     lifecycle["approval"] = None if identity_changed else old_approval
     if identity_changed:
-        pins = updated.pop("archon_pin", {}) or {}
-        if pins:
+        pin = updated.pop("reference_pin", None)
+        if pin:
             updated.setdefault("manual_history", []).append({
                 "action": "edit",
                 "timestamp": utc_timestamp(),
                 "by": by,
-                "changes": {"retired_reference_pins": pins},
-                "note": "Previous pins are preserved in history because acoustic identity changed.",
+                "changes": {"retired_reference_pin": pin},
+                "note": "The previous pin is preserved in history because acoustic identity changed.",
             })
         qc = updated.setdefault("qc", {})
         for key in ("reference_duration_ok", "reference_transcript_verified", "no_reference_leak", "identity_approved", "no_drift"):

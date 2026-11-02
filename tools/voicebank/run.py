@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""Render VoiceDesign archons and clone sample lines for each take.
+"""Render VoiceDesign references and clone sample lines for each take.
 
 Runs inside the tts-qwen image (ROCm torch + qwen-tts). Input is a directory of
-plan files produced by `tools/blueprint.py plan`; output is, per voice and archon:
+plan files produced by `tools/blueprint.py plan`; output is, per voice:
 
-    refs/<mood>.wav              the designed reference (one take per seed)
-    lines/<mood>.<n>.wav         one clone of each sample line
-    report.json / index.html     prompts, seeds, durations, pitch, audition page
+    refs/take.wav                the designed reference (one take per seed)
+    lines/take.<n>.wav           one clone of each sample line
+    report.json / index.html     prompt, seeds, durations, pitch, audition page
 
 `--seeds N` draws N independent references from the same instruct, so one
 blueprint can be auditioned as N different voice options.
 
-Nothing here writes a pack. Samples are neutral by default: requesting no
-`--moods` renders the identity prompt alone, with no mood block.
+Nothing here writes a pack. The instruct is the profile's identity sentence plus
+its speech-style clause.
 """
 from __future__ import annotations
 
@@ -103,7 +103,7 @@ def summarize_profile(profile: dict) -> dict:
     character = profile.get("character") or {}
     return {
         "character": {key: character.get(key) for key in
-                      ("id", "name", "npc_id", "race", "clan", "sex", "lore_age", "source_url")},
+                      ("id", "name", "npc_id", "race", "clan", "sex")},
         "identity": identity_rows,
         "style": style_rows,
         "classification": profile.get("classification") or {},
@@ -151,41 +151,39 @@ def render_decisions(profile_summary: dict) -> str:
 def write_audition(out: pathlib.Path, report: dict) -> None:
     blocks = []
     for voice in report["voices"]:
-        for variant in voice["variants"]:
-            takes = []
-            for take in variant["takes"]:
-                clips = "".join(
-                    f'<audio controls preload="none" src="{html.escape(line["file"])}"></audio>'
-                    for line in take["lines"]
-                )
-                f0s = ", ".join(
-                    f'{line["f0"]:.0f}' for line in take["lines"] if line["f0"]
-                )
-                takes.append(
-                    '<div class="take">'
-                    f'<div class="meta"><b>take {take["take"]}</b>'
-                    f'<span>seed {take["seed"]}</span>'
-                    f'<span>ref {take["ref_seconds"]:.1f}s · {take["ref_f0"]} Hz</span>'
-                    f'<span>line pitch {f0s} Hz</span>'
-                    f'<span class="sha">sha {html.escape(take["ref_sha256"][:12])}</span></div>'
-                    f'<div class="clips">{clips}</div></div>'
-                )
-            blocks.append(
-                '<section class="voice">'
-                f'<div class="head"><b>{html.escape(voice["profile_id"])}</b>'
-                f'<span>{html.escape(variant["mood"])} · '
-                f'{len(variant["takes"])} take(s) · '
-                f'{variant["distinct_references"]} distinct reference hash(es)</span></div>'
-                + "".join(takes)
-                + (f'<div class="verdict">same seed, {len(variant["takes"])} draws: '
-                   + ("byte-identical" if variant["identical"]
-                      else f'{variant["distinct_references"]} different outputs')
-                   + '</div>' if variant["repeat_seed"] else '')
-                + '<details><summary>instruct</summary>'
-                f'<p>{html.escape(variant["instruct"])}</p></details>'
-                + render_decisions(voice.get("profile"))
-                + '</section>'
+        takes = []
+        for take in voice["takes"]:
+            clips = "".join(
+                f'<audio controls preload="none" src="{html.escape(line["file"])}"></audio>'
+                for line in take["lines"]
             )
+            f0s = ", ".join(
+                f'{line["f0"]:.0f}' for line in take["lines"] if line["f0"]
+            )
+            takes.append(
+                '<div class="take">'
+                f'<div class="meta"><b>take {take["take"]}</b>'
+                f'<span>seed {take["seed"]}</span>'
+                f'<span>ref {take["ref_seconds"]:.1f}s · {take["ref_f0"]} Hz</span>'
+                f'<span>line pitch {f0s} Hz</span>'
+                f'<span class="sha">sha {html.escape(take["ref_sha256"][:12])}</span></div>'
+                f'<div class="clips">{clips}</div></div>'
+            )
+        blocks.append(
+            '<section class="voice">'
+            f'<div class="head"><b>{html.escape(voice["profile_id"])}</b>'
+            f'<span>{len(voice["takes"])} take(s) · '
+            f'{voice["distinct_references"]} distinct reference hash(es)</span></div>'
+            + "".join(takes)
+            + (f'<div class="verdict">same seed, {len(voice["takes"])} draws: '
+               + ("byte-identical" if voice["identical"]
+                  else f'{voice["distinct_references"]} different outputs')
+               + '</div>' if voice["repeat_seed"] else '')
+            + '<details><summary>instruct</summary>'
+            f'<p>{html.escape(voice["instruct"])}</p></details>'
+            + render_decisions(voice.get("profile"))
+            + '</section>'
+        )
     (out / "index.html").write_text(
         '<!doctype html><meta charset="utf-8"><title>voicebank audition</title>'
         '<style>body{font:14px system-ui,sans-serif;margin:24px;max-width:1100px}'
@@ -222,12 +220,11 @@ def parse_args():
     p.add_argument("--design-model", required=True)
     p.add_argument("--base-model", required=True)
     p.add_argument("--device", default="cuda:0")
-    p.add_argument("--moods", default="", help="comma separated mood filter")
     p.add_argument("--samples", type=int, default=len(SAMPLE_TEXTS))
     p.add_argument("--texts-file", type=pathlib.Path,
                    help="one sample line per line; defaults to the built-in neutral set")
     p.add_argument("--seeds", type=int, default=1,
-                   help="draw N independent references per archon from the same instruct")
+                   help="draw N independent references from the same instruct")
     p.add_argument("--seed-step", type=int, default=1000,
                    help="seed offset between draws (ignored with --repeat-seed)")
     p.add_argument("--repeat-seed", action="store_true",
@@ -260,7 +257,6 @@ def main() -> int:
     if not plans:
         print(f"no plans in {args.plans}", file=sys.stderr)
         return 2
-    wanted = {m.strip() for m in args.moods.split(",") if m.strip()}
     low, high = (float(x) for x in args.ref_seconds.split(","))
     draws = max(1, args.seeds)
 
@@ -295,50 +291,40 @@ def main() -> int:
             "profile_id": data["profile_id"],
             "profile_version": data["profile_version"],
             "profile": summarize_profile(profile) if profile else None,
-            "variants": [],
+            "instruct": data["instruct"],
+            "seed": data["seed"],
+            "takes": [],
         }
-        for mood, variant in data["variants"].items():
-            if wanted and mood not in wanted:
-                continue
-            takes = []
-            for draw in range(draws):
-                if args.repeat_seed:
-                    seed = variant["seed"]
-                else:
-                    seed = variant["seed"] + draw * args.seed_step
-                torch.manual_seed(seed)
-                wavs, sr = design.generate_voice_design(
-                    text=data["reference"]["text"],
-                    language=data["reference"]["language"],
-                    instruct=variant["instruct"],
-                )
-                name = slug(mood) if draws == 1 else f"{slug(mood)}.{draw}"
-                path = voice_dir / "refs" / f"{name}.wav"
-                sf.write(path, wavs[0], sr)
-                seconds = len(wavs[0]) / sr
-                flag = "" if low <= seconds <= high else " OUT-OF-RANGE"
-                print(f"[design] {data['profile_id']}/{name} {seconds:.2f}s{flag}",
-                      flush=True)
-                takes.append({
-                    "take": draw,
-                    "seed": seed,
-                    "ref": str(path.relative_to(out)),
-                    "ref_sha256": file_sha256(path),
-                    "ref_seconds": round(seconds, 3),
-                    "ref_in_range": low <= seconds <= high,
-                    "ref_f0": median_f0(wavs[0], sr),
-                    "lines": [],
-                })
-            distinct_refs = len({t["ref_sha256"] for t in takes})
-            entry["variants"].append({
-                "mood": mood,
-                "instruct": variant["instruct"],
-                "seed": variant["seed"],
-                "repeat_seed": bool(args.repeat_seed),
-                "distinct_references": distinct_refs,
-                "identical": distinct_refs == 1 and len(takes) > 1,
-                "takes": takes,
+        takes = entry["takes"]
+        for draw in range(draws):
+            seed = data["seed"] if args.repeat_seed else data["seed"] + draw * args.seed_step
+            torch.manual_seed(seed)
+            wavs, sr = design.generate_voice_design(
+                text=data["reference"]["text"],
+                language=data["reference"]["language"],
+                instruct=data["instruct"],
+            )
+            name = "take" if draws == 1 else f"take.{draw}"
+            path = voice_dir / "refs" / f"{name}.wav"
+            sf.write(path, wavs[0], sr)
+            seconds = len(wavs[0]) / sr
+            flag = "" if low <= seconds <= high else " OUT-OF-RANGE"
+            print(f"[design] {data['profile_id']}/{name} {seconds:.2f}s{flag}",
+                  flush=True)
+            takes.append({
+                "take": draw,
+                "seed": seed,
+                "ref": str(path.relative_to(out)),
+                "ref_sha256": file_sha256(path),
+                "ref_seconds": round(seconds, 3),
+                "ref_in_range": low <= seconds <= high,
+                "ref_f0": median_f0(wavs[0], sr),
+                "lines": [],
             })
+        distinct_refs = len({t["ref_sha256"] for t in takes})
+        entry["repeat_seed"] = bool(args.repeat_seed)
+        entry["distinct_references"] = distinct_refs
+        entry["identical"] = distinct_refs == 1 and len(takes) > 1
         report["voices"].append(entry)
         (out / "report.json").write_text(json.dumps(report, indent=2) + "\n",
                                          encoding="utf-8")
@@ -357,35 +343,33 @@ def main() -> int:
 
     for voice in report["voices"]:
         voice_dir = out / "voices" / voice["profile_id"]
-        for variant in voice["variants"]:
-            mood = slug(variant["mood"])
-            many = len(variant["takes"]) > 1
-            for take in variant["takes"]:
-                prompt = base.create_voice_clone_prompt(
-                    ref_audio=str(out / take["ref"]),
-                    ref_text=report["reference_text"],
-                    x_vector_only_mode=False,
+        many = len(voice["takes"]) > 1
+        for take in voice["takes"]:
+            prompt = base.create_voice_clone_prompt(
+                ref_audio=str(out / take["ref"]),
+                ref_text=report["reference_text"],
+                x_vector_only_mode=False,
+            )
+            stem = f"take.{take['take']}" if many else "take"
+            for index, text in enumerate(texts):
+                torch.manual_seed(take["seed"] + 101 + index)
+                wavs, sr = base.generate_voice_clone(
+                    text=text, language="English", voice_clone_prompt=prompt,
+                    non_streaming_mode=True, max_new_tokens=1024,
                 )
-                stem = f"{mood}.{take['take']}" if many else mood
-                for index, text in enumerate(texts):
-                    torch.manual_seed(take["seed"] + 101 + index)
-                    wavs, sr = base.generate_voice_clone(
-                        text=text, language="English", voice_clone_prompt=prompt,
-                        non_streaming_mode=True, max_new_tokens=1024,
-                    )
-                    path = voice_dir / "lines" / f"{stem}.{index}.wav"
-                    sf.write(path, wavs[0], sr)
-                    take["lines"].append({
-                        "text": text,
-                        "file": str(path.relative_to(out)),
-                        "sha256": file_sha256(path),
-                        "seconds": round(len(wavs[0]) / sr, 3),
-                        "f0": median_f0(wavs[0], sr),
-                    })
-                    print(f"[clone] {voice['profile_id']}/{stem}#{index} "
-                          f"{take['lines'][-1]['seconds']:.2f}s", flush=True)
-                (out / "report.json").write_text(json.dumps(report, indent=2) + "\n",
-                                                 encoding="utf-8")
+                path = voice_dir / "lines" / f"{stem}.{index}.wav"
+                sf.write(path, wavs[0], sr)
+                take["lines"].append({
+                    "text": text,
+                    "file": str(path.relative_to(out)),
+                    "sha256": file_sha256(path),
+                    "seconds": round(len(wavs[0]) / sr, 3),
+                    "f0": median_f0(wavs[0], sr),
+                })
+                print(f"[clone] {voice['profile_id']}/{stem}#{index} "
+                      f"{take['lines'][-1]['seconds']:.2f}s", flush=True)
+            (out / "report.json").write_text(json.dumps(report, indent=2) + "\n",
+                                             encoding="utf-8")
 
     write_audition(out, report)
     print(f"wrote {out}")

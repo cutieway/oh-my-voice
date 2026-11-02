@@ -16,7 +16,7 @@
   ],
   "properties": {
     "schema_version": {
-      "const": "1.1"
+      "const": "1.2"
     },
     "profile_version": {
       "type": "integer",
@@ -63,13 +63,6 @@
             "female",
             "unknown",
             null
-          ]
-        },
-        "lore_age": {
-          "type": [
-            "integer",
-            "string",
-            "null"
           ]
         },
         "role": {
@@ -175,152 +168,6 @@
         }
       }
     },
-    "archon_pin": {
-      "type": "object",
-      "description": "The pinned take per archon. The design seed fixes the reference clip, and the frozen reference fixes the voice for every dialogue line of that character.",
-      "propertyNames": {
-        "enum": [
-          "neutral",
-          "calm",
-          "happy",
-          "sad",
-          "angry",
-          "fearful",
-          "secretive"
-        ]
-      },
-      "additionalProperties": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "design_seed",
-          "reference_sha256"
-        ],
-        "properties": {
-          "design_seed": {
-            "type": "integer",
-            "description": "VoiceDesign seed that produced the reference clip."
-          },
-          "reference_sha256": {
-            "type": "string",
-            "pattern": "^[0-9a-f]{64}$",
-            "description": "Hash of the reference WAV, so a regenerated take is provably the same one."
-          },
-          "ref_seconds": {
-            "type": "number"
-          },
-          "ref_f0": {
-            "type": "number"
-          },
-          "pinned_on": {
-            "type": "string"
-          }
-        }
-      }
-    },
-    "pack_archon": {
-      "type": "string",
-      "default": "neutral",
-      "description": "The one archon this character's pack uses for every line. A casting decision, not a per-line choice."
-    },
-    "moods": {
-      "type": "object",
-      "description": "Optional extra archons. Each key is a preset plus at most two overrides. Rendered and auditioned; at most one is chosen as pack_archon.",
-      "propertyNames": {
-        "enum": [
-          "neutral",
-          "calm",
-          "happy",
-          "sad",
-          "angry",
-          "fearful",
-          "secretive"
-        ]
-      },
-      "additionalProperties": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "intensity": {
-            "enum": [
-              "subtle",
-              "mild",
-              "moderate",
-              "strong",
-              "extreme"
-            ]
-          },
-          "energy": {
-            "enum": [
-              "very_low",
-              "low",
-              "moderate",
-              "high",
-              "very_high"
-            ]
-          },
-          "projection": {
-            "enum": [
-              "very_soft",
-              "soft",
-              "conversational",
-              "projected",
-              "forceful",
-              "shouting",
-              "whispering"
-            ]
-          },
-          "pace": {
-            "enum": [
-              "very_slow",
-              "slow",
-              "measured",
-              "normal",
-              "brisk",
-              "fast",
-              "rushed"
-            ]
-          },
-          "pitch_movement": {
-            "enum": [
-              "restrained",
-              "natural",
-              "expressive",
-              "wide",
-              "unstable",
-              "rising",
-              "falling"
-            ]
-          },
-          "articulation": {
-            "enum": [
-              "softened",
-              "crisp",
-              "firm",
-              "clipped",
-              "deliberate",
-              "slurred",
-              "breathy",
-              "strained",
-              "hesitant",
-              "fluid"
-            ]
-          },
-          "rhythm": {
-            "enum": [
-              "even",
-              "measured",
-              "conversational",
-              "erratic",
-              "hesitant",
-              "staccato",
-              "flowing",
-              "dramatic"
-            ]
-          }
-        }
-      }
-    },
     "evidence": {
       "type": "object",
       "description": "Field path -> evidence record. Every non-null identity field needs one.",
@@ -398,7 +245,7 @@
     "speech_style": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Closed-vocabulary textual style; it is separate from acoustic identity and is not rendered into the identity prompt.",
+      "description": "Closed-vocabulary textual style; separate from acoustic identity, appended to the instruct by default when present.",
       "properties": {
         "register": {
           "type": [
@@ -424,34 +271,11 @@
             "null"
           ]
         },
-        "diction_style": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "rhetorical_style": {
           "type": [
             "string",
             "null"
           ]
-        },
-        "contraction_frequency": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "speech_habits": {
-          "type": [
-            "array",
-            "null"
-          ],
-          "items": {
-            "type": "string"
-          },
-          "maxItems": 5,
-          "uniqueItems": true
         }
       }
     },
@@ -567,7 +391,7 @@
           "action": {
             "enum": [
               "edit",
-            "audition",
+              "audition",
               "approve",
               "reject",
               "reset"
@@ -615,6 +439,31 @@
             "approved",
             "rejected"
           ]
+        }
+      }
+    },
+    "reference_pin": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The single auditioned reference clip this profile's pack is built from.",
+      "required": [
+        "design_seed",
+        "reference_sha256",
+        "ref_seconds",
+        "pinned_on"
+      ],
+      "properties": {
+        "design_seed": {
+          "type": "integer"
+        },
+        "reference_sha256": {
+          "type": "string"
+        },
+        "ref_seconds": {
+          "type": "number"
+        },
+        "pinned_on": {
+          "type": "string"
         }
       }
     }

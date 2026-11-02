@@ -42,7 +42,6 @@ from blueprint_pipeline.config import (
     DEFAULT_JEV_MODEL,
     DEFAULT_OUT,
     DEFAULT_THRESHOLDS,
-    DEFAULT_WIKI_API,
 )
 from blueprint_pipeline.dossier import build_dossiers, latest_dossiers
 from blueprint_pipeline.game_data import load_game_index
@@ -53,7 +52,6 @@ from blueprint_pipeline.generator import build_individual_profile, validate_gene
 from blueprint_pipeline.identity import canonical_id
 from blueprint_pipeline.inventory import build_inventory
 from blueprint_pipeline.jev import JevProvider, build_questions, compact_state
-from blueprint_pipeline.mood import build_mood_chunks, plan_chunk_count
 from blueprint_pipeline.reporting import build_pipeline_report, review_report
 from blueprint_pipeline.review import (
     apply_manual_changes,
@@ -62,7 +60,6 @@ from blueprint_pipeline.review import (
     preserve_manual_profile,
     reject_profile,
 )
-from blueprint_pipeline.wiki import MediaWikiProvider
 
 
 def _base_options(command: argparse.ArgumentParser) -> None:
@@ -85,7 +82,6 @@ def make_parser() -> argparse.ArgumentParser:
     for name, help_text in (
         ("inventory", "build the conservative synthetic NPC inventory"),
         ("dossiers", "aggregate dialogue and build character dossiers"),
-        ("enrich", "resolve and enrich dossier lore using MediaWiki"),
         ("classify", "classify eligible dossiers with rules or Jev"),
         ("compose", "compose draft profiles from archetype acoustics plus classified speech style"),
         ("inspect", "print a dossier, classification, profile, and decision audit"),
@@ -108,11 +104,6 @@ def make_parser() -> argparse.ArgumentParser:
                 help="price used for the approximate Jev input-cost estimate",
             )
             sub.add_argument("--allow-bulk", action="store_true", help="allow more than 25 dossiers in one invocation")
-        elif name == "enrich":
-            sub.add_argument("--wiki-api", default=DEFAULT_WIKI_API)
-            sub.add_argument("--user-agent")
-            sub.add_argument("--requests-per-second", type=float, default=1.0)
-            sub.add_argument("--allow-bulk", action="store_true", help="allow more than 25 wiki lookups in one invocation")
         elif name == "inspect":
             sub.add_argument("target", help="canonical ID, NPC name, speaker ID, or profile ID")
             sub.add_argument("--review-report", action="store_true")
@@ -123,10 +114,9 @@ def make_parser() -> argparse.ArgumentParser:
             sub.add_argument("--changes", type=Path, help="JSON object mapping dotted fields to values")
             sub.add_argument("--reference", type=Path, help="auditioned VoiceDesign WAV")
             sub.add_argument("--seed", type=int)
-            sub.add_argument("--archon", default="neutral")
             sub.add_argument("--reason")
             sub.add_argument("--note")
-        if name in {"inventory", "dossiers", "enrich", "classify", "compose", "inspect", "validate", "report", "review"}:
+        if name in {"inventory", "dossiers", "classify", "compose", "inspect", "validate", "report", "review"}:
             sub.add_argument("--vocabulary", type=Path, default=ROOT / "blueprints" / "vocabulary.json")
     return parser
 
@@ -202,46 +192,6 @@ def cmd_dossiers(args) -> int:
         limit=args.limit,
     )
     print(f"dossier snapshots written or reused: {len(output)} under {args.cache_dir / 'dossiers'}")
-    return 0
-
-
-def cmd_enrich(args) -> int:
-    if not args.allow_network and not args.dry_run:
-        raise ValueError("wiki enrichment requires --allow-network")
-    latest = latest_dossiers(args.cache_dir)
-    records = [
-        dossier for dossier, _ in latest.values()
-        if (dossier.get("identity") or {}).get("npc_id") is not None
-        and (dossier.get("identity") or {}).get("resolution_status") == "eligible"
-    ]
-    records.sort(key=lambda item: item["identity"]["canonical_id"])
-    records = _selected(records, args)
-    limit = args.limit if args.limit is not None else 25
-    if limit <= 0:
-        raise ValueError("wiki enrichment requires a positive --limit")
-    if args.limit is None:
-        records = records[:25]
-    if len(records) > 25 and not args.allow_bulk:
-        raise ValueError("more than 25 wiki lookups requires --allow-bulk after reviewing the workload")
-    print(f"wiki workload: up to {len(records)} canonical NPC lookups at {args.requests_per_second:g} request/s")
-    if args.dry_run:
-        print("dry run: no network requests made")
-        return 0
-    provider = MediaWikiProvider(
-        args.wiki_api,
-        cache_dir=args.cache_dir,
-        user_agent=args.user_agent or __import__("blueprint_pipeline.config", fromlist=["DEFAULT_USER_AGENT"]).DEFAULT_USER_AGENT,
-        requests_per_second=args.requests_per_second,
-    )
-    written = 0
-    for dossier in records:
-        if args.resume and not args.force and dossier.get("wiki_resolution"):
-            continue
-        enriched = provider.enrich_dossier(dossier)
-        enriched["input_hash"] = object_hash({key: value for key, value in enriched.items() if key != "input_hash"})
-        write_content_addressed(args.cache_dir / "dossiers", safe_component(dossier["identity"]["canonical_id"]), enriched)
-        written += 1
-    print(f"wiki dossier snapshots updated: {written}")
     return 0
 
 
@@ -390,43 +340,14 @@ def cmd_classify(args) -> int:
         and any(value.get("cache_key") == cache_key for value, _ in cached.values())
         for cache_key in cache_keys
     ]
-    # A chunked mood run is one style/identity request plus one request per
-    # dialogue window, so the preflight has to count calls, not dossiers.
-    mood_questions = {
-        question_id: question for question_id, question in questions.items()
-        if question_id.startswith("mood.")
-    }
-    policy = dict(DEFAULT_THRESHOLDS)
-    policy.update(vocabulary.get("classification", {}).get("thresholds", {}))
-
     def _request_plan(dossier: dict) -> tuple[int, int]:
         if args.provider != "jev":
             return 0, 0
-        base = len(json.dumps({
+        return 1, len(json.dumps({
             "model": args.model,
             "state": compact_state(dossier),
             "questions": questions,
         }, ensure_ascii=False).encode())
-        statistics = dossier.get("statistics") or {}
-        line_count = int(statistics.get("unique_line_count") or statistics.get("dialogue_count") or 0)
-        pool = dossier.get("dialogue_pool") or []
-        chunk_count = plan_chunk_count(line_count, policy)
-        if not chunk_count or not pool:
-            return 1, base
-        requests = 1
-        total = base
-        for chunk in build_mood_chunks(pool, chunk_count, policy):
-            total += len(json.dumps({
-                "model": args.model,
-                "state": compact_state(
-                    dossier,
-                    samples=chunk["lines"],
-                    chunk={"index": chunk["index"], "count": chunk_count, "chars": chunk["chars"]},
-                ),
-                "questions": mood_questions,
-            }, ensure_ascii=False).encode())
-            requests += 1
-        return requests, total
 
     plans = [
         _request_plan(item) for item, can_reuse in zip(records, reusable) if not can_reuse
@@ -439,10 +360,6 @@ def cmd_classify(args) -> int:
         f"classification workload: {len(records)} dossiers, {request_count} Jev requests, "
         f"{sum(request_bytes)} request bytes ({max(request_bytes, default=0)} max per dossier)"
     )
-    if args.provider == "jev":
-        print(
-            "mood calls are chunked: each mood-eligible dossier costs one request per dialogue window"
-        )
     if request_count:
         print(
             f"rough Jev estimate: about {estimated_tokens:,} input tokens and "
@@ -660,11 +577,10 @@ def cmd_review(args) -> int:
             reference_file=args.reference,
             design_seed=args.seed,
             by=args.by,
-            archon=args.archon,
             note=args.note,
         )
     elif args.action == "approve":
-        profile = approve_profile(profile, by=args.by, archon=args.archon)
+        profile = approve_profile(profile, by=args.by)
     elif args.action == "reject":
         if not args.reason:
             raise ValueError("review reject requires --reason")
@@ -684,7 +600,6 @@ def main(argv: list[str] | None = None) -> int:
     commands = {
         "inventory": cmd_inventory,
         "dossiers": cmd_dossiers,
-        "enrich": cmd_enrich,
         "classify": cmd_classify,
         "compose": cmd_compose,
         "inspect": cmd_inspect,

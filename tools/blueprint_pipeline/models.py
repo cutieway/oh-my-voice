@@ -43,7 +43,6 @@ class Dossier:
     statistics: dict[str, Any]
     dialogue_analysis: dict[str, Any]
     dialogue_samples: list[dict[str, Any]]
-    lore_evidence: list[dict[str, Any]]
     voice_evidence: list[dict[str, Any]]
     sources: list[dict[str, Any]]
     schema_version: str = "1.0"

@@ -19,24 +19,13 @@ from typing import Any
 # ENpcBase.BodyType. Only the extremes are claims: 3 selects the aged model, 4
 # the small model used by children and child-like Padjal. BodyType 1 is the
 # ordinary model and says nothing about age, so it yields the project fallback
-# band rather than a game-data fact. Measured 2026-11-01 against 12 wiki
-# ground-truth NPCs: BodyType alone matched 2/11, and `bt1 -> adult` was wrong
+# band rather than a game-data fact. Measured 2026-11-01 against 12 NPCs with
+# documented ages: BodyType alone matched 2/11, and `bt1 -> adult` was wrong
 # for Merlwyb, Momodi, Hildibrand, Godbert and Kan-E-Senna.
 BODY_TYPE_AGE = {
     3: "mature",
     4: "young_teen",
 }
-
-# Lore/wiki age, when a dossier carries one, wins over BodyType.
-LORE_AGE_BANDS = (
-    (12, "child"),
-    (17, "young_teen"),
-    (19, "older_teen"),
-    (29, "young_adult"),
-    (49, "adult"),
-    (64, "middle_aged"),
-    (79, "mature"),
-)
 
 # ENpcBase.Height is a scale percentage whose 0 value means "no override" and
 # whose meaning differs per race, so it is recorded but not used for casting.
@@ -144,29 +133,8 @@ AGE_RANGE = {
 FALLBACK_AGE = "adult"
 
 
-def _lore_age_band(lore_age: Any) -> str | None:
-    try:
-        age = int(lore_age)
-    except (TypeError, ValueError):
-        return None
-    if age <= 0:
-        return None
-    for ceiling, band in LORE_AGE_BANDS:
-        if age <= ceiling:
-            return band
-    return "elderly"
-
-
 def _age_band(identity: dict, body_type: Any) -> tuple[str, str | None, str, str]:
     """Return (band, rule, evidence level, note) for the perceived age."""
-    band = _lore_age_band(identity.get("lore_age"))
-    if band is not None:
-        return (
-            band,
-            "lore_age_band",
-            "creative_selection",
-            f"Voice age mapped from the documented lore age {identity.get('lore_age')}.",
-        )
     band = BODY_TYPE_AGE.get(body_type) if isinstance(body_type, int) else None
     if band is not None:
         return (

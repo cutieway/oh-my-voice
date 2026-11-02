@@ -9,27 +9,15 @@ from . import CLASSIFIER_CONFIG_VERSION
 from .cache import object_hash
 from .config import DEFAULT_THRESHOLDS
 from .jev import build_questions
-from .mood import (
-    aggregate_mood,
-    build_mood_chunks,
-    insufficient_volume,
-    plan_chunk_count,
-)
 
 
 class ClassifierProvider(ABC):
     name = "base"
     model_id = "unknown"
-    # True when the provider can be called once per dialogue window, which is
-    # how a character with more lines than the context window is judged.
-    supports_chunks = False
 
     @abstractmethod
     def classify(self, dossier: dict, questions: dict[str, dict]) -> dict:
         raise NotImplementedError
-
-    def classify_chunk(self, dossier: dict, questions: dict[str, dict], chunk: dict) -> dict:
-        raise NotImplementedError(f"{self.name} provider does not support dialogue chunks")
 
 
 class RulesProvider(ClassifierProvider):
@@ -157,64 +145,6 @@ def _score(answer: dict, thresholds: dict) -> dict:
     }
 
 
-def _mood_decision(
-    selected: str | None,
-    choice_check: dict,
-    justified_check: dict,
-    answer: dict,
-    policy: dict,
-    line_count: int,
-    provider: str,
-) -> dict:
-    """Decide the one archon a pack uses, defaulting to neutral.
-
-    A non-neutral preset needs a probability above `mood_probability`, a corpus
-    with enough dialogue for a baseline register, and an answer that is not an
-    abstention (`none`/`neutral`, or a `none` + `neutral` mass at or above
-    `mood_abstention_mass`). Confidence is not a gate: on this model it is a
-    linear rescaling of the top probability. `mood.justified` is recorded as
-    advisory evidence and never blocks.
-    """
-    floor = int(policy["min_dialogue_lines_for_mood"])
-    justified = justified_check.get("decision") == "yes"
-    preset = selected if selected not in (None, "none", "neutral") else None
-    distribution = answer.get("probabilities") or {}
-    abstention = float(distribution.get("none", 0.0)) + float(distribution.get("neutral", 0.0))
-    blocked_by = []
-    if selected is None:
-        blocked_by.append("low_probability")
-    elif preset is None:
-        blocked_by.append("none_winner")
-    if abstention >= float(policy.get("mood_abstention_mass", 0.55)):
-        blocked_by.append("abstention_mass")
-    if line_count < floor:
-        blocked_by.append("insufficient_volume")
-    accepted = not blocked_by
-    return {
-        "preset": preset if accepted else "none",
-        "archon": preset if accepted else "neutral",
-        "accepted": accepted,
-        "justified": justified,
-        "gate": {
-            "selected": selected,
-            "confidence": choice_check.get("confidence"),
-            "selected_probability": choice_check.get("selected_probability"),
-            "choice_accepted": bool(choice_check.get("accepted")),
-            "yes_probability": justified_check.get("yes_probability"),
-            "abstention_mass": round(abstention, 4),
-            "line_count": line_count,
-            "min_dialogue_lines": floor,
-            "thresholds": {
-                "probability": policy["mood_probability"],
-                "abstention_mass": policy.get("mood_abstention_mass", 0.55),
-            },
-        },
-        "blocked_by": blocked_by,
-        "probabilities": answer.get("probabilities"),
-        "method": f"{provider}_choice" if accepted else "default",
-    }
-
-
 def classify_dossier(
     dossier: dict,
     provider: ClassifierProvider,
@@ -255,89 +185,13 @@ def classify_dossier(
     questions = build_questions(vocabulary)
     statistics = dossier.get("statistics") or {}
     line_count = int(statistics.get("unique_line_count") or statistics.get("dialogue_count") or 0)
-    mood_questions = {
-        question_id: question
-        for question_id, question in questions.items()
-        if question_id.startswith("mood.")
-    }
-    base_questions = {
-        question_id: question
-        for question_id, question in questions.items()
-        if not question_id.startswith("mood.")
-    }
-    chunked = bool(getattr(provider, "supports_chunks", False))
-    chunk_plan: list[dict] = []
-    chunk_responses: list[dict] = []
-    if chunked:
-        # Mood is asked per chunk, never alongside the style questions: the
-        # style call sees the 24-line sample, and a mood answer drawn from it
-        # would be the single-scene guess the chunking exists to avoid.
-        response = (
-            provider.classify(dossier, base_questions)
-            if base_questions
-            else {
-                "model": model_id or provider.model_id,
-                "answers": {},
-                "usage": {"input_tokens": 0, "output_tokens": 0},
-            }
-        )
-        pool = dossier.get("dialogue_pool") or dossier.get("dialogue_samples") or []
-        chunk_count = plan_chunk_count(line_count, policy)
-        if chunk_count and mood_questions and chunk_count > 1 and not dossier.get("dialogue_pool"):
-            # A dossier built before the mood pool carries only the 24-line style
-            # sample. Chunking that would present one window as if it were the
-            # corpus, which is exactly the single-scene guess this path exists to
-            # prevent, so the refusal is explicit instead of silent.
-            mood: dict | None = insufficient_volume(
-                line_count, policy, provider.name, "insufficient_pool"
-            )
-        elif chunk_count and pool and mood_questions:
-            chunk_plan = build_mood_chunks(pool, chunk_count, policy)
-            for chunk in chunk_plan:
-                chunk_responses.append(
-                    provider.classify_chunk(
-                        dossier, mood_questions, {**chunk, "count": len(chunk_plan)}
-                    )
-                )
-            mood = aggregate_mood(
-                [chunk_response["answers"] for chunk_response in chunk_responses],
-                policy,
-                line_count=line_count,
-                provider=provider.name,
-                chunk_lines=[len(chunk["lines"]) for chunk in chunk_plan],
-            )
-        else:
-            mood = insufficient_volume(line_count, policy, provider.name)
-    else:
-        response = provider.classify(dossier, questions)
-        mood = None
+    response = provider.classify(dossier, questions)
     answers = dict(response["answers"])
-    if chunk_responses:
-        # The aggregate is exposed under the same question IDs, so every
-        # downstream reader sees one mean distribution instead of N answers.
-        answers["mood.preset"] = {
-            "type": "choice",
-            "choice": mood["gate"]["selected"],
-            "probabilities": mood["probabilities"],
-            "confidence": mood["gate"]["confidence"],
-        }
-        answers["mood.justified"] = {"type": "noul", "noul": mood["gate"]["yes_probability"]}
     decision_checks = {}
     accepted_choices = {}
-    # Mood is held to its own, stricter bar: a wrong default archon changes how
-    # every line of a pack sounds, while a wrong style word only changes wording.
-    mood_policy = {
-        **policy,
-        # No confidence gate for mood: confidence is a linear rescaling of the
-        # top probability on this model, so only the probability threshold bites.
-        "choice_confidence": 0.0,
-        "choice_probability": policy["mood_probability"],
-    }
     for question_id, answer in answers.items():
         if answer["type"] == "choice":
-            selected, check = _choice(
-                answer, mood_policy if question_id == "mood.preset" else policy
-            )
+            selected, check = _choice(answer, policy)
             decision_checks[question_id] = check
             if selected is not None:
                 accepted_choices[question_id] = selected
@@ -350,11 +204,6 @@ def classify_dossier(
         "input_tokens": int((response.get("usage") or {}).get("input_tokens") or 0),
         "output_tokens": int((response.get("usage") or {}).get("output_tokens") or 0),
     }
-    for chunk_response in chunk_responses:
-        chunk_usage = chunk_response.get("usage") or {}
-        usage["input_tokens"] += int(chunk_usage.get("input_tokens") or 0)
-        usage["output_tokens"] += int(chunk_usage.get("output_tokens") or 0)
-
     identity_resolved = decision_checks.get("identity_resolved", {}).get("decision") == "yes"
     if not identity_resolved:
         return {
@@ -427,33 +276,7 @@ def classify_dossier(
         "confidence": None,
     }
 
-    if mood is None:
-        mood = _mood_decision(
-            accepted_choices.get("mood.preset"),
-            decision_checks.get("mood.preset") or {},
-            decision_checks.get("mood.justified") or {},
-            answers.get("mood.preset") or {},
-            policy,
-            line_count,
-            provider.name,
-        )
-    else:
-        mood = {
-            **mood,
-            "chunking": {
-                "chunks": len(chunk_plan),
-                "chunk_chars": int(policy["mood_chunk_chars"]),
-                "overlap": float(policy["mood_chunk_overlap"]),
-                "pool_lines": len(dossier.get("dialogue_pool") or dossier.get("dialogue_samples") or []),
-                "chunk_line_counts": [len(chunk["lines"]) for chunk in chunk_plan],
-            },
-        }
-
     review_reasons = []
-    if "insufficient_pool" in (mood.get("blocked_by") or []):
-        review_reasons.append(
-            "dossier has no mood pool; re-run `dossiers` so mood can be judged on chunks"
-        )
     if not style_sufficient:
         review_reasons.append(
             f"dialogue volume {line_count} is below the style floor {style_floor}; no style recorded"
@@ -502,8 +325,6 @@ def classify_dossier(
         "answers": answers,
         "decision_checks": decision_checks,
         "distinctive": distinctive,
-        "mood": mood,
-        "pack_archon": mood["archon"],
         "speech_style": speech_style,
         "voice_claims": [
             {

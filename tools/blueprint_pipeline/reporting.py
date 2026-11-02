@@ -21,7 +21,7 @@ def review_report(
         "name": identity.get("name"),
         "game_metadata": {
             key: identity.get(key)
-            for key in ("npc_id", "race", "clan", "sex", "lore_age", "occupation", "faction", "location")
+            for key in ("npc_id", "race", "clan", "sex")
         },
         "identity_resolution": {
             "status": identity.get("resolution_status"),
@@ -29,13 +29,7 @@ def review_report(
             "ambiguous": identity.get("identity_ambiguous"),
             "reasons": identity.get("review_reasons", []),
         },
-        "wiki": {
-            "resolution": dossier.get("wiki_resolution"),
-            "page": dossier.get("wiki_page"),
-            "lore_evidence": dossier.get("lore_evidence", []),
-            "voice_evidence": dossier.get("voice_evidence", []),
-            "fact_conflicts": dossier.get("fact_conflicts", []),
-        },
+        "voice_evidence": dossier.get("voice_evidence", []),
         "dialogue_statistics": dossier.get("statistics", {}),
         "dialogue_analysis": dossier.get("dialogue_analysis", {}),
         "dialogue_samples": dossier.get("dialogue_samples", []),
@@ -112,7 +106,7 @@ def build_pipeline_report(
             if item.get("status") == "needs_review"
         ],
         "limits": [
-            "Classification and wiki snapshots are immutable and resumable.",
+            "Classification snapshots are immutable and resumable.",
             "Jev usage is reported when the provider returns token counts; this report does not estimate provider billing.",
             "Assignments are provisional until a human auditions and approves the linked profile.",
         ],

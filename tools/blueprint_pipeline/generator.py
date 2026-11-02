@@ -8,7 +8,7 @@ except ModuleNotFoundError:
     from tools import blueprint as blueprint_renderer
 
 from .cache import object_hash
-from .evidence import creative_evidence, make_evidence, source_evidence
+from .evidence import creative_evidence, make_evidence
 
 
 # Only fields with a validation story may reach a profile. `diction_style` and
@@ -20,44 +20,6 @@ VALIDATED_STYLE_FIELDS = (
     "colloquialism",
     "rhetorical_style",
 )
-
-
-def _voice_evidence_for(dossier: dict, field: str, value: str, vocabulary: dict) -> dict | None:
-    if not value:
-        return None
-    if field == "distinctive_traits" or isinstance(value, (list, dict)):
-        return None
-    field_spec = vocabulary["identity"][field]
-    values = field_spec.get("values", {})
-    if field == "timbre_secondary":
-        values = vocabulary["identity"][field_spec["ref"]]["values"]
-    rendered = str(values.get(value, {}).get("render") or value).casefold()
-    tokens = [token for token in rendered.split() if len(token) > 2]
-    for evidence in dossier.get("voice_evidence") or []:
-        quote = str(evidence.get("quote") or "")
-        quote_words = quote.casefold()
-        if tokens and all(token in quote_words for token in tokens) and evidence.get("source"):
-            return source_evidence(
-                field,
-                str(evidence.get("source_type") or "wiki_lore"),
-                str(evidence["source"]),
-                evidence.get("revision_id"),
-                quote,
-                level=str(evidence.get("level") or "explicit"),
-            )
-    return None
-
-
-MOOD_GATE_NOTES = {
-    "insufficient_volume": "too few unique lines for a baseline register",
-    "insufficient_pool": "the dialogue pool is still building",
-    "abstention_mass": "the dialogue is mostly none/neutral: no emotional baseline",
-    "none_winner": "the dominant answer was none/neutral",
-    "neutral_winner": "the dominant answer was neutral",
-    "low_consistency": "no preset led consistently across dialogue chunks",
-    "low_probability": "no preset cleared the probability threshold",
-    "high_dispersion": "the answer distribution was flat",
-}
 
 
 def build_individual_profile(
@@ -80,10 +42,6 @@ def build_individual_profile(
         value = decision.get("value")
         identity[field] = value
         if value is None or value == []:
-            continue
-        source = _voice_evidence_for(dossier, field, value, vocabulary)
-        if source is not None:
-            evidence[field] = source
             continue
         level = decision.get("level") or "creative_selection"
         rule = decision.get("rule")
@@ -154,45 +112,7 @@ def build_individual_profile(
         if answer.get("type") in {"choice", "score"} and answer.get("confidence") is not None
     ]
     confidence = min(confidence_values) if confidence_values else None
-    source_url = (
-        (dossier.get("wiki_page") or {}).get("url")
-        or f"game:ENpcResident/{identity_context.get('npc_id')}"
-    )
-    mood = classification.get("mood") or {}
-    pack_archon = str(mood.get("archon") or "neutral")
-    blocked = [MOOD_GATE_NOTES.get(token, token) for token in (mood.get("blocked_by") or [])]
-    gate = mood.get("gate") or {}
-    if gate.get("chunks"):
-        chunk_note = (
-            f"{gate.get('agreeing_chunks')} of {gate.get('chunks')} dialogue chunks agreed, "
-            f"dispersion {gate.get('dispersion')}"
-        )
-    else:
-        chunk_note = "no chunked evidence"
-    if pack_archon != "neutral":
-        moods = {pack_archon: {}}
-        evidence["pack_archon"] = creative_evidence(
-            "pack_archon",
-            "Default archon chosen by the classification model: "
-            f"preset `{pack_archon}`, confidence {gate.get('confidence')}, "
-            f"p={gate.get('selected_probability')}, "
-            f"{gate.get('line_count')} unique lines; {chunk_note}; "
-            "mean of the per-chunk distributions. "
-            "Audition it against neutral before packing; it is a proposal, not canon.",
-            source="blueprint_pipeline.classifier:mood",
-        )
-    else:
-        moods = {}
-        evidence["pack_archon"] = make_evidence(
-            "pack_archon",
-            "default",
-            note=(
-                "Neutral archon. "
-                + ("; ".join(blocked) or "no mood evidence recorded")
-                + f". {chunk_note}; judged from dialogue alone."
-                " Neutral is the project default until a source justifies another archon."
-            ),
-        )
+    source_url = f"game:ENpcResident/{identity_context.get('npc_id')}"
     profile = {
         "schema_version": vocabulary["schema_version"],
         "profile_version": 1,
@@ -204,7 +124,6 @@ def build_individual_profile(
             "race": identity_context.get("race"),
             "clan": identity_context.get("clan"),
             "sex": identity_context.get("sex", "unknown"),
-            "lore_age": identity_context.get("lore_age"),
             "role": identity_context.get("occupation"),
             "source_url": source_url,
             "applies_to": identity_context.get("speaker_ids", []),
@@ -220,14 +139,12 @@ def build_individual_profile(
             "source_audit_hash": object_hash(classification),
             "timestamp": classification.get("timestamp", ""),
         },
-        "moods": moods,
         "lifecycle": {
             "status": "draft",
             "classification_confidence": confidence,
             "manual_override": False,
             "approval": None,
         },
-        "pack_archon": pack_archon,
         "evidence": evidence,
         "qc": {
             "reference_duration_ok": False,

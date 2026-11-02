@@ -7,12 +7,11 @@ record, and the rendered identity prompt may not contain emotion words.
 
     python3 tools/blueprint.py check                 # every blueprint
     python3 tools/blueprint.py check blueprints/characters/gerolt.json
-    python3 tools/blueprint.py render gerolt         # neutral instruct
-    python3 tools/blueprint.py render gerolt --moods # every mood instruct
+    python3 tools/blueprint.py render gerolt         # full instruct
     python3 tools/blueprint.py plan gerolt --out /tmp/plan
 
 `plan` emits the JSON a generator needs: the shared reference script, the
-VoiceDesign instruct per mood, and a deterministic seed per voice/mood pair.
+VoiceDesign instruct, and its deterministic seed.
 """
 from __future__ import annotations
 
@@ -90,6 +89,9 @@ def vocabulary_for_profile(profile: dict, fallback: dict | None = None) -> dict:
     version = profile.get("schema_version")
     if version == "1.0" and LEGACY_VOCABULARY.is_file():
         return load_vocabulary(LEGACY_VOCABULARY)
+    legacy_11 = ROOT / "blueprints" / "migrations" / "vocabulary-1.1.json"
+    if version == "1.1" and legacy_11.is_file():
+        return load_vocabulary(legacy_11)
     return fallback or load_vocabulary()
 
 
@@ -174,42 +176,13 @@ def render_identity(profile: dict, vocab: dict) -> str:
     ).strip()
 
 
-def _mood_settings(profile: dict, vocab: dict, mood_id: str) -> dict:
-    preset = vocab["moods"]["presets"][mood_id]
-    overrides = (profile.get("moods") or {}).get(mood_id) or {}
-    settings = {key: preset[key] for key in vocab["moods"]["override_fields"]}
-    settings["phrase"] = preset["phrase"]
-    settings.update(overrides)
-    return settings
-
-
-def render_mood(profile: dict, vocab: dict, mood_id: str) -> str:
-    settings = _mood_settings(profile, vocab, mood_id)
-    moods = vocab["moods"]
-    return vocab["render"]["mood_template"].format(
-        phrase=settings["phrase"],
-        intensity=moods["intensities"][settings["intensity"]]["render"],
-        energy=moods["energy"][settings["energy"]],
-        projection=moods["projection"][settings["projection"]],
-        pace=moods["pace"][settings["pace"]],
-        pitch_movement=moods["pitch_movement"][settings["pitch_movement"]],
-        articulation=moods["articulation"][settings["articulation"]],
-        rhythm=moods["rhythm"][settings["rhythm"]],
-    )
-
-
-def mood_ids(profile: dict) -> list[str]:
-    keys = list((profile.get("moods") or {}).keys())
-    return keys or ["neutral"]
-
-
-def pack_archon(profile: dict) -> str:
-    """The single archon a pack uses for every line of this character."""
-    return profile.get("pack_archon") or "neutral"
-
-
 def render_style(profile: dict, vocab: dict) -> str:
-    """Render the speech-style clause, or "" when the profile carries no style."""
+    """Render the speech-style clause, or "" when the profile carries no style.
+
+    Listening on 2026-11-03 preferred styled takes over identity-only ones for
+    every sampled voice, so the clause is part of the default render. It is
+    appended, never merged: the identity sentence stays byte-identical.
+    """
     style = profile.get("speech_style") or {}
     dimensions = vocab.get("speech_style", {}).get("dimensions") or {}
     values = {}
@@ -222,15 +195,9 @@ def render_style(profile: dict, vocab: dict) -> str:
     return vocab["render"]["style_template"].format(**values)
 
 
-def render_instructs(profile: dict, vocab: dict, with_style: bool = False) -> dict:
-    identity = render_identity(profile, vocab)
-    style = render_style(profile, vocab) if with_style else ""
-    base = f"{identity}{style}"
-    return {
-        mood: base if mood == "neutral" and not (profile.get("moods") or {}).get(mood)
-        else f"{base} {render_mood(profile, vocab, mood)}"
-        for mood in mood_ids(profile)
-    }
+def render_instruct(profile: dict, vocab: dict) -> str:
+    """Identity sentence, then the style clause when the profile has one."""
+    return f"{render_identity(profile, vocab)}{render_style(profile, vocab)}"
 
 
 # --------------------------------------------------------------------------
@@ -248,9 +215,9 @@ def validate_profile(profile: dict, vocab: dict, name: str = "<profile>") -> lis
 
     if profile.get("schema_version") != vocab["schema_version"]:
         err(f"schema_version must be {vocab['schema_version']!r}")
-    if profile.get("schema_version") not in {"1.0", "1.1"}:
-        err("schema_version must be a supported profile version (1.0 or 1.1)")
-    is_v11 = profile.get("schema_version") == "1.1"
+    if profile.get("schema_version") not in {"1.0", "1.1", "1.2"}:
+        err("schema_version must be a supported profile version (1.0, 1.1 or 1.2)")
+    is_v11 = profile.get("schema_version") in {"1.1", "1.2"}
     if is_v11 and profile.get("profile_kind") not in {"character", "archetype"}:
         err("profile_kind must be character or archetype")
     version = profile.get("profile_version")
@@ -263,6 +230,26 @@ def validate_profile(profile: dict, vocab: dict, name: str = "<profile>") -> lis
             err(f"character.{field} is required")
     if character.get("id") and not re.fullmatch(r"[a-z0-9][a-z0-9_]*", character["id"]):
         err("character.id must be lowercase letters, digits, and underscores")
+
+    if profile.get("schema_version") == "1.2":
+        for key in ("moods", "pack_archon", "archon_pin"):
+            if key in profile:
+                err(f"{key} was removed in schema 1.2; use reference_pin")
+        if "lore_age" in character:
+            err("character.lore_age was removed in schema 1.2")
+        style = profile.get("speech_style")
+        if isinstance(style, dict):
+            for key in ("diction_style", "contraction_frequency", "speech_habits"):
+                if key in style:
+                    err(f"speech_style.{key} is not a schema 1.2 field")
+        pin = profile.get("reference_pin")
+        if pin is not None:
+            if not isinstance(pin, dict):
+                err("reference_pin must be an object")
+            else:
+                for field in ("design_seed", "reference_sha256", "ref_seconds", "pinned_on"):
+                    if field not in pin:
+                        err(f"reference_pin.{field} is required")
 
     identity = profile.get("identity") or {}
     for field in REQUIRED_IDENTITY:
@@ -396,10 +383,9 @@ def validate_profile(profile: dict, vocab: dict, name: str = "<profile>") -> lis
                 for field in ("approved_by", "approved_at", "reference_sha256"):
                     if not approval.get(field):
                         err(f"lifecycle.approval.{field} is required for approval")
-                archons = profile.get("archon_pin") or {}
-                hashes = {item.get("reference_sha256") for item in archons.values() if isinstance(item, dict)}
-                if approval.get("reference_sha256") not in hashes:
-                    err("approved reference_sha256 must match a pinned archon reference")
+                pin = profile.get("reference_pin") or {}
+                if pin.get("reference_sha256") != approval.get("reference_sha256"):
+                    err("approved reference_sha256 must match the pinned reference clip")
         elif approval is not None:
             err("unapproved profiles may not carry human lifecycle.approval details")
         if profile.get("profile_kind") == "archetype":
@@ -425,30 +411,6 @@ def validate_profile(profile: dict, vocab: dict, name: str = "<profile>") -> lis
                     f"supported_inference evidence, got {level!r}"
                 )
 
-    # moods
-    allowed_moods = set(vocab["moods"]["allowed_presets"])
-    archon = profile.get("pack_archon")
-    if archon is not None:
-        declared = set(profile.get("moods") or {}) | {"neutral"}
-        if archon not in allowed_moods:
-            err(f"pack_archon {archon!r} is not a preset")
-        elif archon not in declared:
-            err(f"pack_archon {archon!r} has no archon declared in moods")
-    for mood, overrides in (profile.get("moods") or {}).items():
-        if mood not in allowed_moods:
-            err(f"moods.{mood!r} is not a preset; allowed: {sorted(allowed_moods)}")
-            continue
-        overrides = overrides or {}
-        unknown = set(overrides) - set(vocab["moods"]["override_fields"])
-        if unknown:
-            err(f"moods.{mood} has unknown overrides {sorted(unknown)}")
-        if len(overrides) > 2:
-            err(f"moods.{mood} overrides {len(overrides)} fields; at most 2 are allowed")
-        for key, value in overrides.items():
-            table = vocab["moods"].get(key)
-            if isinstance(table, dict) and value not in table:
-                err(f"moods.{mood}.{key} = {value!r} is not in the vocabulary")
-
     # rendered prompt hygiene: unknown values make this raise
     if not errors:
         prompt = render_identity(profile, vocab)
@@ -456,7 +418,7 @@ def validate_profile(profile: dict, vocab: dict, name: str = "<profile>") -> lis
         tokens = re.findall(r"[a-z]+", prompt.lower())
         hits = sorted({t for t in tokens if t in banned})
         if hits:
-            err(f"identity prompt contains emotion words {hits}; move them to a mood")
+            err(f"identity prompt contains emotion words {hits}")
         low, high = vocab["render"]["identity_word_target"]
         words = len(prompt.split())
         if not low <= words <= high:
@@ -497,14 +459,14 @@ def find_collisions(profiles: list[dict], vocab: dict) -> list[tuple[tuple, list
 # --------------------------------------------------------------------------
 
 
-def seed_for(voice_id: str, mood: str, base: int = 20261101) -> int:
-    digest = hashlib.sha256(f"{voice_id}:{mood}".encode()).hexdigest()
+def seed_for(voice_id: str, base: int = 20261101) -> int:
+    digest = hashlib.sha256(voice_id.encode()).hexdigest()
     return base + int(digest[:8], 16) % 1_000_000
 
 
-def build_plan(profile: dict, vocab: dict, with_style: bool = False) -> dict:
+def build_plan(profile: dict, vocab: dict) -> dict:
     voice_id = profile["character"]["id"]
-    instructs = render_instructs(profile, vocab, with_style=with_style)
+    instruct = render_instruct(profile, vocab)
     reference = vocab["reference"]
     return {
         "profile_id": voice_id,
@@ -517,11 +479,8 @@ def build_plan(profile: dict, vocab: dict, with_style: bool = False) -> dict:
         },
         "design_model": vocab["models"]["design"],
         "clone_model": vocab["models"]["clone"],
-        "pack_archon": pack_archon(profile),
-        "variants": {
-            mood: {"instruct": instruct, "seed": seed_for(voice_id, mood)}
-            for mood, instruct in instructs.items()
-        },
+        "instruct": instruct,
+        "seed": seed_for(voice_id),
     }
 
 
@@ -618,16 +577,11 @@ def cmd_render(args) -> int:
         for error in errors:
             print(error, file=sys.stderr)
         return 1
-    instructs = render_instructs(profile, vocab)
+    instruct = render_instruct(profile, vocab)
     if args.json:
-        payload = dict(instructs) if args.moods else instructs["neutral"]
-        print(json.dumps(payload, indent=2))
+        print(json.dumps(instruct, indent=2))
         return 0
-    if args.moods:
-        for mood, text in instructs.items():
-            print(f"[{mood}]\n{text}\n")
-    else:
-        print(instructs["neutral"])
+    print(instruct)
     return 0
 
 
@@ -640,7 +594,7 @@ def cmd_plan(args) -> int:
         for error in errors:
             print(error, file=sys.stderr)
         return 1
-    plan = build_plan(profile, vocab, with_style=getattr(args, "with_style", False))
+    plan = build_plan(profile, vocab)
     text = json.dumps(plan, indent=2, ensure_ascii=False) + "\n"
     if args.out:
         out = pathlib.Path(args.out)
@@ -688,12 +642,36 @@ def migrate_profile_1_0(profile: dict) -> dict:
     return migrated
 
 
+def migrate_profile_1_1(profile: dict) -> dict:
+    if profile.get("schema_version") != "1.1":
+        raise BlueprintError("only schema 1.1 profiles can use this migration")
+    migrated = json.loads(json.dumps(profile))
+    migrated["schema_version"] = "1.2"
+    migrated.pop("moods", None)
+    migrated.pop("pack_archon", None)
+    migrated.pop("archon_pin", None)
+    style = migrated.get("speech_style")
+    if isinstance(style, dict):
+        for key in ("diction_style", "contraction_frequency", "speech_habits"):
+            style.pop(key, None)
+    character = migrated.get("character")
+    if isinstance(character, dict):
+        character.pop("lore_age", None)
+    note = "Explicitly migrated from schema 1.1; the mood/archon layer and wiki-derived lore fields were removed. Identity, style and lifecycle values were preserved."
+    migrated["notes"] = (migrated.get("notes", "").strip() + "\n\n" + note).strip()
+    return migrated
+
+
 def cmd_migrate(args) -> int:
     from blueprint_pipeline.cache import write_immutable_json
 
     source_path = resolve_profile(args.target)
     profile = load_json(source_path)
-    migrated = migrate_profile_1_0(profile)
+    version = profile.get("schema_version")
+    if version not in {"1.0", "1.1"}:
+        raise BlueprintError(f"only schema 1.0 or 1.1 profiles can be migrated, got {version!r}")
+    migrated = migrate_profile_1_0(profile) if version == "1.0" else profile
+    migrated = migrate_profile_1_1(migrated)
     destination = pathlib.Path(args.out) if args.out else (
         ROOT / "data" / "blueprints" / "profiles" / f"{profile['character']['id']}.json"
     )
@@ -714,21 +692,15 @@ def main(argv: list[str] | None = None) -> int:
 
     render = sub.add_parser("render", help="render the VoiceDesign instruct")
     render.add_argument("target")
-    render.add_argument("--moods", action="store_true")
     render.add_argument("--json", action="store_true")
     render.set_defaults(func=cmd_render)
 
     plan = sub.add_parser("plan", help="emit the generation plan JSON")
     plan.add_argument("target")
     plan.add_argument("--out", type=pathlib.Path)
-    plan.add_argument(
-        "--with-style",
-        action="store_true",
-        help="append the profile's speech_style clause to the identity instruct",
-    )
     plan.set_defaults(func=cmd_plan)
 
-    migrate = sub.add_parser("migrate-1.0", help="explicitly migrate one schema 1.0 profile to 1.1")
+    migrate = sub.add_parser("migrate", help="explicitly migrate one profile to schema 1.2")
     migrate.add_argument("target")
     migrate.add_argument("--out", type=pathlib.Path)
     migrate.set_defaults(func=cmd_migrate)

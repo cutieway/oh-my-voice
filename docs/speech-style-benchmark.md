@@ -21,13 +21,10 @@ part of this question.
 
 ## 2. Evidence sources, in priority order
 
-1. **In-game data first.** `dialogue.db` lines per speaker, `ENpcResident` /
+1. **In-game data only.** `dialogue.db` lines per speaker, `ENpcResident` /
    `ENpcBase` metadata, and the SCD voice files. This is measured, offline, and
-   already what dossiers are built from.
-2. **Wiki API second.** `MediaWikiProvider` infobox text, opt-in with
-   `--allow-network`, rate-limited, cached under `data/blueprints/cache/wiki`.
-   Use it for descriptions the game data does not carry, never to overrule it.
-3. **Anything else only if it adds signal.** SCD audio through x-vectors,
+   what dossiers are built from. The MediaWiki source was removed on 2026-11-03.
+2. **Anything else only if it adds signal.** SCD audio through x-vectors,
    existing hand-authored archetypes as a sanity check. Each addition needs a
    reason; volume is not a reason.
 
@@ -47,7 +44,7 @@ them:
 
 ```bash
 python3 -m tools.blueprint_pipeline.cli compose --only npc_1003075
-./scripts/voicebank.sh --with-style --samples 1 data/blueprints/profiles/<profile>.json
+./scripts/voicebank.sh --samples 1 data/blueprints/profiles/<profile>.json
 ```
 
 Ten-NPC audition from 2026-11-01: `data/samples/voicebank/jev10/` (`montage.wav`
@@ -69,16 +66,16 @@ pipeline's `jev.build_questions()` already emits this.
 
 ## 3b. Where style is allowed to act
 
-Style and mood are inputs to **reference generation only** — the VoiceDesign
-step that produces one clip per archon. Dialogue lines are then cloned from that
-reference with no style or mood instruction, so a per-line style would be a
-second, undocumented control path (`blueprints/README.md`,
-"Archons, not per-line moods").
+Style is an input to **reference generation only** — the VoiceDesign step that
+produces the one clip a pack is built from. Dialogue lines are then cloned from
+that reference; the Base model never reads a style instruction, so a per-line
+style would be a second, undocumented control path.
 
-Code path: `blueprint.py render_style()` appends the clause to the identity
-instruct, `plan --with-style` opts in, and `voicebank.sh --with-style` passes it
-through. The clone step (`tools/voicebank/run.py`, `tools/qwen/generate.py`)
-never reads it.
+Current code path: `blueprint.py render_style()` appends the clause to the
+identity instruct, and every plan carries the resulting instruct. There is no
+opt-in flag. Style was opt-in from 2026-11-02 until 2026-11-03, when listening
+preferred it for every sampled voice; the mood layer that confounded the earlier
+A/B was removed at the same time. See `style-ab-2026-11-02.md` for that history.
 
 Measured effect, one profile, one seed, otherwise identical inputs:
 
@@ -89,8 +86,9 @@ Measured effect, one profile, one seed, otherwise identical inputs:
 
 Re-rendering the identity-only plan twice produced byte-identical WAVs
 (`sha256 739ed00d…`), so the shift is caused by the clause, not sampling noise.
-Appending style therefore does move the reference voice; that is the sanctioned
-use, but it means "style never touches acoustics" is not true for the reference.
+The clause therefore moves the reference voice, including pitch; that is the
+sanctioned effect and the reason the identity text is kept byte-identical, so
+the move is always attributable to the style clause alone.
 
 ## 4. What the benchmark harness adds
 

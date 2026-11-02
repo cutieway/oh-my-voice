@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.1",
+  "schema_version": "1.2",
   "kind": "voicebank_vocabulary",
   "purpose": "Closed vocabulary for synthetic Qwen3-TTS blueprints. Acoustic identity and textual speech style are separately classified; every value is closed, evidenced, and rendered deterministically.",
   "models": {
@@ -541,220 +541,6 @@
       ]
     }
   },
-  "moods": {
-    "status": "generated per character and auditioned; not per-line",
-    "purpose": "The mood layer is a separate reference recording per state. It exists so the same identity can be performed in different emotional registers without redrawing the character.",
-    "implementation_rules": [
-      "A mood is baked into its own VoiceDesign reference clip and its own cached ICL prompt. It is never passed to the Base model as text.",
-      "The identity prompt is identical across a character's archons; only the trailing mood block differs.",
-      "Every archon speaks the same reference script as the neutral clip.",
-      "NEVER select an archon per dialogue line. Listening on 2026-11-01 found the shift between archons far too large: the same character would change voice mid-conversation.",
-      "Archon choice is a casting decision made once per character, recorded in pack_archon, and defaulting to neutral.",
-      "Neutral is the basis. It is deliberately the least expressive of the archons and is what every character packs with until a source justifies otherwise.",
-      "Add an archon only when the source material describes how the character sounds by default, not when a scene happens to be emotional.",
-      "Every character needs a neutral archon. Mood archons are optional and are auditioned against each other before one is chosen for packing."
-    ],
-    "intensities": {
-      "subtle": {
-        "level": 1,
-        "render": "subtle"
-      },
-      "mild": {
-        "level": 2,
-        "render": "mild"
-      },
-      "moderate": {
-        "level": 3,
-        "render": "moderate"
-      },
-      "strong": {
-        "level": 4,
-        "render": "strong"
-      },
-      "extreme": {
-        "level": 5,
-        "render": "extreme"
-      }
-    },
-    "energy": {
-      "very_low": "very low",
-      "low": "low",
-      "moderate": "moderate",
-      "high": "high",
-      "very_high": "very high"
-    },
-    "projection": {
-      "very_soft": "very soft",
-      "soft": "soft",
-      "conversational": "conversational",
-      "projected": "projected",
-      "forceful": "forceful",
-      "shouting": "shouting",
-      "whispering": "whispering"
-    },
-    "pace": {
-      "very_slow": "very slow",
-      "slow": "slow",
-      "measured": "measured",
-      "normal": "moderate",
-      "brisk": "brisk",
-      "fast": "fast",
-      "rushed": "rushed"
-    },
-    "pitch_movement": {
-      "restrained": "restrained",
-      "natural": "natural",
-      "expressive": "expressive",
-      "wide": "wide-ranging",
-      "unstable": "unstable",
-      "rising": "rising",
-      "falling": "falling"
-    },
-    "articulation": {
-      "softened": "softened",
-      "crisp": "crisp",
-      "firm": "firm",
-      "clipped": "clipped",
-      "deliberate": "deliberate",
-      "slurred": "slurred",
-      "breathy": "breathy",
-      "strained": "strained",
-      "hesitant": "hesitant",
-      "fluid": "fluid"
-    },
-    "rhythm": {
-      "even": "even",
-      "measured": "measured",
-      "conversational": "conversational",
-      "erratic": "erratic",
-      "hesitant": "hesitant with pauses",
-      "staccato": "staccato",
-      "flowing": "flowing",
-      "dramatic": "dramatic"
-    },
-    "presets": {
-      "neutral": {
-        "phrase": "plain, unforced emotion",
-        "intensity": "subtle",
-        "energy": "moderate",
-        "projection": "conversational",
-        "pace": "normal",
-        "pitch_movement": "natural",
-        "articulation": "crisp",
-        "rhythm": "conversational",
-        "classification_description": "No distinct default register: ordinary, unforced delivery. Choose this only when the character genuinely reads as neutral; choose none when the evidence is too thin to tell the difference."
-      },
-      "calm": {
-        "phrase": "settled calm",
-        "intensity": "mild",
-        "energy": "low",
-        "projection": "soft",
-        "pace": "measured",
-        "pitch_movement": "restrained",
-        "articulation": "softened",
-        "rhythm": "even",
-        "classification_description": "Habitually settled and unhurried, with steady volume even when the scene is tense."
-      },
-      "happy": {
-        "phrase": "warm happiness",
-        "intensity": "moderate",
-        "energy": "high",
-        "projection": "conversational",
-        "pace": "brisk",
-        "pitch_movement": "expressive",
-        "articulation": "fluid",
-        "rhythm": "flowing",
-        "classification_description": "Habitually warm and upbeat; the good humour is part of the character, not one reaction."
-      },
-      "sad": {
-        "phrase": "quiet sadness",
-        "intensity": "moderate",
-        "energy": "low",
-        "projection": "soft",
-        "pace": "slow",
-        "pitch_movement": "restrained",
-        "articulation": "softened",
-        "rhythm": "even",
-        "classification_description": "Habitually subdued and low-energy; a persistent melancholy in ordinary talk."
-      },
-      "angry": {
-        "phrase": "controlled anger",
-        "intensity": "moderate",
-        "energy": "high",
-        "projection": "forceful",
-        "pace": "measured",
-        "pitch_movement": "restrained",
-        "articulation": "firm",
-        "rhythm": "staccato",
-        "classification_description": "Habitually forceful and clipped; irritation or command is the baseline, not an outburst."
-      },
-      "fearful": {
-        "phrase": "nervous fear",
-        "intensity": "moderate",
-        "energy": "high",
-        "projection": "soft",
-        "pace": "rushed",
-        "pitch_movement": "unstable",
-        "articulation": "strained",
-        "rhythm": "erratic",
-        "classification_description": "Habitually nervous and rushed; anxiety shows in ordinary lines, not only in danger."
-      },
-      "secretive": {
-        "phrase": "conspiratorial secrecy",
-        "intensity": "mild",
-        "energy": "low",
-        "projection": "whispering",
-        "pace": "slow",
-        "pitch_movement": "restrained",
-        "articulation": "softened",
-        "rhythm": "hesitant",
-        "classification_description": "Habitually hushed and conspiratorial; speaks as if someone may be listening."
-      }
-    },
-    "allowed_presets": [
-      "neutral",
-      "calm",
-      "happy",
-      "sad",
-      "angry",
-      "fearful",
-      "secretive"
-    ],
-    "override_fields": [
-      "intensity",
-      "energy",
-      "projection",
-      "pace",
-      "pitch_movement",
-      "articulation",
-      "rhythm"
-    ],
-    "rules": [
-      "The neutral variant is the identity prompt alone. It exists as a preset only so a profile can override it; with no overrides the renderer emits no mood block and the identity text is used verbatim.",
-      "Presets are the only moods. Do not invent free-form mood names.",
-      "Overrides may change at most two fields from the preset; a third override means the preset is wrong and should be corrected here first.",
-      "Reserve extreme intensity for a deliberate decision; ordinary dialogue lives at subtle to moderate.",
-      "shouting and whispering are production styles, not emotions; do not use them as the default mood of a character."
-    ],
-    "definition": "One mood reference is an ARCHON: a designed reference clip plus its cached ICL prompt. A character owns a small set of archons (neutral plus whichever moods the source justifies). A pack uses exactly one archon for all of that character's lines, and that archon's clip is pinned by hash.",
-    "archon_pinning": {
-      "unit": "the reference clip, not a per-line seed",
-      "rule": "One approved reference WAV per archon is stored and hashed. Every dialogue line for that character is cloned from that clip through create_voice_clone_prompt, so identity is fixed without seeding individual lines.",
-      "why_not_a_line_seed": "Measured 2026-11-01: two lines from the same take score 0.991-0.994 cosine, two lines from different takes 0.984-0.994, and per-line pitch scatter inside one take exceeds the mean gap between takes. A line seed does not carry identity.",
-      "why_not_only_a_design_seed": "The same seed produces a different clip when dtype, attention backend, torch build, or the reference script change. The hash is the durable guarantee; the design seed is kept for reproducibility.",
-      "fields": [
-        "design_seed",
-        "reference_sha256",
-        "ref_seconds",
-        "ref_f0",
-        "pinned_on"
-      ]
-    },
-    "archon_none": {
-      "render": "none",
-      "classification_description": "Not enough evidence for any default emotional register. Packs the neutral archon."
-    }
-  },
   "render": {
     "identity_word_target": [
       25,
@@ -771,8 +557,8 @@
       "accent": ", carrying a {strength} {accent} accent",
       "traits": " Notable vocal traits: {traits}."
     },
-    "mood_template": "For this take, speak with {phrase}, at {intensity} emotional intensity. Use {energy} vocal energy, {projection} projection, and a {pace} speaking pace. The delivery should carry {pitch_movement} intonation, {articulation} articulation, and {rhythm} rhythm.",
-    "mood_composition": "mood_instruct = identity_prompt + ' ' + mood_template(rendered). The identity text is byte-identical across every mood of a character; only the trailing mood block changes.",
+    "style_template": " The wording is {register} in register, {vocabulary_complexity} in vocabulary, {sentence_complexity} in sentence structure, {colloquialism} in colloquialism, and {rhetorical_style} in rhetorical shape.",
+    "style_note": "Appended by default when a profile carries speech_style; describes performed wording, and is never merged into the identity sentence.",
     "article_rule": "Use 'An' when the rendered phrase starts with a vowel sound (adult, ageless, ancient, elderly, androgynous), otherwise 'A'.",
     "banned_identity_words": [
       "happy",
@@ -803,9 +589,7 @@
       "loving"
     ],
     "banned_identity_words_reason": "Identity is the constant; emotion belongs to the mood layer. An emotion word in the identity prompt makes every line of the character permanently emotional.",
-    "word_target_note": "48 is the hard ceiling: it still fits accent plus secondary timbre plus two traits. Anything longer dilutes the description, and Qwen's own voice-design examples are shorter.",
-    "style_template": " The wording is {register} in register, {vocabulary_complexity} in vocabulary, {sentence_complexity} in sentence structure, {colloquialism} in colloquialism, and {rhetorical_style} in rhetorical shape.",
-    "style_note": "Optional speech-style clause rendered only when a plan asks for it; it describes wording, never pitch, timbre, or accent."
+    "word_target_note": "48 is the hard ceiling: it still fits accent plus secondary timbre plus two traits. Anything longer dilutes the description, and Qwen's own voice-design examples are shorter."
   },
   "evidence": {
     "values": {
@@ -857,7 +641,7 @@
     ]
   },
   "speech_style": {
-    "purpose": "Closed classification of how text is written and phrased. Speech style is separate from acoustic identity and is never appended to the VoiceDesign identity prompt.",
+    "purpose": "Closed classification of how text is written and phrased. Speech style is separate from acoustic identity, but its rendered clause is appended to every instruct by default because listeners preferred it.",
     "dimensions": {
       "register": {
         "question": "What register best describes the dialogue wording?",
@@ -1141,19 +925,6 @@
           "false": "No source quote describes an audible voice quality."
         }
       },
-      "mood.preset": {
-        "type": "choice",
-        "instructions": "Which single mood preset describes how this character sounds by DEFAULT across ordinary dialogue? Judge the baseline register across unrelated lines, never the strongest scene. Use only the dialogue lines in this state; lore or personality text is not mood evidence. Choose none when the lines do not show one consistent register, when they are mostly quest instructions, or when the volume is too small to tell; none is the correct answer far more often than not.",
-        "values": "moods.archon_choice"
-      },
-      "mood.justified": {
-        "type": "noul",
-        "instructions": "Does the dialogue itself show a default emotional register for this character, rather than the emotion of individual scenes?",
-        "criteria": {
-          "true": "Lines from unrelated scenes share one register, and ordinary lines carry it as clearly as dramatic ones.",
-          "false": "The register varies by scene, the lines are mostly instructions or one-off exclamations, or there are too few lines to tell."
-        }
-      },
       "speech_style.register": {
         "type": "choice",
         "instructions": "Which register best describes the actual wording in the sampled dialogue?",
@@ -1188,16 +959,8 @@
       "distinctiveness_score": 3.7,
       "min_dialogue_lines_for_individual": 50,
       "min_dialogue_lines_for_review": 5,
-      "mood_probability": 0.5,
       "min_dialogue_lines_for_mood": 40,
-      "min_dialogue_lines_for_style": 40,
-      "mood_consistency_ratio": 0.6,
-      "mood_consistency_margin": 0.05,
-      "mood_dispersion_limit": 0.55,
-      "mood_chunk_chars": 7000,
-      "mood_chunk_overlap": 0.15,
-      "mood_max_chunks": 8,
-      "mood_abstention_mass": 0.55
+      "min_dialogue_lines_for_style": 40
     },
     "confidence_policy": [
       "Choice confidence and probability are both retained; low confidence routes to review or a shared archetype.",
@@ -1224,6 +987,7 @@
   },
   "schema_migrations": {
     "1.0_to_1.1": "Adds speech-style classifications, lifecycle and classification provenance. Existing identity selections and the Qwen reference script keep their original meanings. Use the explicit blueprint migration command; old profiles are never silently rewritten.",
-    "reference_script_policy": "The schema 1.0 npc_reference_v1 script remains byte-for-byte unchanged."
+    "reference_script_policy": "The schema 1.0 npc_reference_v1 script remains byte-for-byte unchanged.",
+    "1.1_to_1.2": "Removes the mood/archon layer and the wiki-derived lore fields. Profiles keep identity, speech style, lifecycle and evidence unchanged; migration is explicit."
   }
 }

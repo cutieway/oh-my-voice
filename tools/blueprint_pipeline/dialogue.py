@@ -365,7 +365,7 @@ def _bucket_quotas(counts: dict[str, int], max_count: int) -> dict[str, int]:
 def _signal_hits(text: str, signals: dict) -> list[str]:
     """Name the closed-vocabulary signals a line actually contains.
 
-    These names travel with the sample, so a style or mood answer can be traced
+    These names travel with the sample, so a style answer can be traced
     back to the lines that supported it instead of an opaque "the model read
     something".
     """

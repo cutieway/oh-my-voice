@@ -72,17 +72,6 @@ def _resolve_values(vocabulary: dict, path: str) -> dict:
     if path.startswith("speech_style."):
         field = path.split(".", 1)[1]
         return vocabulary["speech_style"]["dimensions"][field]["values"]
-    if path == "moods.archon_choice":
-        # Exactly the presets plus `none`, so the option list cannot drift from
-        # allowed_presets and no free-form mood name can be answered.
-        moods = vocabulary["moods"]
-        choices = {"none": moods["archon_none"]}
-        for preset in moods["allowed_presets"]:
-            entry = moods["presets"].get(preset)
-            if entry is None:
-                raise ValueError(f"allowed preset {preset!r} has no entry in moods.presets")
-            choices[preset] = entry
-        return choices
     raise ValueError(f"unsupported question vocabulary path: {path}")
 
 
@@ -91,11 +80,9 @@ def _resolve_values(vocabulary: dict, path: str) -> dict:
 GUARDRAILS = (
     "This is synthetic casting; there is no original recording to discover.",
     "Race, clan, sex, body, occupation, and personality are not acoustic evidence.",
-    "Dialogue text can support speech style, but cannot establish pitch or timbre.",
+    "Dialogue text supports speech style and is rendered into the voice instruct, but cannot establish pitch or timbre.",
     "dialogue_coverage says how much of the corpus you actually see; never claim more than it supports.",
-    "A mood is one archon chosen for the whole character, never a per-line emotion. Neutral is the default.",
-    "A mood answer must come from the dialogue lines themselves; lore or personality text is not mood evidence.",
-    "Judge the baseline register across ordinary, unrelated lines. A dramatic scene is not a default.",
+    "Judge the baseline across ordinary, unrelated lines. A dramatic scene is not the default.",
     "Never invent source facts or citations.",
 )
 
@@ -118,66 +105,15 @@ def _coverage(statistics: dict, samples: list[dict]) -> dict:
     }
 
 
-def _lore_quotes(dossier: dict) -> list[dict]:
-    quotes = []
-    for record in dossier.get("lore_quotes") or []:
-        text = str(record.get("quote") or "").strip()
-        if text:
-            quotes.append({"text": text, "source": record.get("source"), "field": record.get("field")})
-    for record in dossier.get("lore_evidence") or []:
-        # Infobox records are structured values ("Race: Hyur"), not prose about
-        # the character; the identity block already carries them.
-        if str(record.get("field") or "").startswith("identity."):
-            continue
-        text = str(record.get("quote") or "").strip()
-        if text:
-            quotes.append({"text": text, "source": record.get("source"), "field": record.get("field")})
-    return quotes[:24]
+def compact_state(dossier: dict, *, max_bytes: int = MAX_STATE_BYTES) -> dict:
+    """Build the dialogue-only state the model sees.
 
-
-def _aggregates(measurements: dict) -> dict:
-    """Corpus-level context every chunk carries, in a token-cheap shape.
-
-    The full measurement block costs ~2,800 tokens because it is a tree of
-    floats; inside an 8k context that is most of a chunk. These are the same
-    numbers the model needs to judge a baseline register against a sample.
-    """
-    length = measurements.get("words_per_utterance") or {}
-    return {
-        "unique_lines": measurements.get("line_count"),
-        "words": measurements.get("word_count"),
-        "utterance_words": {
-            key: length.get(key) for key in ("mean", "median", "p10", "p90")
-        },
-        "utterance_length_share": measurements.get("utterance_length_share"),
-        "signal_line_rates": measurements.get("signal_line_rates"),
-        "contraction_rate_per_word": measurements.get("contraction_rate_per_word"),
-        "formal_signal_rate_per_word": measurements.get("formal_signal_rate_per_word"),
-        "colloquial_signal_rate_per_word": measurements.get("colloquial_signal_rate_per_word"),
-        "repeated_expressions": [
-            entry.get("value") for entry in (measurements.get("repeated_expressions") or [])[:6]
-        ],
-    }
-
-
-def compact_state(
-    dossier: dict,
-    *,
-    samples: list[dict] | None = None,
-    chunk: dict | None = None,
-    max_bytes: int = MAX_STATE_BYTES,
-) -> dict:
-    """Build the state the model sees.
-
-    `samples` replaces the dossier's 24-line style sample with a chunk window;
-    `chunk` marks the call as one of several independent mood judgements. A
-    chunk state carries the same global aggregates as every other chunk, but no
-    wiki text: mood is decided from in-game dialogue only, and a lore sentence
-    is exactly the shortcut this path is meant to avoid.
+    Measurements are supplied; the rules-derived interpretation is deliberately
+    withheld, because showing the model its own baseline's labels turns the
+    answer into an echo and destroys the independence the benchmark needs.
     """
     statistics = dossier.get("statistics") or {}
     analysis = dossier.get("dialogue_analysis") or {}
-    source = samples if samples is not None else dossier.get("dialogue_samples") or []
     samples = [
         {
             "text": sample.get("text", ""),
@@ -185,7 +121,7 @@ def compact_state(
             "sheet": sample.get("sheet"),
             "signals": sample.get("signals") or [],
         }
-        for sample in source
+        for sample in dossier.get("dialogue_samples") or []
     ]
     state = {
         "identity": {
@@ -196,40 +132,12 @@ def compact_state(
                 "has_se_voice_reference", "identity_ambiguous",
             )
         },
-        # Measurements only. The rules-derived interpretation is deliberately
-        # withheld: showing the model its own baseline's labels turns the answer
-        # into an echo and destroys the independence the benchmark needs.
         "dialogue_measurements": analysis.get("measurements") or {},
         "dialogue_coverage": _coverage(statistics, samples),
         "dialogue_samples": samples,
+        "voice_evidence": dossier.get("voice_evidence") or [],
         "guardrails": list(GUARDRAILS),
     }
-    if chunk is None:
-        state["lore_quotes"] = _lore_quotes(dossier)
-        state["voice_evidence"] = dossier.get("voice_evidence") or []
-        state["wiki_resolution"] = dossier.get("wiki_resolution") or {}
-        state["fact_conflicts"] = dossier.get("fact_conflicts") or []
-    else:
-        # A chunk has to fit an 8k context, and repeated JSON keys are expensive:
-        # a list of bare strings carries the same dialogue as a list of objects
-        # with text/source/sheet/signals. Provenance is kept globally in
-        # dialogue_coverage and per source in dialogue_chunk.sources.
-        sources: dict[str, int] = {}
-        for sample in samples:
-            key = str(sample.get("source") or "unknown")
-            sources[key] = sources.get(key, 0) + 1
-        state["dialogue_samples"] = [sample["text"] for sample in samples]
-        state["dialogue_aggregates"] = _aggregates(analysis.get("measurements") or {})
-        state.pop("dialogue_measurements", None)
-        state["dialogue_chunk"] = {
-            "index": chunk.get("index"),
-            "count": chunk.get("count"),
-            "chars": chunk.get("chars"),
-            "lines": len(samples),
-            "of_unique_lines": statistics.get("unique_line_count"),
-            "sources": dict(sorted(sources.items())),
-        }
-        state["lore_quotes"] = []
     while len(json.dumps(state, ensure_ascii=False).encode("utf-8")) > max_bytes:
         samples = state["dialogue_samples"]
         if not samples:
@@ -343,7 +251,6 @@ class JevProvider:
     """
 
     name = "jev"
-    supports_chunks = True
 
     def __init__(
         self,
@@ -373,19 +280,6 @@ class JevProvider:
 
     def classify(self, dossier: dict, questions: dict[str, dict]) -> dict:
         return self.classify_state(compact_state(dossier), questions)
-
-    def classify_chunk(self, dossier: dict, questions: dict[str, dict], chunk: dict) -> dict:
-        """One independent mood judgement over a single dialogue window."""
-        state = compact_state(
-            dossier,
-            samples=chunk.get("lines") or [],
-            chunk={
-                "index": chunk.get("index"),
-                "count": chunk.get("count"),
-                "chars": chunk.get("chars"),
-            },
-        )
-        return self.classify_state(state, questions)
 
     def classify_state(self, state: dict, questions: dict[str, dict]) -> dict:
         api_key = os.environ.get(self.api_key_env)

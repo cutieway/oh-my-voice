@@ -143,20 +143,19 @@ dotnet run --project tools/xivdata -- npc-index --lang en > /tmp/game-npc-index.
 python3 tools/blueprint_pipeline/cli.py inventory --game-index /tmp/game-npc-index.json
 python3 tools/blueprint_pipeline/cli.py dossiers --game-index /tmp/game-npc-index.json --limit 25
 python3 tools/blueprint_pipeline/cli.py classify --provider rules --limit 25
-python3 tools/blueprint_pipeline/cli.py enrich --allow-network --limit 25
 python3 tools/blueprint_pipeline/cli.py classify --provider jev --allow-network --limit 25
 python3 tools/blueprint_pipeline/cli.py inspect npc_1003075 --review-report
 python3 tools/blueprint_pipeline/cli.py validate
 python3 tools/blueprint_pipeline/cli.py report
 ```
 
-Rules classification is offline. Wiki fetches and Jev calls require
+Rules classification is offline. Jev calls require
 `--allow-network`; Jev also requires `TYPESAFE_API_KEY` in the environment and
 defaults to 25 dossiers per run. Larger batches require `--allow-bulk` and
 print a request, token, and approximate cost estimate first. Cached outputs are
 immutable under gitignored `data/blueprints/`, so unchanged dossiers and
 classifier settings resume without duplicate API work. Jev cannot process
-audio or provide citations; exact source evidence is collected independently.
+audio or provide citations.
 Race, clan, and sex describe identity and are not acoustic evidence. Synthetic
 profiles remain drafts until a human auditions a VoiceDesign clip, pins its
 hash, and approves it. This task does not wire those references into the

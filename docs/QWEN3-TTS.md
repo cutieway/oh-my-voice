@@ -276,8 +276,8 @@ unresolved the run warns and fingerprints use `unresolved:<repo-id>`.
 Unvoiced NPCs have no source speaker, so there is nothing valid to average.
 Phase 2 now implements the source-to-draft pipeline and its audition handoff:
 read-only SQLite inventory, canonical identity gates, dialogue dossiers,
-optional cached MediaWiki evidence, offline rules or opt-in Jev classification,
-shared synthetic archetypes, generated drafts, and human review lifecycle.
+offline rules or opt-in Jev classification, shared synthetic archetypes,
+generated drafts, and human review lifecycle.
 It stops before the runtime plugin or pack-generation path; no Phase 1 code was
 changed.
 
@@ -295,25 +295,23 @@ python3 tools/blueprint_pipeline/cli.py dossiers --game-index /tmp/game-npc-inde
 python3 tools/blueprint_pipeline/cli.py classify --provider rules --limit 25
 
 # Network use is explicit. Set TYPESAFE_API_KEY in the shell for Jev.
-python3 tools/blueprint_pipeline/cli.py enrich --allow-network --limit 25
 python3 tools/blueprint_pipeline/cli.py classify --provider jev --allow-network --limit 25
 
 python3 tools/blueprint.py render archetype_neutral_clear_mid
 ./scripts/voicebank.sh archetype_neutral_clear_mid
 ```
 
-Wiki enrichment and Jev require `--allow-network`; rules need no credentials.
+Jev requires `--allow-network`; rules need no credentials.
 The Jev preflight prints a workload and approximate token-cost estimate, and
 requests are capped at 25 dossiers unless `--allow-bulk` is supplied. Jev
 accepts text/structured state only: it cannot hear WAV files and does not
-provide citations. The evidence collector records wiki revision IDs, URLs,
-and quotes independently. Jev's probabilities and confidence are useful
+provide citations. Jev's probabilities and confidence are useful
 routing signals, not proof; low-confidence choices go to review or a shared
 archetype.
 
 The six initial archetypes under `blueprints/archetypes/` are deliberately
 hand-curated drafts, not approved voices. Generated character profiles,
-dossiers, classification results, wiki responses, and assignment registries
+dossiers, classification results, and assignment registries
 live under gitignored `data/blueprints/`. Use `cli.py inspect <id>
 --review-report` to see the dossier, evidence, distributions, assignment, and
 rendered neutral instruction. Run `./scripts/voicebank.sh <profile-id>` to
@@ -321,10 +319,10 @@ audition a draft. `cli.py review audition` hashes a valid reference WAV and
 `cli.py review approve` records the human approval. Assignments are not usable
 for future generation until the resolved profile is human-approved.
 
-Mood references are archons: one clip per character, chosen once as
-`pack_archon` and used for every line. Listening on 2026-11-01 found the archons
-individually excellent but too different from each other to swap per dialogue
-line. Neutral is the pack-wide basis.
+The instruct is the identity sentence plus the profile's rendered speech-style
+clause when it has one. Listening on 2026-11-03 preferred styled takes over
+identity-only takes for every sampled voice, so the clause is the default. The
+mood/archon layer was removed on the same date.
 
 The prior reference and ICL pipeline remains the tested mechanical path. The
 new classification pipeline has been exercised on a three-character local

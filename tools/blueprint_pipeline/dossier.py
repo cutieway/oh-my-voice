@@ -14,7 +14,6 @@ from .cache import object_hash, read_json, safe_component, write_content_address
 from .config import (
     DEFAULT_CACHE,
     DEFAULT_DB,
-    DEFAULT_THRESHOLDS,
     MAX_DIALOGUE_SAMPLE_CHARS,
     MAX_DIALOGUE_SAMPLE_COUNT,
 )
@@ -23,7 +22,6 @@ from .dialogue import analyze_dialogue, select_representative_samples, split_spe
 from .game_data import game_metadata
 from .identity import unresolved_id
 from .inventory import build_inventory
-from .mood import plan_chunk_count, select_mood_pool
 
 
 def _candidate_line_key(row: dict, speaker_by_id: dict, candidates_by_label: dict) -> list[str]:
@@ -171,23 +169,6 @@ def build_dossiers(
         for sample in samples:
             sample.pop("_rank", None)
             sample.pop("_bucket", None)
-        # Mood is judged chunk by chunk, so a mood-eligible character carries a
-        # much larger signal-ranked pool. The pool is built here, once, from the
-        # database: the classifier only ever receives a dossier.
-        mood_policy = dict(DEFAULT_THRESHOLDS)
-        mood_policy.update(vocabulary.get("classification", {}).get("thresholds", {}))
-        chunk_count = plan_chunk_count(len(unique_line_ids), mood_policy)
-        dialogue_pool = [
-            {
-                "text": line.get("text"),
-                "source": line.get("source"),
-                "sheet": line.get("sheet"),
-                "signals": line.get("signals") or [],
-            }
-            for line in select_mood_pool(
-                key, lines, chunk_count=chunk_count, policy=mood_policy, vocabulary=vocabulary,
-            )
-        ]
         dialogue_analysis = analyze_dialogue(lines, vocabulary)
         if candidate.get("npc_id") is None:
             metadata = {
@@ -210,10 +191,6 @@ def build_dossiers(
             "sex": candidate.get("sex") or metadata.get("sex", "unknown"),
             "body_type": candidate.get("body_type") or metadata.get("body_type"),
             "height": candidate.get("height") or metadata.get("height"),
-            "lore_age": None,
-            "occupation": None,
-            "faction": None,
-            "location": None,
             "resolution_status": candidate["identity_status"],
             "has_se_voice_reference": candidate["has_se_reference"],
             "identity_ambiguous": candidate["identity_ambiguous"],
@@ -248,8 +225,6 @@ def build_dossiers(
             "statistics": statistics,
             "dialogue_analysis": dialogue_analysis,
             "dialogue_samples": samples,
-            "dialogue_pool": dialogue_pool,
-            "lore_evidence": [],
             "voice_evidence": [],
             "sources": game_source + [
                 {
