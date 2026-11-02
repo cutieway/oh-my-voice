@@ -167,17 +167,31 @@ would be dead weight.
 
 | Gate | Threshold | Rationale |
 |---|---|---|
-| Winner | argmax of the mean probability vector; ties go to `none` | one answer per character, not per chunk |
-| Consistency | the winner leads (or is within `mood_consistency_margin` 0.05 of the top) in ≥ `ceil(N × 0.6)` chunks | a single loud chunk must not decide |
+| Abstention | mean `none` + `neutral` mass < `mood_abstention_mass` 0.55 | both answers mean "no emotional baseline"; high mass is abstention, not a vote |
+| Candidate | strongest of the six emotion presets in the mean vector | one answer per character, not per chunk |
+| Consistency | the candidate leads (or is within `mood_consistency_margin` 0.05 of the top) in ≥ `ceil(N × 0.6)` chunks | a single loud chunk must not decide |
 | Selected probability | mean `mood_probability` 0.50 | the preset must beat the whole field, on average |
-| Confidence | mean `mood_confidence` 0.70 | stricter than style (0.55): a wrong archon changes every line |
 | Dispersion | normalised entropy of the mean vector ≤ 0.55 | a flat field means no dominant register |
-| Justification | mean `mood.justified` ≥ `noul_yes` 0.75 | a default register, not one emotional scene |
+
+Two gates were removed after measuring the model, not by taste:
+
+- **Confidence.** On 35/35 real chunks the model's `confidence` field equals
+  `(p_top − 1/8) / (7/8)`, a pure linear rescaling of the top probability
+  (max |error| 6e-5). A `mood_confidence` gate of 0.70 was therefore the same
+  question as `p_top ≥ 0.7375`, and no chunk ever reached it (max 0.670 across
+  those 35 chunks). The
+  probability gate already asks that question with a threshold the model can
+  reach.
+- **Justification.** `mood.justified` never exceeded 0.587 on real dialogue
+  (mean 0.09–0.59) and correlates with `p` at only 0.455, so a 0.75 bar
+  rejected every character for a reason the model could not express. The answer
+  is still asked, recorded per chunk, and kept as advisory evidence in
+  `mood.gate.yes_probability`; it never blocks.
 
 Any failure sets `pack_archon: neutral` and records the failed gates in
 `mood.blocked_by` as stable tokens: `insufficient_volume`, `insufficient_pool`,
-`none_winner`, `low_consistency`, `low_probability`, `low_confidence`,
-`high_dispersion`, `not_justified`. `insufficient_pool` is a pipeline-state
+`abstention_mass`, `none_winner`, `neutral_winner`, `low_consistency`,
+`low_probability`, `high_dispersion`. `insufficient_pool` is a pipeline-state
 refusal, not a character judgement: a dossier built before the mood pool carries
 only the 24-line style sample, and chunking that would present one window as the
 corpus, so `classify` asks no mood question and adds a review reason telling the
@@ -187,11 +201,12 @@ with the preset, mean confidence, mean probability, chunk count, and agreeing
 chunk count in the note, and declares the archon in `moods` so
 `validate_profile` accepts it.
 
-`mood.chunks` records every chunk's top preset, its probability for the
-winner, confidence, justified value, and full distribution; `mood.aggregate`
-records the mean vector, agreeing/required counts, mean probability, mean
-confidence, mean justification, and dispersion. A profile can therefore be
-audited back to the individual windows that produced it.
+`mood.chunks` records every chunk's raw top preset, the candidate's probability
+in that chunk, confidence, justified value, and full distribution;
+`mood.aggregate` records the mean vector, agreeing/required counts, candidate
+probability, abstention mass, mean confidence, mean justification, and
+dispersion. A profile can therefore be audited back to the individual windows
+that produced it.
 
 ### Gating policy in one paragraph
 
@@ -200,17 +215,20 @@ question is asked and the pack is neutral with `blocked_by: ["insufficient_volum
 above it the signal-ranked dialogue pool is cut into overlapping, bucket-stratified
 windows (1 for 40-119 lines up to 8 at 2,000+), each window is asked the same two
 typed questions with the same compact aggregates and no wiki text, and the archon
-is the argmax of the mean probability vector accepted only if that preset leads
-(or is within 0.05 of the top) in at least 60% of windows, the mean selected
-probability is at least 0.50, mean confidence at least 0.70, the normalised
-entropy of the mean vector at most 0.55, and mean `mood.justified` at least 0.75.
-Every failure is recorded as a stable token in `mood.blocked_by`
-(`insufficient_volume`, `insufficient_pool`, `none_winner`, `low_consistency`,
-`low_probability`, `low_confidence`, `high_dispersion`, `not_justified`), the pack archon stays
-`neutral`, and the profile evidence is level `default` naming those gates; an
-accepted preset is level `creative_selection`, declares the archon in `moods`,
-and keeps every per-window answer, distribution, and the mean vector for audit.
-Acoustics never enter this path: they remain deterministic casting from game data.
+is the strongest of the six emotion presets in the mean probability vector,
+accepted only if the mean `none` + `neutral` mass stays under 0.55, that preset
+leads (or is within 0.05 of the top) in at least 60% of windows, its mean
+probability is at least 0.50, and the normalised entropy of the mean vector is
+at most 0.55. There is no confidence gate because confidence is a linear
+rescaling of the top probability, and `mood.justified` is recorded as advisory
+evidence rather than a gate. Every failure is recorded as a stable token in
+`mood.blocked_by` (`insufficient_volume`, `insufficient_pool`, `abstention_mass`,
+`none_winner`, `neutral_winner`, `low_consistency`, `low_probability`,
+`high_dispersion`), the pack archon stays `neutral`, and the profile evidence is
+level `default` naming those gates; an accepted preset is level
+`creative_selection`, declares the archon in `moods`, and keeps every per-window
+answer, distribution, and the mean vector for audit. Acoustics never enter this
+path: they remain deterministic casting from game data.
 
 The rules provider (`--provider rules`) does not chunk: it is deterministic and
 answers `none`, so offline runs are unchanged and always neutral.
@@ -218,31 +236,35 @@ answers `none`, so offline runs are unchanged and always neutral.
 Measured 2026-11-02 against the local Nimble 9B, sixteen real NPCs, on dossiers
 rebuilt by the current `dossiers` command:
 
-| NPC | lines | chunks | per-chunk tops | mean top | p | conf | outcome |
-|---|---:|---:|---|---|---:|---:|---|
-| Gerolt | 1,552 | 7 | angry x3, neutral x4 | neutral | 0.36 | 0.38 | `low_consistency`, `low_probability`, `low_confidence`, `high_dispersion`, `not_justified` |
-| Hildibrand | 1,133 | 6 | happy x5, none x1 | happy | 0.51 | 0.47 | `low_confidence`, `not_justified` |
-| wandering minstrel | 1,062 | 6 | neutral x6 | neutral | 0.57 | 0.51 | `low_confidence`, `not_justified` |
-| Haermaga | 466 | 4 | happy x1, neutral x3 | neutral | 0.41 | 0.38 | `low_probability`, `low_confidence`, `high_dispersion`, `not_justified` |
-| Widargelt | 459 | 4 | neutral x3, none x1 | neutral | 0.54 | 0.52 | `low_confidence`, `not_justified` |
-| Erik | 405 | 4 | neutral x4 | neutral | 0.61 | 0.55 | `low_confidence`, `not_justified` |
-| Motte | 51 | 1 | happy | happy | 0.63 | 0.58 | `low_confidence`, `not_justified` |
-| Hachisuba | 51 | 1 | neutral | neutral | 0.52 | 0.46 | `low_confidence`, `not_justified` |
-| Linu Vanu | 49 | 1 | neutral | neutral | 0.60 | 0.55 | `low_confidence`, `high_dispersion`, `not_justified` |
-| Knem Cheleim-In | 47 | 1 | neutral | neutral | 0.62 | 0.57 | `low_confidence`, `not_justified` |
-| six sparse NPCs | 5-8 | 0 | - | - | - | - | `insufficient_volume` |
+| NPC | lines | chunks | per-chunk tops | candidate | p | abst | H | agree | outcome |
+|---|---:|---:|---|---|---:|---:|---:|---:|---|
+| Gerolt | 1,552 | 7 | neutral x4, angry x3 | angry | 0.33 | 0.59 | 0.63 | 3/5 | **neutral**: `abstention_mass`, `low_consistency`, `low_probability`, `high_dispersion` |
+| Hildibrand | 1,133 | 6 | happy x5, none x1 | happy | 0.51 | 0.47 | 0.54 | 5/4 | **happy** |
+| wandering minstrel | 1,062 | 6 | neutral x6 | happy | 0.08 | 0.89 | 0.49 | 0/4 | **neutral**: `abstention_mass`, `low_consistency`, `low_probability` |
+| Haermaga | 466 | 4 | neutral x3, happy x1 | happy | 0.23 | 0.75 | 0.56 | 1/3 | **neutral**: `abstention_mass`, `low_consistency`, `low_probability`, `high_dispersion` |
+| Widargelt | 459 | 4 | neutral x3, none x1 | calm | 0.02 | 0.97 | 0.40 | 0/3 | **neutral**: `abstention_mass`, `low_consistency`, `low_probability` |
+| Erik | 405 | 4 | neutral x4 | angry | 0.08 | 0.87 | 0.50 | 0/3 | **neutral**: `abstention_mass`, `low_consistency`, `low_probability` |
+| Motte | 51 | 1 | happy | happy | 0.63 | 0.36 | 0.46 | 1/1 | **happy** |
+| Hachisuba | 51 | 1 | neutral | happy | 0.37 | 0.61 | 0.47 | 0/1 | **neutral**: `abstention_mass`, `low_consistency`, `low_probability` |
+| Linu Vanu | 49 | 1 | neutral | happy | 0.10 | 0.77 | 0.60 | 0/1 | **neutral**: `abstention_mass`, `low_consistency`, `low_probability`, `high_dispersion` |
+| Knem Cheleim-In | 47 | 1 | neutral | happy | 0.03 | 0.94 | 0.43 | 0/1 | **neutral**: `abstention_mass`, `low_consistency`, `low_probability` |
+| six sparse NPCs | 5-8 | 0 | - | - | - | - | - | - | **neutral**: `insufficient_volume` |
 
-No real NPC passed, and the binding gate is `mood_confidence`: the model's
-self-reported confidence on real dialogue sits at 0.38-0.58, well under the
-0.70 bar. The two informative cases are Gerolt and Hildibrand. Gerolt splits
-3 angry / 4 neutral across seven windows, so the mean lands on `neutral` and
-`low_consistency` joins the refusal: the corpus really does mix forge-grumbling
-with ordinary instruction. Hildibrand is 5/6 `happy` with mean p 0.51, so the
-register is consistent and the model still will not claim it confidently;
-refusing that is the conservative reading, not a bug in the aggregation. The
-accept path itself is proven with the same model on uniform evidence: a 400-line
-angry probe produced 4/4 chunks at mean p 0.994, confidence 0.993, dispersion
-0.019, and `pack_archon: angry` with `method: jev_chunks`.
+Exactly the two characters whose windows lean one way earn an archon
+(Hildibrand 5/6 `happy`, Motte `happy`). Gerolt stays neutral for a real reason:
+seven windows split 4 neutral / 3 angry, so the mean `angry` p is 0.33 and the
+`none` + `neutral` mass is 0.59. Haermaga is messier still (one happy window,
+three neutral, H 0.56). Everyone under ~100 lines is dominated by `none` +
+`neutral` mass (0.61-0.97): the model is saying "no stable baseline", which is
+abstention, not a weak vote for happy.
+
+The `none`-mass rule is what separates those refusals from the acceptances.
+Before it, the candidate was the overall argmax including `none`, so a chunked
+run with a high `none` share reported `none` as the candidate and its own
+probability; after it, the candidate is always one of the six emotions and the
+abstention mass is reported separately. The accept path is also proven with the
+same model on uniform evidence: a 400-line angry probe produces 4/4 chunks,
+mean p 0.994, H 0.019, and `pack_archon: angry`.
 
 ## Volume gates
 
@@ -404,22 +426,28 @@ python3 tools/blueprint.py check
 
 | NPC | unique lines | style fields | mood chunks | pack_archon | blocked_by |
 |---|---:|---:|---:|---|---|
-| Pimoh Nelhah | 5 | 0 | 0 | neutral | insufficient_volume |
-| Colina | 5 | 0 | 0 | neutral | insufficient_volume |
-| Diggin | 6 | 0 | 0 | neutral | insufficient_volume |
-| Colden | 7 | 0 | 0 | neutral | insufficient_volume |
-| Waldew | 8 | 0 | 0 | neutral | insufficient_volume |
-| Hathenbet | 8 | 0 | 0 | neutral | insufficient_volume |
-| Knem Cheleim-In | 47 | 5 | 1 | neutral | low_confidence, not_justified |
-| Linu Vanu | 49 | 5 | 1 | neutral | low_confidence, high_dispersion, not_justified |
-| Motte | 51 | 5 | 1 | neutral | low_probability, low_confidence, high_dispersion, not_justified |
-| Hachisuba | 51 | 5 | 1 | neutral | low_confidence, not_justified |
-| Erik | 405 | 5 | 4 | neutral | low_confidence, not_justified |
-| Widargelt | 459 | 5 | 4 | neutral | low_confidence, not_justified |
-| Haermaga | 466 | 5 | 4 | neutral | low_consistency, low_probability, low_confidence, not_justified |
-| wandering minstrel | 1062 | 5 | 6 | neutral | low_confidence, not_justified |
-| Hildibrand | 1133 | 5 | 6 | neutral | low_confidence, not_justified |
-| Gerolt | 1552 | 5 | 7 | neutral | low_probability, low_confidence, high_dispersion, not_justified |
+| Pimoh Nelhah | 5 | 0 | 0 | neutral | insufficient_volume, none_winner, abstention_mass |
+| Colina | 5 | 0 | 0 | neutral | insufficient_volume, none_winner, abstention_mass |
+| Diggin | 6 | 0 | 0 | neutral | insufficient_volume, none_winner, abstention_mass |
+| Colden | 7 | 0 | 0 | neutral | insufficient_volume, none_winner, abstention_mass |
+| Hathenbet | 8 | 0 | 0 | neutral | insufficient_volume, none_winner, abstention_mass |
+| Waldew | 8 | 0 | 0 | neutral | insufficient_volume, none_winner, abstention_mass |
+| Knem Cheleim-In | 47 | 5 | 0 | neutral | none_winner, abstention_mass |
+| Linu Vanu | 49 | 5 | 0 | neutral | none_winner, abstention_mass |
+| Motte | 51 | 5 | 0 | neutral | none_winner, abstention_mass |
+| Hachisuba | 51 | 5 | 0 | neutral | none_winner, abstention_mass |
+| Erik | 405 | 5 | 0 | neutral | none_winner, abstention_mass |
+| Widargelt | 459 | 5 | 0 | neutral | none_winner, abstention_mass |
+| Haermaga | 466 | 5 | 0 | neutral | none_winner, abstention_mass |
+| wandering minstrel | 1,062 | 5 | 0 | neutral | none_winner, abstention_mass |
+| Hildibrand | 1,133 | 5 | 0 | neutral | none_winner, abstention_mass |
+| Gerolt | 1,552 | 5 | 0 | neutral | none_winner, abstention_mass |
+
+The rules provider answers `none` with probability 1.0, so its abstention mass
+is 1.0 and it always stays neutral; that is the shape an offline run is meant to
+prove, not a working archon. Its `blocked_by` uses the same tokens as the model
+path, and the profile evidence renders them as prose (`the dominant answer was
+none/neutral; the dialogue is mostly none/neutral: no emotional baseline`).
 
 ### Mood, offline (no model server)
 
@@ -435,11 +463,16 @@ question is asked and `blocked_by` is `["insufficient_volume"]`; a dossier with
 no mood pool is refused with `insufficient_pool` and zero chunk calls; consistent
 chunks accept (`stub_chunks`); one loud chunk among disagreeing ones is blocked
 by `low_consistency`; a flat field is blocked by `high_dispersion` and
-`low_probability`; every rejection names at least one gate; `plan_chunk_count`
-follows the volume bands; a Gerolt-scale pool yields seven windows that all
-contain short, medium, and long lines and overlap their neighbour; a chunk
-state carries the global aggregates and no lore; the aggregate records per-chunk
-evidence; a composed profile names the agreeing-chunk count in its evidence.
+`low_probability`; a `none` + `neutral` mass at or above 0.55 blocks with
+`abstention_mass` while the recorded candidate stays the strongest emotion and
+its probability is that emotion's mean, not the overall top's; a neutral winner
+under the abstention rule blocks with `neutral_winner`; low `mood.justified` and
+low confidence do not block; every rejection names at least one gate;
+`plan_chunk_count` follows the volume bands; a Gerolt-scale pool yields seven
+windows that all contain short, medium, and long lines and overlap their
+neighbour; a chunk state carries the global aggregates and no lore; the
+aggregate records per-chunk evidence; a composed profile names the
+agreeing-chunk count in its evidence.
 
 ### Mood, real multi-chunk path
 
@@ -477,23 +510,25 @@ disambiguation, and the mood profile evidence levels.
 3. `vocabulary_complexity` confidence is low (median 0.31 across 80 items).
 4. Casting rules are taste encoded once: they are auditable, not measured. A
    human override is still required before a profile becomes canon.
-5. None of the sixteen real NPCs earned a mood archon. Chunking changed the
-   shape of the refusal: the model no longer answers `none` at 0.96 from 24
-   lines, it now splits a 1,552-line character across seven windows and lands
-   on `neutral` with 3 of 7 windows reading `angry`. The binding gate is
-   `mood_confidence` (0.32-0.57 against 0.70), so a consistent but hedged
-   register like Hildibrand's 6/6 `happy` is still refused. That is the safe
-   failure direction; human auditions, not the model, remain the way a mood
-   archon gets chosen in practice. If real auditions show the model is simply
-   under-confident, `mood_confidence` is the one knob to calibrate first - not
-   the consistency gate, which is what protects against one loud scene.
+5. Two of sixteen real NPCs earn an archon (Hildibrand and Motte, both
+   `happy`), and the rest are neutral because the model puts most of its mass on
+   `none` + `neutral` (0.59-0.97), not because a threshold is out of reach. The
+   earlier 0.70 confidence bar was exactly that kind of unreachable threshold
+   and is gone; what remains (abstention mass 0.55, probability 0.50, H 0.55,
+   consistency 0.6 N) all sit inside the model's observed range. The failure
+   direction is still conservative: Gerolt (4 neutral / 3 angry windows) and
+   Haermaga (3 neutral / 1 happy, H 0.56) stay neutral, which is the right
+   reading of a genuinely split corpus. Human auditions, not the model, remain
+   the way an archon is confirmed in practice.
 6. Wiki lore is no longer mood evidence. It is still fetched for identity
    fields, but a mood chunk state withholds `lore_quotes`, `voice_evidence`,
    `wiki_resolution`, and `fact_conflicts`, so no disposition sentence can
    stand in for dialogue. Most FFXIV NPC pages are stubs or dialogue
    transcripts; enrich mainly buys identity fields and `fact_conflicts`.
-7. `mood.justified` is a yes/no gate rather than a score: a score would need
-   calibration against human labels before it could set a threshold, and the
-   gate is what the archon decision actually needs. No `insufficient_evidence`
-   label was added to the style dimensions either; the volume gate covers that
-   case without widening the closed label vocabulary.
+7. `mood.justified` is asked and recorded but not gated: on real dialogue it
+   never exceeded 0.587 against a 0.75 bar and correlates with the top
+   probability at only 0.455, so as a hard gate it killed every character for a
+   reason the model could not express. It stays in the record as advisory
+   evidence. No `insufficient_evidence` label was added to the style dimensions
+   either; the volume gate covers that case without widening the closed label
+   vocabulary.

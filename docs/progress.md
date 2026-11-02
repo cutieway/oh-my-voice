@@ -58,13 +58,13 @@ have unvoiced lines; the other 345 are fully voiced by SE.
 
 | Measure | Done | Total | Percent | Left |
 |---|---:|---:|---:|---:|
-| Phase 1: cloned | 30,880 | 48,200 | 64.1% | 17,320 |
+| Phase 1: cloned | 32,609 | 48,200 | 67.7% | 15,591 |
 | Phase 2: synthetic | 0 | 166,559 | 0.0% | 166,559 |
-| Project lines (1+2) | 30,880 | 214,759 | 14.4% | 183,879 |
-| All dialogue (incl. SE VO) | 55,985 | 239,864 | 23.3% | 183,879 |
+| Project lines (1+2) | 32,609 | 214,759 | 15.2% | 182,150 |
+| All dialogue (incl. SE VO) | 57,714 | 239,864 | 24.1% | 182,150 |
 
-- **Phase 1** is the current cloned-voice work. 30,880 unique lines are
-  generated (`v_generation_candidates`), 17,320 are queued, and every speaker
+- **Phase 1** is the current cloned-voice work. 32,609 unique lines are
+  generated (`v_generation_candidates`), 15,591 are queued, and every speaker
   with remaining work has an x-vector.
 - **Phase 2** classification and audition handoff are implemented. Audio
   generation remains at 0 lines; synthetic speakers are absent from

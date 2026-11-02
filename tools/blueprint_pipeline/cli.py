@@ -156,7 +156,11 @@ def _latest_records(directory: Path, pattern: str) -> dict[str, tuple[dict, Path
         except (OSError, ValueError):
             continue
         key = record.get("canonical_id")
-        if key:
+        if not key:
+            continue
+        stamp = str(record.get("timestamp") or "")
+        current = result.get(str(key))
+        if current is None or stamp >= str(current[0].get("timestamp") or ""):
             result[str(key)] = (record, path)
     return result
 

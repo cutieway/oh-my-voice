@@ -48,6 +48,18 @@ def _voice_evidence_for(dossier: dict, field: str, value: str, vocabulary: dict)
     return None
 
 
+MOOD_GATE_NOTES = {
+    "insufficient_volume": "too few unique lines for a baseline register",
+    "insufficient_pool": "the dialogue pool is still building",
+    "abstention_mass": "the dialogue is mostly none/neutral: no emotional baseline",
+    "none_winner": "the dominant answer was none/neutral",
+    "neutral_winner": "the dominant answer was neutral",
+    "low_consistency": "no preset led consistently across dialogue chunks",
+    "low_probability": "no preset cleared the probability threshold",
+    "high_dispersion": "the answer distribution was flat",
+}
+
+
 def build_individual_profile(
     dossier: dict,
     classification: dict,
@@ -148,6 +160,7 @@ def build_individual_profile(
     )
     mood = classification.get("mood") or {}
     pack_archon = str(mood.get("archon") or "neutral")
+    blocked = [MOOD_GATE_NOTES.get(token, token) for token in (mood.get("blocked_by") or [])]
     gate = mood.get("gate") or {}
     if gate.get("chunks"):
         chunk_note = (
@@ -175,7 +188,7 @@ def build_individual_profile(
             "default",
             note=(
                 "Neutral archon. "
-                + ("; ".join(mood.get("blocked_by") or []) or "no mood evidence recorded")
+                + ("; ".join(blocked) or "no mood evidence recorded")
                 + f". {chunk_note}; judged from dialogue alone."
                 " Neutral is the project default until a source justifies another archon."
             ),

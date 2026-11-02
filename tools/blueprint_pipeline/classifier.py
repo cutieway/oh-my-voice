@@ -168,22 +168,27 @@ def _mood_decision(
 ) -> dict:
     """Decide the one archon a pack uses, defaulting to neutral.
 
-    Three independent gates must all pass before a non-neutral preset is
-    proposed: the choice cleared the mood thresholds, `mood.justified` is yes,
-    and the character has enough dialogue for a baseline register to exist.
+    A non-neutral preset needs a probability above `mood_probability`, a corpus
+    with enough dialogue for a baseline register, and an answer that is not an
+    abstention (`none`/`neutral`, or a `none` + `neutral` mass at or above
+    `mood_abstention_mass`). Confidence is not a gate: on this model it is a
+    linear rescaling of the top probability. `mood.justified` is recorded as
+    advisory evidence and never blocks.
     """
     floor = int(policy["min_dialogue_lines_for_mood"])
     justified = justified_check.get("decision") == "yes"
     preset = selected if selected not in (None, "none", "neutral") else None
+    distribution = answer.get("probabilities") or {}
+    abstention = float(distribution.get("none", 0.0)) + float(distribution.get("neutral", 0.0))
     blocked_by = []
     if selected is None:
-        blocked_by.append("mood choice fell below the mood confidence and probability thresholds")
+        blocked_by.append("low_probability")
     elif preset is None:
-        blocked_by.append("answer was none/neutral: no consistent default register")
-    if not justified:
-        blocked_by.append("mood.justified is not yes")
+        blocked_by.append("none_winner")
+    if abstention >= float(policy.get("mood_abstention_mass", 0.55)):
+        blocked_by.append("abstention_mass")
     if line_count < floor:
-        blocked_by.append(f"{line_count} unique lines is below the mood floor {floor}")
+        blocked_by.append("insufficient_volume")
     accepted = not blocked_by
     return {
         "preset": preset if accepted else "none",
@@ -196,11 +201,12 @@ def _mood_decision(
             "selected_probability": choice_check.get("selected_probability"),
             "choice_accepted": bool(choice_check.get("accepted")),
             "yes_probability": justified_check.get("yes_probability"),
+            "abstention_mass": round(abstention, 4),
             "line_count": line_count,
             "min_dialogue_lines": floor,
             "thresholds": {
-                "confidence": policy["mood_confidence"],
                 "probability": policy["mood_probability"],
+                "abstention_mass": policy.get("mood_abstention_mass", 0.55),
             },
         },
         "blocked_by": blocked_by,
@@ -322,7 +328,9 @@ def classify_dossier(
     # every line of a pack sounds, while a wrong style word only changes wording.
     mood_policy = {
         **policy,
-        "choice_confidence": policy["mood_confidence"],
+        # No confidence gate for mood: confidence is a linear rescaling of the
+        # top probability on this model, so only the probability threshold bites.
+        "choice_confidence": 0.0,
         "choice_probability": policy["mood_probability"],
     }
     for question_id, answer in answers.items():

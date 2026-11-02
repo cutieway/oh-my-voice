@@ -1188,7 +1188,6 @@
       "distinctiveness_score": 3.7,
       "min_dialogue_lines_for_individual": 50,
       "min_dialogue_lines_for_review": 5,
-      "mood_confidence": 0.7,
       "mood_probability": 0.5,
       "min_dialogue_lines_for_mood": 40,
       "min_dialogue_lines_for_style": 40,
@@ -1197,14 +1196,15 @@
       "mood_dispersion_limit": 0.55,
       "mood_chunk_chars": 7000,
       "mood_chunk_overlap": 0.15,
-      "mood_max_chunks": 8
+      "mood_max_chunks": 8,
+      "mood_abstention_mass": 0.55
     },
     "confidence_policy": [
       "Choice confidence and probability are both retained; low confidence routes to review or a shared archetype.",
       "Noul returns a yes probability, not a separate confidence field; interpret it with the configured yes/no thresholds.",
       "A Score carries its distribution, expected score, and confidence. A high signal is not proof of correctness.",
       "Thresholds are initial project settings and must be calibrated against manually reviewed examples.",
-      "A mood preset is decided from dialogue alone: the dossier must clear min_dialogue_lines_for_mood, the dialogue pool is split into chunk windows, and every window is asked the same typed questions. The preset is accepted only when the mean distribution clears mood_probability, mean confidence clears mood_confidence, the same preset leads at least mood_consistency_ratio of the chunks, the mean distribution stays under mood_dispersion_limit, and mean mood.justified clears noul_yes. Otherwise the pack archon is neutral and mood.blocked_by names every failed gate.",
+      "A mood preset is decided from dialogue alone: the dossier must clear min_dialogue_lines_for_mood, the dialogue pool is split into chunk windows, and every window is asked the same typed questions. The preset is accepted only when the mean distribution clears mood_probability, the same preset leads at least mood_consistency_ratio of the chunks, the mean distribution stays under mood_dispersion_limit, and the mean none+neutral mass stays under mood_abstention_mass. There is no separate confidence gate: on this model confidence is a linear rescaling of the top probability, so a second threshold would only re-ask the probability question. mood.justified is recorded as advisory evidence and never blocks. Otherwise the pack archon is neutral and mood.blocked_by names every failed gate.",
       "Speech-style choices below min_dialogue_lines_for_style are recorded as insufficient rather than answered; the profile then carries no style and renders from identity alone."
     ],
     "acoustic_family_compatibility": "Primary and optional secondary timbres must use different acoustic families. Distinctive traits cannot repeat the selected primary family.",

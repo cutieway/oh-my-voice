@@ -186,10 +186,18 @@ def aggregate_mood(
 ) -> dict:
     """Combine per-chunk typed answers into one archon decision.
 
-    Gates, in order of what they protect against: no winner (dispersion and
-    `none`), one loud chunk (consistency), a confident but weak signal
-    (probability and confidence), and scene emotion mistaken for a baseline
-    (`mood.justified`).
+    Gates, in order of what they protect against: no register at all
+    (`abstention_mass`: the mean `none` + `neutral` mass), one loud chunk
+    (consistency), a weak winner (probability), and a field with no dominant
+    register (dispersion).
+
+    There is deliberately no confidence gate. On this model the per-answer
+    confidence is a linear rescaling of the top probability,
+    `(p_top - 1/N) / (1 - 1/N)`, so a confidence threshold would only restate
+    the probability threshold with a stricter number. `mood.justified` is
+    recorded as advisory evidence: its real ceiling on real dialogue is far
+    below the `noul_yes` bar, so gating on it rejects every character for a
+    reason the model cannot express.
     """
     if not chunk_answers:
         return insufficient_volume(line_count, policy, provider)
@@ -200,7 +208,18 @@ def aggregate_mood(
         option: round(_mean([answer["probabilities"].get(option, 0.0) for answer in presets]), 4)
         for option in options
     }
-    winner = _top(mean_vector)
+    dispersion = _entropy(mean_vector)
+    required = max(1, math.ceil(count * float(policy.get("mood_consistency_ratio", 0.6))))
+    # `none` and `neutral` both mean "no emotional baseline", so they are
+    # abstentions rather than rival presets. Their combined mass decides whether
+    # the corpus has a register at all; when it does, the candidate is the
+    # strongest of the six emotion presets.
+    abstention = round(
+        float(mean_vector.get("none", 0.0)) + float(mean_vector.get("neutral", 0.0)), 4
+    )
+    emotions = [option for option in options if option not in ("none", "neutral")]
+    candidate = max(emotions, key=lambda option: mean_vector[option]) if emotions else None
+    winner = candidate or "none"
     margin = float(policy.get("mood_consistency_margin", 0.05))
     agreeing = 0
     per_chunk = []
@@ -223,22 +242,22 @@ def aggregate_mood(
     mean_justified = round(
         _mean([float(answer["mood.justified"]["noul"]) for answer in chunk_answers]), 4
     )
-    dispersion = _entropy(mean_vector)
-    required = max(1, math.ceil(count * float(policy.get("mood_consistency_ratio", 0.6))))
 
     blocked_by = []
-    if winner == "none":
+    if abstention >= float(policy.get("mood_abstention_mass", 0.55)):
+        blocked_by.append("abstention_mass")
+    elif candidate is None:
         blocked_by.append("none_winner")
+    elif _top(mean_vector) == "neutral":
+        # Neutral leads outright while the abstention rule did not fire: the
+        # corpus says "ordinary", which is the default and needs no archon.
+        blocked_by.append("neutral_winner")
     if agreeing < required:
         blocked_by.append("low_consistency")
     if mean_selected < float(policy["mood_probability"]):
         blocked_by.append("low_probability")
-    if mean_confidence < float(policy["mood_confidence"]):
-        blocked_by.append("low_confidence")
     if dispersion > float(policy.get("mood_dispersion_limit", 0.55)):
         blocked_by.append("high_dispersion")
-    if mean_justified < float(policy["noul_yes"]):
-        blocked_by.append("not_justified")
     accepted = not blocked_by
     return {
         "preset": winner if accepted else "none",
@@ -251,6 +270,7 @@ def aggregate_mood(
             "selected_probability": mean_selected,
             "choice_accepted": accepted,
             "yes_probability": mean_justified,
+            "abstention_mass": abstention,
             "line_count": line_count,
             "min_dialogue_lines": int(policy["min_dialogue_lines_for_mood"]),
             "chunks": count,
@@ -258,10 +278,10 @@ def aggregate_mood(
             "required_chunks": required,
             "dispersion": dispersion,
             "thresholds": {
-                "confidence": policy["mood_confidence"],
                 "probability": policy["mood_probability"],
                 "consistency_ratio": policy.get("mood_consistency_ratio", 0.6),
                 "dispersion_limit": policy.get("mood_dispersion_limit", 0.55),
+                "abstention_mass": policy.get("mood_abstention_mass", 0.55),
             },
         },
         "blocked_by": blocked_by,
@@ -273,6 +293,7 @@ def aggregate_mood(
             "mean_selected_probability": mean_selected,
             "mean_confidence": mean_confidence,
             "mean_justified": mean_justified,
+            "abstention_mass": abstention,
             "dispersion": dispersion,
         },
         "chunks": per_chunk,
@@ -301,6 +322,7 @@ def insufficient_volume(
             "selected_probability": None,
             "choice_accepted": False,
             "yes_probability": None,
+            "abstention_mass": None,
             "line_count": line_count,
             "min_dialogue_lines": int(policy["min_dialogue_lines_for_mood"]),
             "chunks": 0,

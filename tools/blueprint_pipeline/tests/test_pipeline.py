@@ -875,24 +875,29 @@ class MoodAndVolumeGateTests(unittest.TestCase):
         result = classify_dossier(self._dossier(floor - 1), provider, self.vocab)
         self.assertEqual(result["pack_archon"], "neutral")
         self.assertEqual(result["mood"]["preset"], "none")
-        self.assertTrue(any("below the mood floor" in reason for reason in result["mood"]["blocked_by"]))
+        self.assertIn("insufficient_volume", result["mood"]["blocked_by"])
 
-    def test_justification_and_confidence_gates_block_a_mood(self):
-        unjustified = self._provider(preset="calm", probability=0.9, confidence=0.9, justified=0.10)
-        result = classify_dossier(self._dossier(400), unjustified, self.vocab)
-        self.assertEqual(result["pack_archon"], "neutral")
-        self.assertTrue(any("justified" in reason for reason in result["mood"]["blocked_by"]))
+    def test_justified_and_confidence_are_advisory_not_gates(self):
+        # `mood.justified` never clears 0.75 on real dialogue, and confidence is
+        # a linear rescaling of the top probability, so neither may block a
+        # preset whose probability clears the threshold.
+        provider = self._provider(preset="calm", probability=0.9, confidence=0.2, justified=0.05)
+        result = classify_dossier(self._dossier(400), provider, self.vocab)
+        self.assertEqual(result["pack_archon"], "calm")
+        self.assertTrue(result["mood"]["accepted"])
+        self.assertEqual(result["mood"]["blocked_by"], [])
+        self.assertAlmostEqual(result["mood"]["gate"]["yes_probability"], 0.05, places=2)
 
-        weak = self._provider(preset="calm", probability=0.40, confidence=0.60, justified=0.95)
+        weak = self._provider(preset="calm", probability=0.40, confidence=0.99, justified=0.99)
         result = classify_dossier(self._dossier(400), weak, self.vocab)
         self.assertEqual(result["pack_archon"], "neutral")
-        self.assertTrue(any("thresholds" in reason for reason in result["mood"]["blocked_by"]))
+        self.assertIn("low_probability", result["mood"]["blocked_by"])
 
     def test_none_answer_keeps_neutral_even_with_volume_and_justification(self):
         provider = self._provider(preset="none", probability=0.97, confidence=0.97, justified=0.99)
         result = classify_dossier(self._dossier(400), provider, self.vocab)
         self.assertEqual(result["pack_archon"], "neutral")
-        self.assertTrue(any("none/neutral" in reason for reason in result["mood"]["blocked_by"]))
+        self.assertIn("none_winner", result["mood"]["blocked_by"])
 
     def test_sparse_character_records_no_style_but_keeps_the_estimate(self):
         floor = self.vocab["classification"]["thresholds"]["min_dialogue_lines_for_style"]
@@ -1049,7 +1054,7 @@ class MoodProfileTests(unittest.TestCase):
                     "agreeing_chunks": 3,
                     "dispersion": 0.04,
                 },
-                "blocked_by": [] if accepted else ["answer was none/neutral: no consistent default register"],
+                "blocked_by": [] if accepted else ["none_winner", "abstention_mass"],
             },
         }
 
@@ -1073,7 +1078,7 @@ class MoodProfileTests(unittest.TestCase):
         self.assertEqual(profile["moods"], {})
         self.assertEqual(profile["evidence"]["pack_archon"]["level"], "default")
         note = profile["evidence"]["pack_archon"]["note"]
-        self.assertIn("none/neutral", note)
+        self.assertIn("the dominant answer was none/neutral", note)
         self.assertIn("3 of 3 dialogue chunks agreed", note)
         self.assertEqual(validate_generated_profile(profile, self.vocab), [])
 
@@ -1261,8 +1266,10 @@ class ChunkedMoodTests(unittest.TestCase):
                 {"preset": "calm", "probability": 0.95, "confidence": 0.95, "justified": 0.95},
                 {"preset": "happy", "probability": 0.95, "confidence": 0.95, "justified": 0.95},
             ],
-            "unjustified": [{"preset": "angry", "probability": 0.9, "confidence": 0.9, "justified": 0.1}],
-            "unconfident": [{"preset": "angry", "probability": 0.9, "confidence": 0.5, "justified": 0.9}],
+            "abstention": [{"preset": "angry", "confidence": 0.9, "justified": 0.9, "distribution": {
+                "none": 0.35, "neutral": 0.25, "angry": 0.20, "happy": 0.08,
+                "calm": 0.06, "sad": 0.03, "fearful": 0.02, "secretive": 0.01,
+            }}],
             "none": [{"preset": "none", "probability": 0.97, "confidence": 0.97, "justified": 0.97}],
         }
         for name, script in cases.items():
@@ -1274,6 +1281,47 @@ class ChunkedMoodTests(unittest.TestCase):
                 self.assertEqual(result["pack_archon"], "neutral")
                 self.assertTrue(result["mood"]["blocked_by"], name)
                 self.assertFalse(result["mood"]["accepted"], name)
+
+    def test_abstention_mass_forces_neutral(self):
+        # `none` + `neutral` at or above the abstention threshold means the
+        # corpus has no emotional baseline, even though a preset is nominally
+        # the largest single answer.
+        provider = ScriptedChunkProvider(self.vocab, [{
+            "preset": "angry", "confidence": 0.9, "justified": 0.9, "distribution": {
+                "none": 0.35, "neutral": 0.25, "angry": 0.20, "happy": 0.08,
+                "calm": 0.06, "sad": 0.03, "fearful": 0.02, "secretive": 0.01,
+            },
+        }])
+        result = classify_dossier(self._dossier(400), provider, self.vocab, thresholds=self.small)
+        self.assertEqual(result["pack_archon"], "neutral")
+        self.assertIn("abstention_mass", result["mood"]["blocked_by"])
+        self.assertAlmostEqual(result["mood"]["gate"]["abstention_mass"], 0.6, places=2)
+        # The recorded candidate is the strongest emotion, not the overall top
+        # (`none` here): its probability must be its own mean, not the top's.
+        self.assertEqual(result["mood"]["gate"]["selected"], "angry")
+        self.assertAlmostEqual(result["mood"]["gate"]["selected_probability"], 0.20, places=2)
+
+    def test_neutral_winner_needs_no_archon(self):
+        provider = ScriptedChunkProvider(self.vocab, [{
+            "preset": "neutral", "confidence": 0.9, "justified": 0.9, "distribution": {
+                "none": 0.02, "neutral": 0.40, "happy": 0.25, "calm": 0.10,
+                "sad": 0.08, "angry": 0.06, "fearful": 0.05, "secretive": 0.04,
+            },
+        }])
+        result = classify_dossier(self._dossier(400), provider, self.vocab, thresholds=self.small)
+        self.assertEqual(result["pack_archon"], "neutral")
+        self.assertIn("neutral_winner", result["mood"]["blocked_by"])
+        self.assertIn("low_probability", result["mood"]["blocked_by"])
+
+    def test_low_justification_does_not_block_consistent_chunks(self):
+        provider = ScriptedChunkProvider(
+            self.vocab,
+            [{"preset": "happy", "probability": 0.80, "confidence": 0.40, "justified": 0.05}],
+        )
+        result = classify_dossier(self._dossier(200), provider, self.vocab, thresholds=self.small)
+        self.assertEqual(result["pack_archon"], "happy")
+        self.assertTrue(result["mood"]["accepted"])
+        self.assertEqual(result["mood"]["blocked_by"], [])
 
     def test_chunk_planner_scales_with_volume(self):
         self.assertEqual(plan_chunk_count(8, self.policy), 0)

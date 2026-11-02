@@ -34,8 +34,8 @@ DEFAULT_THRESHOLDS = {
     # volume at which a baseline register can exist at all; below it no mood
     # question is asked and the pack stays neutral.
     "min_dialogue_lines_for_mood": 40,
-    "mood_confidence": 0.70,
     "mood_probability": 0.50,
+    "mood_abstention_mass": 0.55,
     "mood_consistency_ratio": 0.6,
     "mood_consistency_margin": 0.05,
     "mood_dispersion_limit": 0.55,
