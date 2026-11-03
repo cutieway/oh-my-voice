@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import math
+import os
 import sys
 from collections import Counter
 from pathlib import Path
@@ -57,6 +58,8 @@ from blueprint_pipeline.jev import (
     is_loopback_endpoint,
     request_fingerprint,
 )
+from blueprint_pipeline.audit import write_style_audit
+from blueprint_pipeline.audition import audit_entries, write_audition_plans
 from blueprint_pipeline.reporting import build_pipeline_report, review_report
 from blueprint_pipeline.review import (
     apply_manual_changes,
@@ -92,10 +95,16 @@ def make_parser() -> argparse.ArgumentParser:
         ("validate", "validate curated and generated blueprint profiles"),
         ("report", "summarize inventory, classifications, assignments, and review work"),
         ("review", "edit, audition, approve, or reject a draft profile"),
+        ("audition", "prepare matched Identity-only and Identity+Style reference plans"),
     ):
         sub = commands.add_parser(name, help=help_text)
         _base_options(sub)
-        if name == "classify":
+        if name == "audition":
+            sub.add_argument("profile", help="profile ID or JSON path")
+            sub.add_argument("--seeds", type=int, default=1)
+            sub.add_argument("--seed-step", type=int, default=1000)
+            sub.add_argument("--report", type=Path, help="existing VoiceDesign report.json to link")
+        elif name == "classify":
             sub.add_argument("--provider", choices=("rules", "jev"), default="rules")
             sub.add_argument("--model", default=DEFAULT_JEV_MODEL)
             sub.add_argument("--endpoint", default=DEFAULT_JEV_ENDPOINT)
@@ -115,16 +124,24 @@ def make_parser() -> argparse.ArgumentParser:
         elif name == "inspect":
             sub.add_argument("target", help="canonical ID, NPC name, speaker ID, or profile ID")
             sub.add_argument("--review-report", action="store_true")
+            sub.add_argument(
+                "--audit-html", type=Path,
+                help="write a human-readable HTML Style audit (implies --review-report)",
+            )
         elif name == "review":
             sub.add_argument("action", choices=("edit", "audition", "approve", "reject"))
             sub.add_argument("profile", help="profile ID or JSON path")
             sub.add_argument("--by", required=True)
             sub.add_argument("--changes", type=Path, help="JSON object mapping dotted fields to values")
             sub.add_argument("--reference", type=Path, help="auditioned VoiceDesign WAV")
-            sub.add_argument("--seed", type=int)
+            sub.add_argument("--seed", type=int, help="defaults to the plan seed")
+            sub.add_argument(
+                "--condition", choices=("identity_only", "identity_style"),
+                help="which matched audition condition this WAV belongs to",
+            )
             sub.add_argument("--reason")
             sub.add_argument("--note")
-        if name in {"inventory", "dossiers", "classify", "compose", "inspect", "validate", "report", "review"}:
+        if name in {"inventory", "dossiers", "classify", "compose", "inspect", "validate", "report", "review", "audition"}:
             sub.add_argument("--vocabulary", type=Path, default=ROOT / "blueprints" / "vocabulary.json")
     return parser
 
@@ -518,14 +535,22 @@ def cmd_compose(args) -> int:
     return 0
 
 
-def cmd_inspect(args) -> int:
-    found = _find_dossier(args, args.target)
-    profile_found = _find_profile(args.target, args.out)
-    dossier = found[0] if found else None
+def _review_inputs(args, target: str):
+    profile_found = _find_profile(target, args.out)
     profile = profile_found[0] if profile_found else None
+    lookup = target
+    if profile is not None:
+        lookup = profile.get("character", {}).get("id") or target
+    found = _find_dossier(args, lookup)
+    dossier = found[0] if found else None
     classifications = _latest_records(args.cache_dir / "classifications", "*.json")
+    canonical_id = (
+        (dossier or {}).get("identity", {}).get("canonical_id")
+        or (profile or {}).get("character", {}).get("id")
+    )
+    if not canonical_id and str(target).startswith("npc_"):
+        canonical_id = str(target)
     classification = None
-    canonical_id = (dossier or {}).get("identity", {}).get("canonical_id") or (profile or {}).get("character", {}).get("id")
     if canonical_id and canonical_id in classifications:
         classification = classifications[canonical_id][0]
     assignments = _load_assignments(args.out)
@@ -533,7 +558,9 @@ def cmd_inspect(args) -> int:
     if profile is None and assignment and assignment.get("speaker_ids"):
         for speaker_id in assignment["speaker_ids"]:
             try:
-                resolved = resolve_effective_profile(speaker_id, {"assignments": list(assignments.values())})
+                resolved = resolve_effective_profile(
+                    speaker_id, {"assignments": list(assignments.values())},
+                )
             except FileNotFoundError:
                 continue
             if resolved:
@@ -541,12 +568,21 @@ def cmd_inspect(args) -> int:
                 assignment = resolved["assignment"]
                 break
     if not dossier and not profile:
-        raise ValueError(f"no dossier or blueprint found for {args.target!r}")
-    if args.review_report:
+        raise ValueError(f"no dossier or blueprint found for {target!r}")
+    return dossier, profile, classification, assignment, canonical_id
+
+
+def cmd_inspect(args) -> int:
+    dossier, profile, classification, assignment, _ = _review_inputs(args, args.target)
+    if args.review_report or args.audit_html:
         report = review_report(
             dossier or {"identity": profile.get("character", {})}, classification, profile,
             blueprint_renderer, blueprint_renderer.load_vocabulary(args.vocabulary), assignment,
         )
+        if args.audit_html:
+            target = Path(args.audit_html)
+            write_style_audit(report, target)
+            print(f"style audit: {target}", file=sys.stderr)
     else:
         report = {"dossier": dossier, "classification": classification, "assignment": assignment, "profile": profile}
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
@@ -595,6 +631,46 @@ def cmd_report(args) -> int:
     return 0
 
 
+def cmd_audition(args) -> int:
+    vocabulary = blueprint_renderer.load_vocabulary(args.vocabulary)
+    dossier, profile, classification, assignment, canonical_id = _review_inputs(
+        args, args.profile,
+    )
+    if profile is None:
+        raise ValueError(f"profile not found: {args.profile}")
+    if args.seeds < 1:
+        raise ValueError("--seeds must be positive")
+    output = args.out / "auditions" / str(profile["character"]["id"])
+    plans = write_audition_plans(
+        profile, vocabulary, output, seeds=args.seeds, seed_step=args.seed_step,
+    )
+    report = review_report(
+        dossier or {"identity": profile.get("character", {})}, classification, profile,
+        blueprint_renderer, vocabulary, assignment,
+    )
+    entries = []
+    if args.report:
+        report_root = Path(args.report).resolve().parent
+        for entry in audit_entries(read_json(args.report)):
+            if entry.get("profile_id") not in (None, profile["character"]["id"]):
+                continue
+            source = Path(entry.get("path") or "")
+            if not source.is_absolute():
+                source = report_root / source
+            if source.is_file():
+                entry["path"] = Path(os.path.relpath(source, output)).as_posix()
+                entries.append(entry)
+    audit_path = write_style_audit(report, output / "style-audit.html", entries)
+    for plan in plans:
+        print(plan)
+    print(f"style audit: {audit_path}")
+    print(
+        "Next: render the plans with tools/voicebank/run.py --references-only, "
+        "then pass each in-range WAV to `review audition`."
+    )
+    return 0
+
+
 def cmd_review(args) -> int:
     found = _find_profile(args.profile, args.out)
     if not found:
@@ -606,24 +682,36 @@ def cmd_review(args) -> int:
         changes = read_json(args.changes)
         profile = apply_manual_changes(profile, changes, by=args.by, note=args.note)
     elif args.action == "audition":
-        if not args.reference or args.seed is None:
-            raise ValueError("review audition requires --reference WAV and --seed")
+        if not args.reference:
+            raise ValueError("review audition requires --reference WAV")
         vocabulary = blueprint_renderer.load_vocabulary(args.vocabulary)
         plan = blueprint_renderer.build_plan(profile, vocabulary)
+        seed = args.seed if args.seed is not None else plan["seed"]
+        # Pin the instruction that actually produced this WAV. An identity-only
+        # take is rendered from the identity prompt alone; pinning the combined
+        # prompt would misattribute the audio to a style clause it never had.
+        if args.condition == "identity_only":
+            instruct = plan["identity_prompt"]
+            combined_instruct_hash = plan["identity_prompt_hash"]
+        else:
+            instruct = plan["instruct"]
+            combined_instruct_hash = plan["combined_instruct_hash"]
         profile = mark_auditioned(
             profile,
             reference_file=args.reference,
-            design_seed=args.seed,
+            design_seed=seed,
             by=args.by,
             note=args.note,
+            condition=args.condition,
+            reference_file_path=str(args.reference),
             reference_transcript=plan["reference"]["text"],
             design_model=plan["design_model"],
             identity_prompt_hash=plan["identity_prompt_hash"],
             style_profile_hash=plan["style_profile_hash"],
-            combined_instruct_hash=plan["combined_instruct_hash"],
+            combined_instruct_hash=combined_instruct_hash,
             casting_rules_version=plan["casting_rules_version"],
             renderer_version=plan["renderer_version"],
-            instruct=plan["instruct"],
+            instruct=instruct,
             taxonomy_version=plan["taxonomy_version"],
             classifier_version=plan["classifier_version"],
             prompt_version=plan["prompt_version"],
@@ -658,6 +746,7 @@ def main(argv: list[str] | None = None) -> int:
         "validate": cmd_validate,
         "report": cmd_report,
         "review": cmd_review,
+        "audition": cmd_audition,
     }
     try:
         return commands[args.command](args)

@@ -311,18 +311,35 @@ provide citations. Jev's probabilities and confidence are useful
 routing signals, not proof; low-confidence choices go to review or a shared
 archetype.
 
+A loopback `systemone` build answers a Style question with a distribution only,
+which would leave every field uncited and therefore unsupported. The pipeline
+therefore asks for citations in a second pass: `jev.run_evidence_pass` sends
+line-choice questions over the exact IDs already in the request, keeps the
+model's top-ranked lines above the flat-distribution floor, and records
+`diagnostics.evidence_source = "model_line_choice"`. The evidence gate is
+untouched, so these citations can reject a weak field but never promote one.
+`speech_style_analysis.evidence_pass` stores the questions, per-question top
+lines and failures; recorded `usage` covers both passes.
+
 The six initial archetypes under `blueprints/archetypes/` are deliberately
 hand-curated drafts, not approved voices. Generated character profiles,
 dossiers, classification results, and assignment registries
 live under gitignored `data/blueprints/`. Use `cli.py inspect <id>
---review-report` to see the dossier, evidence, distributions, assignment, and
-rendered neutral instruction. Run `./scripts/voicebank.sh <profile-id>` to
-audition a draft. `cli.py review audition` hashes a valid reference WAV and
-`cli.py review approve` records the human approval. Assignments are not usable
+--review-report` to see the dossier, evidence, distributions and assignment, and
+`cli.py inspect <id> --audit-html PATH` for the human Style audit: the exact
+post-trim JEV sample, per-field status and citations, model diagnostics labelled
+as such, and the Identity / Style / Combined instructions with their hashes.
+Run `./scripts/voicebank.sh <profile-id>` to audition a draft. `cli.py review audition --condition identity_only|identity_style` hashes a valid
+reference WAV, records which matched condition produced it, and pins that
+condition's own instruct; `cli.py review approve` records the human approval. Assignments are not usable
 for future generation until the resolved profile is human-approved.
 
 The instruct is the identity sentence plus the profile's rendered speech-style
-clause when it has one. Listening on 2026-11-03 preferred styled takes over
+clause when it has one. For a matched Identity-only vs Identity+Style
+comparison, `cli.py audition <profile> --seeds 3` writes paired plans and
+`./scripts/audition.sh <plans-dir> <out-dir>` renders them; the plans and the
+render report carry the reference transcript, design model, seed, instruct and
+hash for every clip. Listening on 2026-11-03 preferred styled takes over
 identity-only takes for every sampled voice, so the clause is the default. The
 mood/archon layer was removed on the same date.
 

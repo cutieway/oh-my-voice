@@ -448,6 +448,320 @@ def _patterns(value: Any, allowed: list[str], limit: int) -> list[dict]:
     return patterns
 
 
+# --------------------------------------------------------------------------
+# Evidence pass
+#
+# A local System One endpoint answers a value question with a distribution and
+# nothing else: it returns no citations. The documented Style gate, however,
+# requires cited lines before a field may be called supported. Rather than
+# invent citations or waive the gate, the application runs a second, explicitly
+# separate pass that asks the model to rank the exact supplied lines. Every
+# citation recorded afterwards is model output; `evidence_source` says so, and
+# nothing implies the value question produced it.
+# --------------------------------------------------------------------------
+
+EVIDENCE_PASS_VERSION = "jev-evidence-pass-1.0"
+# Four questions over <=40 line options fit the default 8192-token local
+# context; ten do not. Each question re-states the full option list.
+EVIDENCE_QUESTIONS_PER_REQUEST = 4
+EVIDENCE_SUPPORT_TOP_K = 3
+EVIDENCE_COUNTER_TOP_K = 2
+EVIDENCE_MIXED_PATTERN_LIMIT = 3
+# A flat distribution over N options is 1/N. Anything below this floor is not
+# a preference and must never become a citation.
+EVIDENCE_MIN_PROBABILITY = 0.08
+
+EVIDENCE_SOURCE = "model_line_choice"
+
+
+def _evidence_instructions(field: str, value: str, kind: str) -> str:
+    if kind == "support":
+        return (
+            f"Which supplied line most clearly exemplifies the value `{value}` "
+            f"for the field {field}? Judge only the wording, not who might say it."
+        )
+    if kind == "counter":
+        return (
+            f"Which supplied line is most atypical of the value `{value}` for the "
+            f"field {field} and would count as a counterexample? Judge only the wording."
+        )
+    return (
+        f"Which supplied line belongs to the recurring pattern `{value}` for the "
+        f"field {field}? Judge only the wording."
+    )
+
+
+def _mix_pattern_labels(question: dict, answer: dict) -> list[str]:
+    """The concrete labels a mixed answer plausibly splits into."""
+    probabilities = (answer.get("diagnostics") or {}).get("raw_probabilities") or {}
+    labels = [
+        label for label in question["criteria"]
+        if label != "mixed" and label in probabilities
+    ]
+    labels.sort(key=lambda label: (-probabilities[label], label))
+    return labels[:EVIDENCE_MIXED_PATTERN_LIMIT]
+
+
+def evidence_question_specs(
+    answers: dict[str, dict],
+    questions: dict[str, dict],
+    line_ids: list[str],
+) -> dict[str, dict]:
+    """Line-ranking questions for the fields that produced a concrete value.
+
+    Returns request-ready question specs keyed by evidence question ID. An
+    empty result means no field produced a value worth citing.
+    """
+    if not line_ids:
+        return {}
+    criteria = {line_id: None for line_id in line_ids}
+    specs: dict[str, dict] = {}
+    for field in STYLE_FIELDS:
+        question = questions.get(f"speech_style.{field}")
+        answer = answers.get(f"speech_style.{field}")
+        if not question or not isinstance(answer, dict):
+            continue
+        value = answer.get("choice")
+        if not value:
+            continue
+        if value == "mixed":
+            for label in _mix_pattern_labels(question, answer):
+                specs[f"evidence.{field}.pattern.{label}"] = {
+                    "type": "choice",
+                    "instructions": _evidence_instructions(field, label, "pattern"),
+                    "criteria": dict(criteria),
+                }
+            continue
+        for kind in ("support", "counter"):
+            specs[f"evidence.{field}.{kind}"] = {
+                "type": "choice",
+                "instructions": _evidence_instructions(field, value, kind),
+                "criteria": dict(criteria),
+            }
+    return specs
+
+
+def _ranked_line_ids(answer: dict, limit: int) -> list[str]:
+    """Highest-probability line IDs above the flat-distribution floor."""
+    diagnostics = answer.get("diagnostics") or {}
+    probabilities = diagnostics.get("raw_probabilities") or {}
+    if probabilities:
+        ranked = [
+            line_id for line_id, probability in sorted(
+                probabilities.items(), key=lambda item: (-item[1], item[0]),
+            )
+            if probability >= EVIDENCE_MIN_PROBABILITY
+        ]
+        return ranked[:limit]
+    choice = answer.get("choice")
+    return [choice] if isinstance(choice, str) and choice else []
+
+
+def select_evidence(
+    answers: dict[str, dict],
+    questions: dict[str, dict],
+    responses: dict[str, dict],
+    *,
+    failures: dict[str, str] | None = None,
+) -> dict:
+    """Turn the evidence answers into per-field citations.
+
+    Nothing here decides a status. The citations are injected into the value
+    answer and the existing evidence gate still decides whether they are
+    sufficient, so a weak line ranking can only reject a field, never promote
+    one.
+    """
+    fields: dict[str, dict] = {}
+    diagnostics: dict[str, dict] = {}
+    for field in STYLE_FIELDS:
+        value_answer = answers.get(f"speech_style.{field}")
+        question = questions.get(f"speech_style.{field}")
+        if not isinstance(value_answer, dict) or not question:
+            continue
+        value = value_answer.get("choice")
+        if not value:
+            continue
+        if value == "mixed":
+            patterns = []
+            claimed: set[str] = set()
+            for label in _mix_pattern_labels(question, value_answer):
+                answer = responses.get(f"evidence.{field}.pattern.{label}")
+                if not isinstance(answer, dict):
+                    continue
+                line_ids = [
+                    line_id for line_id in _ranked_line_ids(
+                        answer, EVIDENCE_SUPPORT_TOP_K + len(claimed),
+                    )
+                    if line_id not in claimed
+                ][:EVIDENCE_SUPPORT_TOP_K]
+                diagnostics[f"evidence.{field}.pattern.{label}"] = _evidence_diagnostic(answer)
+                if not line_ids:
+                    continue
+                claimed.update(line_ids)
+                patterns.append({"label": label, "line_ids": line_ids})
+            fields[field] = {
+                "supporting_line_ids": [],
+                "counterexample_line_ids": [],
+                "patterns": patterns,
+                "citation_balance": None,
+            }
+            continue
+        support = responses.get(f"evidence.{field}.support")
+        counter = responses.get(f"evidence.{field}.counter")
+        support_ids = (
+            _ranked_line_ids(support, EVIDENCE_SUPPORT_TOP_K)
+            if isinstance(support, dict) else []
+        )
+        counter_ids = [
+            line_id for line_id in (
+                _ranked_line_ids(counter, EVIDENCE_COUNTER_TOP_K)
+                if isinstance(counter, dict) else []
+            )
+            if line_id not in support_ids
+        ]
+        if isinstance(support, dict):
+            diagnostics[f"evidence.{field}.support"] = _evidence_diagnostic(support)
+        if isinstance(counter, dict):
+            diagnostics[f"evidence.{field}.counter"] = _evidence_diagnostic(counter)
+        total = len(support_ids) + len(counter_ids)
+        fields[field] = {
+            "supporting_line_ids": support_ids,
+            "counterexample_line_ids": counter_ids,
+            "patterns": [],
+            "citation_balance": (
+                round(len(support_ids) / total, 4) if total else None
+            ),
+        }
+    return {
+        "fields": fields,
+        "diagnostics": diagnostics,
+        "failures": dict(failures or {}),
+    }
+
+
+def _evidence_diagnostic(answer: dict) -> dict:
+    """Model diagnostics for one evidence question; never an evidence status."""
+    diagnostics = answer.get("diagnostics") or {}
+    probabilities = diagnostics.get("raw_probabilities") or {}
+    ranked = sorted(probabilities.items(), key=lambda item: (-item[1], item[0]))[:5]
+    return {
+        "choice": answer.get("choice"),
+        "top_lines": [
+            {"line_id": line_id, "probability": probability}
+            for line_id, probability in ranked
+        ],
+        "raw_confidence": diagnostics.get("raw_confidence"),
+        "model_self_reported_confidence": diagnostics.get("model_self_reported_confidence"),
+    }
+
+
+def _evidence_chunks(question_ids: list[str], option_count: int) -> list[list[str]]:
+    """Chunk evidence questions so one request fits the endpoint context.
+
+    Every question restates the whole option list, so the cost is roughly
+    questions x options. Measured on an 8192-token local context: four
+    questions over 24 options fit, ten do not.
+    """
+    size = EVIDENCE_QUESTIONS_PER_REQUEST if option_count <= 24 else 2
+    return [question_ids[index:index + size] for index in range(0, len(question_ids), size)]
+
+
+def run_evidence_pass(
+    provider: Any,
+    state: dict,
+    answers: dict[str, dict],
+    questions: dict[str, dict],
+    line_ids: list[str],
+) -> dict:
+    """Ask the model to rank the supplied lines for each proposed value.
+
+    Only providers that accept an explicit request state can run this pass; the
+    offline rules baseline cannot and reports no citations, which leaves the
+    existing gate to reject its uncited values.
+    """
+    specs = evidence_question_specs(answers, questions, line_ids)
+    result = {
+        "version": EVIDENCE_PASS_VERSION,
+        "source": EVIDENCE_SOURCE,
+        "questions": specs,
+        "fields": {},
+        "diagnostics": {},
+        "failures": {},
+        "usage": {"input_tokens": 0, "output_tokens": 0},
+    }
+    if not specs:
+        return result
+    if not hasattr(provider, "classify_state"):
+        result["failures"] = {
+            question_id: "provider cannot run an explicit-state evidence pass"
+            for question_id in specs
+        }
+        return result
+
+    responses: dict[str, dict] = {}
+
+    def ask(chunk: list[str]) -> None:
+        chunk_questions = {question_id: specs[question_id] for question_id in chunk}
+        try:
+            response = provider.classify_state(state, chunk_questions)
+        except JevError as exc:
+            # A context or body limit is per-request, not per-question: split
+            # rather than lose every citation at once.
+            if len(chunk) > 1:
+                middle = len(chunk) // 2
+                ask(chunk[:middle])
+                ask(chunk[middle:])
+                return
+            result["failures"][chunk[0]] = str(exc)
+            return
+        responses.update(response.get("answers") or {})
+        usage = response.get("usage") or {}
+        for key in ("input_tokens", "output_tokens"):
+            result["usage"][key] += int(usage.get(key) or 0)
+        result["model"] = response.get("model")
+        result["model_revision"] = response.get("model_revision")
+
+    for chunk in _evidence_chunks(list(specs), len(line_ids)):
+        ask(chunk)
+
+    selected = select_evidence(
+        answers, questions, responses, failures=result["failures"],
+    )
+    result["fields"] = selected["fields"]
+    result["diagnostics"] = selected["diagnostics"]
+    return result
+
+
+def apply_evidence(answers: dict[str, dict], evidence: dict) -> dict[str, dict]:
+    """Copy value answers and attach the separately elicited citations."""
+    applied = {}
+    for question_id, answer in answers.items():
+        if question_id.startswith("speech_style."):
+            field = question_id.split(".", 1)[1]
+            citations = (evidence.get("fields") or {}).get(field)
+            if citations and answer.get("choice"):
+                answer = dict(answer)
+                answer["supporting_line_ids"] = citations["supporting_line_ids"]
+                answer["counterexample_line_ids"] = citations["counterexample_line_ids"]
+                answer["patterns"] = citations["patterns"]
+                diagnostics = dict(answer.get("diagnostics") or {})
+                diagnostics["evidence_source"] = evidence.get("source")
+                diagnostics["evidence_pass_version"] = evidence.get("version")
+                diagnostics["evidence_questions"] = {
+                    key: value for key, value in (evidence.get("diagnostics") or {}).items()
+                    if key.split(".")[1:2] == [field]
+                }
+                failures = {
+                    key: value for key, value in (evidence.get("failures") or {}).items()
+                    if key.split(".")[1:2] == [field]
+                }
+                if failures:
+                    diagnostics["evidence_failures"] = failures
+                answer["diagnostics"] = diagnostics
+        applied[question_id] = answer
+    return applied
+
+
 def validate_response(payload: dict, questions: dict[str, dict]) -> dict:
     if not isinstance(payload, dict) or not isinstance(payload.get("model"), str):
         raise JevResponseError("response is missing the answering model ID")
@@ -516,10 +830,6 @@ def validate_response(payload: dict, questions: dict[str, dict]) -> dict:
             if pattern_ids & set(counterexamples):
                 raise JevResponseError(
                     f"{question_id} repeats a pattern line in counterexample_line_ids"
-                )
-            if choice == "mixed" and len(patterns) < int(question.get("min_mixed_patterns", 2)):
-                raise JevResponseError(
-                    f"{question_id} mixed requires at least two recurring patterns"
                 )
             if choice != "mixed" and patterns:
                 raise JevResponseError(

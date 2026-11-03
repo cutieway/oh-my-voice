@@ -71,9 +71,36 @@ otherwise it stays audit-only.
 | v3 manifest and NPC split | generated: 80 items, 20 development / 60 locked test |
 | 12-NPC two-annotator pilot | not_run; blank forms exist |
 | Full 80-item gold | not_run; forms blank, gold pending |
-| Local JEV predictions | not_run |
-| JEV repeat/order/sample stability | not_run |
+| Local JEV predictions | ran on 15 NPCs (2026-11-03); not the 12-NPC pilot protocol |
+| JEV repeat/order/sample stability | not_run — one run per NPC, no repeats |
 | Rules baseline | runs; explicitly non-validated |
-| VoiceDesign A/B matrix | pending |
+| VoiceDesign A/B matrix | partial: 4 profiles × 2 conditions, 3 matched seeds each |
+
+Local JEV note: the loopback endpoint returns no citations, so citations come
+from a separate recorded line-choice pass. Fifteen NPCs were classified once
+each on 2026-11-03 with that pass:
+
+| NPC | Supported fields | Rejected (reason) | Status |
+|---|---|---|---|
+| npc_1013274 Stephanivien | colloquialism, lexical_complexity, register, sentence_complexity | discourse_style (provisional tier) | ready_for_audition |
+| npc_1010139 Oboro | colloquialism, lexical_complexity, register, sentence_complexity | discourse_style (provisional tier) | ready_for_audition |
+| npc_1030775 Ronitt | colloquialism, lexical_complexity, register, sentence_complexity | discourse_style (provisional tier) | ready_for_audition |
+| npc_1005512 Hildibrand | colloquialism, lexical_complexity, register, sentence_complexity | discourse_style (provisional tier) | ready_for_audition |
+| npc_1005513 Godbert | lexical_complexity, sentence_complexity | colloquialism, register (too few ranked lines), discourse_style (mixed patterns) | needs_review |
+| npc_1009943 Jacke | colloquialism, lexical_complexity, register | discourse_style, sentence_complexity (mixed patterns) | needs_review |
+| npc_1026852 Martyn | colloquialism, lexical_complexity, register | discourse_style, sentence_complexity (mixed patterns) | needs_review |
+| npc_1003075 Gerolt | colloquialism, register | discourse_style, lexical_complexity, sentence_complexity | needs_review |
+| npc_1025498 Mikoto | colloquialism, lexical_complexity, register, sentence_complexity | discourse_style (mixed patterns) | needs_review |
+| npc_1005501 Nashu Mhakaracca | colloquialism, register | discourse_style (provisional), lexical_complexity, sentence_complexity | needs_review |
+| npc_1009242 Haermaga | lexical_complexity | colloquialism, register, sentence_complexity, discourse_style | needs_review |
+| npc_1013969 Sidurgu | colloquialism, lexical_complexity, sentence_complexity | register, discourse_style (provisional) | needs_review |
+| npc_1020995 X'rhun Tia | lexical_complexity, sentence_complexity | colloquialism, register, discourse_style (provisional) | needs_review |
+| npc_1007900 Jihli Aliapoh | colloquialism, lexical_complexity, register, sentence_complexity | discourse_style (mixed patterns) | needs_review |
+| npc_1004093 Serendipity | colloquialism | discourse_style, lexical_complexity, register, sentence_complexity | needs_review |
+
+Rejections are the gate working, not a failure to fix: a `mixed` value whose
+pattern questions return fewer than three lines above the flat-distribution
+floor is genuinely under-cited. Four NPCs reached `ready_for_audition`; the
+others stayed `needs_review`.
 
 Every Style field remains experimental until these rows change.

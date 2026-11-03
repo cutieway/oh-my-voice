@@ -169,3 +169,56 @@ Every cited ID must exist in the exact post-trim request sample. Unknown,
 forged, duplicate, or cross-listed IDs reject the field; valid citations plus
 the request-visible tier gate decide `supported`, `provisional`,
 `insufficient_evidence`, or `unresolved`.
+
+## When the endpoint returns no citations
+
+A loopback `systemone` build answers with `choice`, `probabilities`,
+`confidence`, and `usage` only. It accepts `evidence_required`,
+`min_supporting`, `min_mixed_patterns`, and `rationale_required` without
+acting on them. With no citations every Style field would fail the gate, so the
+pipeline elicits citations in a second pass instead of relaxing the gate.
+
+The evidence pass sends the same `state` and asks `choice` questions whose
+options are the exact request line IDs:
+
+```json
+{
+  "model": "jev-latest",
+  "state": {"dialogue_samples": ["...unchanged..."]},
+  "questions": {
+    "evidence.register.support": {
+      "type": "choice",
+      "instructions": "Which supplied line most clearly exemplifies the value `formal` for the field register? Judge only the wording, not who might say it.",
+      "criteria": {"L1F7DF2445BAFF3B4": null, "L4C06198B12D44119": null}
+    },
+    "evidence.register.counter": {
+      "type": "choice",
+      "instructions": "Which supplied line is most atypical of the value `formal` for the field register and would count as a counterexample? Judge only the wording.",
+      "criteria": {"L1F7DF2445BAFF3B4": null, "L4C06198B12D44119": null}
+    }
+  }
+}
+```
+
+Rules:
+
+- One `support` and one `counter` question per field with a concrete non-null
+  value; a `mixed` value instead gets one `evidence.<field>.pattern.<label>`
+  question per candidate label, ranked by the value answer's own distribution.
+  The labels are the model's own top candidates, and the audit marks them as
+  model-derived.
+- Options are only the IDs already sent in the state. An ID outside that set can
+  never be cited.
+- A line becomes a citation only when its probability clears the
+  flat-distribution floor (1/N); ties below it are noise. At most three support
+  lines and two counterexamples are recorded, and no line may appear on both
+  sides or in two patterns.
+- `do not send` `evidence_required`, `min_supporting`, `min_mixed_patterns`, or
+  `rationale_required` with a long option list: the local build answers HTTP
+  500. Four questions over 24 options fit an 8192-token context; ten do not, so
+  the pass chunks and splits a failing chunk in half.
+- A per-question failure is stored in
+  `speech_style_analysis.evidence_pass.failures` and simply yields no citation.
+  It never fabricates one.
+- `diagnostics.evidence_source = "model_line_choice"` travels with the field so
+  the HTML audit never implies the value question produced the citations.

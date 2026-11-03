@@ -145,6 +145,9 @@ python3 tools/blueprint_pipeline/cli.py dossiers --game-index /tmp/game-npc-inde
 python3 tools/blueprint_pipeline/cli.py classify --provider rules --limit 25
 python3 tools/blueprint_pipeline/cli.py classify --provider jev --limit 25
 python3 tools/blueprint_pipeline/cli.py inspect npc_1003075 --review-report
+# Human Style audit: exact JEV request sample, decisions, diagnostics, prompts.
+python3 tools/blueprint_pipeline/cli.py inspect npc_1003075 \
+  --audit-html /tmp/npc_1003075-style-audit.html
 python3 tools/blueprint_pipeline/cli.py validate
 python3 tools/blueprint_pipeline/cli.py report
 ```
@@ -157,6 +160,26 @@ print a request, token, and approximate cost estimate first. Cached outputs are
 immutable under gitignored `data/blueprints/`, so unchanged dossiers and
 classifier settings resume without duplicate API work. Jev cannot process
 audio or provide citations.
+
+### Style citations come from a second, recorded pass
+
+A loopback `systemone` endpoint answers a Style value question with a
+distribution and nothing else. The Style gate still requires cited lines before
+a field may be `supported`, so the pipeline asks for them separately rather
+than inventing them or waiving the gate:
+
+1. The value pass returns a per-field label (`speech_style.<field>`).
+2. `jev.run_evidence_pass` asks line-ranking questions
+   (`evidence.<field>.support|counter`, or `evidence.<field>.pattern.<label>`
+   for `mixed`) over exactly the line IDs that were sent.
+3. Ties above the flat-distribution floor (1/N) become
+   `supporting_line_ids` / `counterexample_line_ids` / `patterns`, and
+   `diagnostics.evidence_source` records `model_line_choice`.
+
+Nothing in that pass decides a status. The same tier and citation thresholds
+then accept or reject the field, so a weak line ranking can only lose a field.
+`speech_style_analysis.evidence_pass` stores the question set, the per-question
+top lines, and any request failures. Recorded `usage` covers both passes.
 Race, clan, and sex describe identity and are not acoustic evidence. Synthetic
 profiles remain drafts until a human auditions a VoiceDesign clip, pins its
 hash, and approves it. This task does not wire those references into the

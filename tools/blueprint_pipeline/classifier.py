@@ -24,9 +24,11 @@ from .dialogue import (
 )
 from .jev import (
     GUARDRAILS,
+    apply_evidence,
     build_questions,
     compact_state,
     request_fingerprint,
+    run_evidence_pass,
 )
 
 
@@ -437,6 +439,19 @@ def classify_dossier(
     resolved_model_id = response.get("model") or model_id or provider.model_id
     resolved_model_revision = response.get("model_revision")
 
+    # The value pass carries no citations on a local endpoint, so citations are
+    # elicited separately over the exact supplied line IDs. They are recorded
+    # as model-derived and only ever feed the existing evidence gate.
+    evidence_pass = None
+    if sent_state is not None and hasattr(provider, "classify_state"):
+        evidence_pass = run_evidence_pass(
+            provider, sent_state, answers, questions, sorted(sample_ids),
+        )
+        answers = apply_evidence(answers, evidence_pass)
+        evidence_usage = evidence_pass.get("usage") or {}
+    else:
+        evidence_usage = {"input_tokens": 0, "output_tokens": 0}
+
     decisions: dict[str, dict] = {}
     decision_checks: dict[str, dict] = {}
     field_tiers: dict[str, dict] = {}
@@ -485,8 +500,10 @@ def classify_dossier(
         }
 
     usage = {
-        "input_tokens": int((response.get("usage") or {}).get("input_tokens") or 0),
-        "output_tokens": int((response.get("usage") or {}).get("output_tokens") or 0),
+        "input_tokens": int((response.get("usage") or {}).get("input_tokens") or 0)
+        + int(evidence_usage.get("input_tokens") or 0),
+        "output_tokens": int((response.get("usage") or {}).get("output_tokens") or 0)
+        + int(evidence_usage.get("output_tokens") or 0),
     }
     allocation = _profile_allocation(dossier, decisions, policy)
     supported_fields = allocation["supported_style_fields"]
@@ -596,6 +613,34 @@ def classify_dossier(
             },
         },
         "dimensions": decisions,
+        "evidence_pass": (
+            {
+                "version": evidence_pass.get("version"),
+                "source": evidence_pass.get("source"),
+                "model": evidence_pass.get("model"),
+                "model_revision": evidence_pass.get("model_revision"),
+                "usage": evidence_pass.get("usage"),
+                "questions": evidence_pass.get("questions"),
+                "answer_diagnostics": evidence_pass.get("diagnostics"),
+                "failures": evidence_pass.get("failures"),
+            }
+            if evidence_pass is not None else None
+        ),
+        # The exact post-trim lines the model received, in the order it received
+        # them. Stored verbatim so a human audit never reconstructs a different
+        # sample from the dossier. Dossier rows carry no `id`; the opaque ID is
+        # derived with the same sample_id() the request state uses, so citations
+        # keep resolving.
+        "representative_sample": [
+            {
+                "id": str(row.get("id") or sample_id(canonical_id, row)),
+                "text": row.get("text"),
+            }
+            for row in (
+                sent_state["dialogue_samples"] if sent_state is not None else samples
+            )
+            if isinstance(row.get("text"), str)
+        ],
         "experimental": {
             "speech_habits": {
                 "value": analysis.get("speech_habits") or [],

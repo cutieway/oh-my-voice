@@ -47,6 +47,8 @@ def mark_auditioned(
     note: str | None = None,
     reference_transcript: str | None = None,
     design_model: str | None = None,
+    condition: str | None = None,
+    reference_file_path: str | None = None,
     identity_prompt_hash: str | None = None,
     style_profile_hash: str | None = None,
     combined_instruct_hash: str | None = None,
@@ -72,6 +74,12 @@ def mark_auditioned(
         "ref_seconds": details["seconds"],
         "pinned_on": timestamp,
     }
+    if condition is not None:
+        if condition not in {"identity_only", "identity_style"}:
+            raise ReviewError("audition condition must be identity_only or identity_style")
+        new_pin["condition"] = condition
+    if reference_file_path is not None:
+        new_pin["reference_file"] = str(reference_file_path)
     if reference_transcript is not None:
         new_pin["reference_transcript"] = reference_transcript
         new_pin["reference_transcript_sha256"] = hashlib.sha256(

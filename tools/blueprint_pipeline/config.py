@@ -45,7 +45,7 @@ STYLE_CLASSIFIER_VERSION = "jev-style-classifier-3.0"
 STYLE_PROMPT_VERSION = "style-prompt-3.0"
 DIALOGUE_SAMPLER_VERSION = "dialogue-sampler-3.0"
 SPEECH_STYLE_SCHEMA_VERSION = "speech-style-3.0"
-STYLE_EVIDENCE_POLICY_VERSION = "style-evidence-3.0"
+STYLE_EVIDENCE_POLICY_VERSION = "style-evidence-3.1"
 
 STYLE_FIELDS = (
     "register",

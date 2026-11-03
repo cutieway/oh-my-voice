@@ -163,9 +163,19 @@ python3 tools/blueprint_pipeline/cli.py classify --provider rules --limit 25
 python3 tools/blueprint_pipeline/cli.py classify --provider jev --limit 25
 
 python3 tools/blueprint_pipeline/cli.py inspect npc_1003075 --review-report
+python3 tools/blueprint_pipeline/cli.py inspect npc_1003075 \
+  --audit-html /tmp/npc_1003075-style-audit.html
 python3 tools/blueprint_pipeline/cli.py validate
 python3 tools/blueprint_pipeline/cli.py report
 ```
+
+`--audit-html` writes the human Style audit for one NPC: identity facts kept
+separate from the identity-blind JEV input, the exact JEV request metadata and
+fingerprints, the recorded post-trim sample (24 opaque IDs with text, each line
+anchorable), a five-row Style table whose citations link to those anchors, model
+diagnostics labelled as such, an audit-only feature panel, and the three exact
+instructions with their plan hashes. The JSON report remains the source of
+truth; the HTML only renders it.
 
 Loopback Jev endpoints need no network opt-in; non-loopback endpoints are
 rejected unless `--allow-remote` is passed explicitly. Jev defaults to at most
@@ -182,7 +192,12 @@ confidence where provided, model version, token usage, and input/config hashes.
 Noul is a yes-probability and has no separate confidence field. Thresholds are
 initial project settings, not accuracy guarantees; low-confidence decisions
 route to review or an archetype. Jev reads text/JSON only: it cannot hear
-audition clips or supply citations.
+audition clips. A loopback `systemone` build also returns no citations, so the
+pipeline elicits them in a second recorded pass (`jev.run_evidence_pass`): the
+model ranks the exact supplied line IDs per proposed value, and
+`diagnostics.evidence_source = "model_line_choice"` marks those citations as
+model output. The evidence gate is unchanged, so a weak ranking can only reject
+a field, never promote one. See `docs/jev-style-request-example.md`.
 
 Game race, clan, and sex are identity metadata, never acoustic evidence.
 Rules-only presentation defaults to neutral. Every non-null acoustic field is
@@ -198,10 +213,37 @@ Use the review command to preserve a human audit trail:
 python3 tools/blueprint_pipeline/cli.py review edit npc_123456 --by reviewer \
   --changes /tmp/voice-edits.json
 python3 tools/blueprint_pipeline/cli.py review audition archetype_neutral_clear_mid \
-  --by reviewer --reference /path/to/audition.wav --seed 20261101
+  --by reviewer --reference /path/to/audition.wav --seed 20261101 \
+  --condition identity_style
 python3 tools/blueprint_pipeline/cli.py review approve archetype_neutral_clear_mid \
   --by reviewer
 ```
+
+`--condition identity_only|identity_style` records which matched audition
+condition produced the WAV, and the pin stores that condition's own instruct and
+instruct hash. Without it, an identity-only take would be pinned against the
+combined identity-plus-style prompt and misattribute the audio.
+
+### Matched identity/style audition
+
+```bash
+python3 tools/blueprint_pipeline/cli.py audition npc_1005512 --seeds 3
+./scripts/audition.sh data/blueprints/auditions/npc_1005512/plans \
+  data/blueprints/auditions/npc_1005512
+```
+
+`audition` writes one plan per condition per seed, all sharing the reference
+text, design model and seed schedule, plus `style-audit.html`. `scripts/audition.sh`
+renders the reference WAVs only. Every reference is in `8–18 s` acceptance
+range before it can be pinned; the audit page lists each clip with its
+condition, seed, duration, sha256 and exact instruct, and flags anything out of
+range or without a recorded hash. When several plans target one voice directory
+the references are named `refs/seed-<seed>.wav` and clones
+`lines/seed-<seed>.<n>.wav`, so a later seed can never overwrite an earlier
+take while `report.json` keeps a stale hash.
+
+Re-running `audition` with `--report <dir>/report.json` links the rendered clips
+into the audit page.
 
 An identity edit retires old pins into the history and returns the profile to
 `ready_for_audition`. Only human review can set `approved`; generation lookup

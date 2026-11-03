@@ -68,8 +68,25 @@ Until then, all Style fields are experimental and may be auditioned only.
 
 | Requirement | State |
 |---|---|
-| Multi-profile, multi-seed matrix | not_run |
+| Multi-profile, multi-seed matrix | partial: 4 profiles x 2 conditions, 3 matched seeds each (npc_1013274, npc_1010139, npc_1030775, npc_1005512) |
 | Blind human judgments | not_run |
 | Acoustic diagnostics | not_run |
 | Base ICL same-speaker checks | not_run |
 | Current vs v3 renderer comparison | not_run |
+
+What ran on 2026-11-03 was a **plumbing** audition, not this matrix: it proves
+the paired plans, seed-named WAVs, hash provenance and audit page agree. It
+supplies no blind ranking, no acoustic measurement, and no conclusion about
+whether the Style clause improves character fit. Reference takes were all
+inside the 8–18 s target with hashes matching `report.json`:
+
+| Profile | Condition | Seeds | Reference seconds |
+|---|---|---|---|
+| npc_1005512 Hildibrand | identity_only | 20740153, 20741153, 20742153 | 11.20, 10.72, 10.80 |
+| npc_1005512 Hildibrand | identity_style | 20740153, 20741153, 20742153 | 10.96, 12.80, 12.32 |
+| npc_1013274 Stephanivien | identity_only | 20881189, 20882189, 20883189 | 12.96, 11.84, 11.28 |
+| npc_1013274 Stephanivien | identity_style | 20881189, 20882189, 20883189 | 12.32, 12.56, 9.92 |
+| npc_1010139 Oboro | identity_only | 20551045, 20552045, 20553045 | 11.20, 9.28, 10.48 |
+| npc_1010139 Oboro | identity_style | 20551045, 20552045, 20553045 | 11.76, 10.80, 10.32 |
+| npc_1030775 Ronitt | identity_only | 20352976, 20353976, 20354976 | 11.04, 10.96, 11.68 |
+| npc_1030775 Ronitt | identity_style | 20352976, 20353976, 20354976 | 10.96, 10.32, 10.08 |

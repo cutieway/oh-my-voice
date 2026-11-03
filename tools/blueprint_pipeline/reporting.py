@@ -5,6 +5,70 @@ from collections import Counter
 from pathlib import Path
 
 from .cache import json_files, read_json, write_content_addressed
+from .dialogue import sample_id
+
+
+def _style_analysis(classification: dict | None, profile: dict | None) -> dict:
+    if classification and isinstance(classification.get("speech_style_analysis"), dict):
+        return classification["speech_style_analysis"]
+    if profile and isinstance(profile.get("speech_style_analysis"), dict):
+        return profile["speech_style_analysis"]
+    return {}
+
+
+def _request_metadata(classification: dict | None) -> dict:
+    if not classification:
+        return {
+            "available": False,
+            "note": "No classification record is available for this NPC.",
+        }
+    analysis = _style_analysis(classification, None)
+    configuration = classification.get("configuration") or {}
+    return {
+        "available": True,
+        "provider": classification.get("provider"),
+        "model_id": classification.get("model_id") or analysis.get("model_id"),
+        "model_revision": analysis.get("model_revision"),
+        "endpoint": analysis.get("endpoint"),
+        "endpoint_class": analysis.get("endpoint_class"),
+        "taxonomy_version": analysis.get("taxonomy_version"),
+        "classifier_version": analysis.get("classifier_version"),
+        "prompt_version": analysis.get("prompt_version"),
+        "schema_version_contract": analysis.get("schema_version_contract"),
+        "sampler_version": analysis.get("sampler_version"),
+        "evidence_policy_version": analysis.get("evidence_policy_version"),
+        "request_fingerprint": analysis.get("request_fingerprint"),
+        "response_fingerprint": analysis.get("response_fingerprint"),
+        "sample_manifest_hash": analysis.get("sample_manifest_hash"),
+        "state_hash": configuration.get("state_hash"),
+        "questions_hash": configuration.get("questions_hash"),
+        "guardrails_hash": configuration.get("guardrails_hash"),
+        "vocabulary_hash": configuration.get("vocabulary_hash"),
+        "budget_reduction": analysis.get("budget_reduction"),
+        "evidence": analysis.get("evidence") or {},
+        "classification_status": classification.get("status"),
+        "classification_timestamp": classification.get("timestamp"),
+        "cached": classification.get("cache_key") is not None,
+    }
+
+
+def _sample_provenance(dossier: dict, sample: list[dict]) -> dict:
+    """Map opaque request IDs to local source/sheet provenance for humans only."""
+    canonical_id = str((dossier.get("identity") or {}).get("canonical_id") or "")
+    wanted = {str(row.get("id")) for row in sample if row.get("id")}
+    provenance = {}
+    for row in dossier.get("dialogue_samples") or []:
+        identifier = str(sample_id(canonical_id, row))
+        if identifier not in wanted:
+            continue
+        provenance[identifier] = {
+            "source": row.get("source"),
+            "sheet": row.get("sheet"),
+            "row_id": row.get("row_id"),
+            "voice_line_id": row.get("voice_line_id"),
+            "dialog_id": row.get("dialog_id"),
+        }
+    return provenance
 
 
 def review_report(
@@ -16,6 +80,13 @@ def review_report(
     assignment: dict | None = None,
 ) -> dict:
     identity = dossier.get("identity") or {}
+    analysis = _style_analysis(classification, profile)
+    stored_sample = [
+        {"id": str(row.get("id")), "text": row.get("text")}
+        for row in analysis.get("representative_sample") or []
+        if row.get("id") and isinstance(row.get("text"), str)
+    ]
+    plan = renderer.build_plan(profile, vocabulary) if profile else None
     report = {
         "canonical_id": identity.get("canonical_id"),
         "name": identity.get("name"),
@@ -23,6 +94,7 @@ def review_report(
             key: identity.get(key)
             for key in ("npc_id", "race", "clan", "sex")
         },
+        "identity_facts": identity,
         "identity_resolution": {
             "status": identity.get("resolution_status"),
             "has_se_voice_reference": identity.get("has_se_voice_reference"),
@@ -36,9 +108,25 @@ def review_report(
         "classification": classification,
         "archetype_assignment": assignment,
         "proposed_blueprint": profile,
-        "rendered_neutral_instruction": (
-            renderer.render_identity(profile, vocabulary) if profile else None
+        "reference_pin": (profile or {}).get("reference_pin"),
+        "jev_request": _request_metadata(classification),
+        "jev_sample": stored_sample,
+        "jev_sample_status": (
+            "recorded_exact_request"
+            if stored_sample
+            else "not_recorded; this classification predates exact sample capture, so the report does not reconstruct one"
         ),
+        "jev_sample_local_provenance": _sample_provenance(dossier, stored_sample),
+        "jev_audit_features": analysis.get("experimental") or {},
+        "identity_instruction": plan["identity_prompt"] if plan else None,
+        "style_instruction": plan["style_prompt"] if plan else None,
+        "combined_instruction": plan["instruct"] if plan else None,
+        "identity_prompt_hash": plan["identity_prompt_hash"] if plan else None,
+        "style_profile_hash": plan["style_profile_hash"] if plan else None,
+        "combined_instruct_hash": plan["combined_instruct_hash"] if plan else None,
+        "reference_text": plan["reference"]["text"] if plan else None,
+        "design_model": plan["design_model"] if plan else None,
+        "design_seed": plan["seed"] if plan else None,
         "human_approval": None,
     }
     return report

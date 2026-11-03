@@ -8,6 +8,11 @@ plan files produced by `tools/blueprint.py plan`; output is, per voice:
     lines/take.<n>.wav           one clone of each sample line
     report.json / index.html     prompt, seeds, durations, pitch, audition page
 
+When several plans in one run target the same voice and condition, the shared
+`take` names would collide and a later seed would overwrite an earlier take
+while `report.json` kept the old hash. Those runs are written as
+`refs/seed-<seed>.wav` and `lines/seed-<seed>.<n>.wav` instead.
+
 `--seeds N` draws N independent references from the same instruct, so one
 blueprint can be auditioned as N different voice options.
 
@@ -172,6 +177,7 @@ def write_audition(out: pathlib.Path, report: dict) -> None:
         blocks.append(
             '<section class="voice">'
             f'<div class="head"><b>{html.escape(voice["profile_id"])}</b>'
+            f'<span>{html.escape(str(voice.get("condition") or ""))}</span>'
             f'<span>{len(voice["takes"])} take(s) · '
             f'{voice["distinct_references"]} distinct reference hash(es)</span></div>'
             + "".join(takes)
@@ -231,6 +237,8 @@ def parse_args():
                    help="draw every take with the SAME seed: a determinism/repeatability test")
     p.add_argument("--ref-seconds", default="8,18",
                    help="accept range for a reference clip")
+    p.add_argument("--references-only", action="store_true",
+                   help="render VoiceDesign references only; skip Base cloning")
     return p.parse_args()
 
 
@@ -257,6 +265,15 @@ def main() -> int:
     if not plans:
         print(f"no plans in {args.plans}", file=sys.stderr)
         return 2
+    # Several plans can target one voice directory (paired audition conditions
+    # carry one plan per seed). Their reference filenames must then include the
+    # seed, or a later render overwrites an earlier take and report.json keeps
+    # hashes that no file on disk matches.
+    plans_per_voice: dict[tuple[str, str | None], int] = {}
+    for plan in plans:
+        data = json.loads(plan.read_text(encoding="utf-8"))
+        key = (data["profile_id"], data.get("condition"))
+        plans_per_voice[key] = plans_per_voice.get(key, 0) + 1
     low, high = (float(x) for x in args.ref_seconds.split(","))
     draws = max(1, args.seeds)
 
@@ -282,22 +299,29 @@ def main() -> int:
     for plan in plans:
         data = json.loads(plan.read_text(encoding="utf-8"))
         report["reference_text"] = data["reference"]["text"]
+        condition = data.get("condition")
         voice_dir = out / "voices" / data["profile_id"]
+        if condition:
+            voice_dir = voice_dir / condition
         (voice_dir / "refs").mkdir(parents=True, exist_ok=True)
         (voice_dir / "lines").mkdir(parents=True, exist_ok=True)
         profile_path = plan.with_name(plan.name.replace(".plan.json", ".profile.json"))
         profile = json.loads(profile_path.read_text(encoding="utf-8")) if profile_path.is_file() else None
+        seed_step = int(data.get("seed_step", args.seed_step))
         entry = {
             "profile_id": data["profile_id"],
             "profile_version": data["profile_version"],
+            "condition": condition,
             "profile": summarize_profile(profile) if profile else None,
             "instruct": data["instruct"],
+            "instruct_hash": data.get("instruct_hash"),
             "seed": data["seed"],
+            "seed_step": seed_step,
             "takes": [],
         }
         takes = entry["takes"]
         for draw in range(draws):
-            seed = data["seed"] if args.repeat_seed else data["seed"] + draw * args.seed_step
+            seed = data["seed"] if args.repeat_seed else data["seed"] + draw * seed_step
             torch.manual_seed(seed)
             wavs, sr = design.generate_voice_design(
                 text=data["reference"]["text"],
@@ -306,13 +330,18 @@ def main() -> int:
             )
             name = "take" if draws == 1 else f"take.{draw}"
             path = voice_dir / "refs" / f"{name}.wav"
+            if plans_per_voice[(data["profile_id"], condition)] > 1:
+                path = voice_dir / "refs" / f"seed-{seed}.wav"
             sf.write(path, wavs[0], sr)
             seconds = len(wavs[0]) / sr
             flag = "" if low <= seconds <= high else " OUT-OF-RANGE"
-            print(f"[design] {data['profile_id']}/{name} {seconds:.2f}s{flag}",
+            print(f"[design] {data['profile_id']}/{path.stem} {seconds:.2f}s{flag}",
                   flush=True)
             takes.append({
                 "take": draw,
+                "condition": condition,
+                "instruct": data["instruct"],
+                "instruct_hash": data.get("instruct_hash"),
                 "seed": seed,
                 "ref": str(path.relative_to(out)),
                 "ref_sha256": file_sha256(path),
@@ -331,6 +360,10 @@ def main() -> int:
 
     del design
     torch.cuda.empty_cache()
+    if args.references_only:
+        write_audition(out, report)
+        print(f"wrote {out}")
+        return 0
 
     base = Qwen3TTSModel.from_pretrained(
         args.base_model, device_map=args.device, dtype=torch.bfloat16,
@@ -343,6 +376,8 @@ def main() -> int:
 
     for voice in report["voices"]:
         voice_dir = out / "voices" / voice["profile_id"]
+        if voice.get("condition"):
+            voice_dir = voice_dir / voice["condition"]
         many = len(voice["takes"]) > 1
         for take in voice["takes"]:
             prompt = base.create_voice_clone_prompt(
@@ -350,7 +385,12 @@ def main() -> int:
                 ref_text=report["reference_text"],
                 x_vector_only_mode=False,
             )
-            stem = f"take.{take['take']}" if many else "take"
+            if plans_per_voice[(voice["profile_id"], voice.get("condition"))] > 1:
+                # Paired plans share one output directory; keep the seed in the
+                # filename so a later plan cannot overwrite earlier line audio.
+                stem = f"seed-{take['seed']}"
+            else:
+                stem = f"take.{take['take']}" if many else "take"
             for index, text in enumerate(texts):
                 torch.manual_seed(take["seed"] + 101 + index)
                 wavs, sr = base.generate_voice_clone(

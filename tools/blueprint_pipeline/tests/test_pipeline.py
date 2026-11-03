@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 import wave
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 from urllib.error import HTTPError
@@ -46,16 +47,26 @@ from blueprint_pipeline.dialogue import (
 from blueprint_pipeline.casting import cast_identity, normalize_sex
 from blueprint_pipeline.generator import build_individual_profile, validate_generated_profile
 from blueprint_pipeline.inventory import build_inventory
+from blueprint_pipeline.audit import render_style_audit
+from blueprint_pipeline.audition import audit_entries, build_audition_plans
+from blueprint_pipeline.reporting import review_report
 from blueprint_pipeline.jev import (
+    EVIDENCE_SOURCE,
     JevConfigurationError,
     JevProvider,
     JevResponseError,
+    apply_evidence,
     build_questions,
     compact_state,
+    evidence_question_specs,
     request_fingerprint,
+    run_evidence_pass,
+    select_evidence,
     validate_response,
 )
+from blueprint_pipeline.cli import main
 from blueprint_pipeline.review import (
+    ReviewError,
     apply_manual_changes,
     approve_profile,
     mark_auditioned,
@@ -512,6 +523,443 @@ class BlueprintAndReviewTests(unittest.TestCase):
             self.assertEqual(pin["corpus_hash"], "corpus-test")
             self.assertEqual(pin["sample_manifest_hash"], "manifest-test")
             self.assertEqual(blueprint.validate_profile(pinned, self.vocab), [])
+
+
+class StyleAuditTests(unittest.TestCase):
+    def setUp(self):
+        self.vocab = blueprint.load_vocabulary()
+        self.profile = json.loads(
+            (ROOT / "blueprints" / "archetypes" / "archetype_masculine_clear_mid.json")
+            .read_text(encoding="utf-8")
+        )
+        self.profile["speech_style"] = {
+            "register": "formal",
+            "lexical_complexity": "advanced",
+            "sentence_complexity": "complex",
+            "colloquialism": "low",
+            "discourse_style": "explanatory",
+        }
+        self.dossier = {
+            "identity": {
+                "canonical_id": "npc_77", "npc_id": 77, "name": "Audit Subject",
+                "race": "Hyur", "clan": "Midlander", "sex": "male",
+            },
+            "dialogue_samples": [
+                {"text": "First local line.", "source": "quest", "sheet": "Q/1",
+                 "voice_line_id": "line-a"},
+            ],
+        }
+        self.classification = {
+            "canonical_id": "npc_77",
+            "provider": "jev",
+            "model_id": "jev-test",
+            "status": "needs_review",
+            "configuration": {
+                "state_hash": "state-hash", "questions_hash": "questions-hash",
+                "guardrails_hash": "guardrails-hash", "vocabulary_hash": "vocab-hash",
+            },
+            "speech_style": {},
+            "speech_style_analysis": {
+                "model_id": "jev-test",
+                "model_revision": "rev-1",
+                "endpoint": "http://127.0.0.1:8081/v1/systemone",
+                "endpoint_class": "local",
+                "taxonomy_version": "style-taxonomy-3.0",
+                "classifier_version": "jev-style-classifier-3.0",
+                "prompt_version": "style-prompt-3.0",
+                "sampler_version": "dialogue-sampler-3.0",
+                "evidence_policy_version": "style-evidence-3.0",
+                "request_fingerprint": "request-fp",
+                "sample_manifest_hash": "manifest-hash",
+                "budget_reduction": {"removed": 0},
+                "evidence": {"sampled_lines": 1, "sampled_words": 3, "contexts_covered": 1},
+                "representative_sample": [
+                    {"id": "LAAAAAAAAAAAAAAA", "text": "First local line."},
+                ],
+                "dimensions": {
+                    "register": {
+                        "value": "formal", "status": "supported", "evidence_tier": "supported",
+                        "supporting_line_ids": ["LAAAAAAAAAAAAAAA"],
+                        "counterexample_line_ids": [],
+                        "patterns": [],
+                        "rationale": "Conventional wording recurs.",
+                        "citation_balance": 1.0,
+                        "diagnostics": {
+                            "raw_probabilities": {"formal": 0.8, "neutral": 0.2},
+                            "raw_confidence": 0.8,
+                            "model_self_reported_confidence": None,
+                        },
+                        "evidence": {
+                            "sampled_lines": 1, "sampled_words": 3,
+                            "context_count": 1, "field_multiplier": 1.0,
+                            "thresholds": {"minimum": {"lines": 8, "words": 100, "contexts": 1}},
+                        },
+                    },
+                },
+                "experimental": {
+                    "lexical_features": {"contraction_frequency": "low"},
+                    "note": "audit only",
+                },
+            },
+        }
+
+    def test_review_report_reuses_production_plan_and_exact_sample(self):
+        report = review_report(
+            self.dossier, self.classification, self.profile, blueprint, self.vocab,
+        )
+        plan = blueprint.build_plan(self.profile, self.vocab)
+        self.assertEqual(report["combined_instruction"], plan["instruct"])
+        self.assertEqual(report["identity_instruction"], plan["identity_prompt"])
+        self.assertEqual(report["style_instruction"], plan["style_prompt"])
+        self.assertEqual(report["combined_instruct_hash"], plan["combined_instruct_hash"])
+        self.assertEqual(report["design_seed"], plan["seed"])
+        self.assertEqual(report["reference_text"], plan["reference"]["text"])
+        self.assertEqual(report["jev_sample"][0]["id"], "LAAAAAAAAAAAAAAA")
+        self.assertNotIn("rendered_neutral_instruction", report)
+
+    def test_report_distinguishes_diagnostics_from_evidence_status(self):
+        html_report = render_style_audit(
+            review_report(
+                self.dossier, self.classification, self.profile, blueprint, self.vocab,
+            )
+        )
+        self.assertIn("application status", html_report)
+        self.assertIn("evidence tier", html_report)
+        self.assertIn("model diagnostics", html_report)
+        self.assertIn("raw probability distribution", html_report)
+        self.assertIn("model self-reported confidence", html_report)
+        self.assertIn("not supplied", html_report)
+        self.assertIn("Audit-only features", html_report)
+        self.assertIn("Non-production", html_report)
+        self.assertIn("LAAAAAAAAAAAAAAA", html_report)
+        # The exact sample, not a reconstruction from the dossier, is shown.
+        self.assertNotIn("First local line.", html_report.replace(
+            "First local line.", "", 1
+        ))
+        for heading in ("Identity", "Style", "Combined"):
+            self.assertIn(f"<h3>{heading}</h3>", html_report)
+
+    def test_missing_sample_is_reported_not_reconstructed(self):
+        self.classification["speech_style_analysis"].pop("representative_sample")
+        report = review_report(
+            self.dossier, self.classification, self.profile, blueprint, self.vocab,
+        )
+        self.assertEqual(report["jev_sample"], [])
+        self.assertIn("does not reconstruct", report["jev_sample_status"])
+        html_report = render_style_audit(report)
+        self.assertIn("does not reconstruct", html_report)
+
+    def test_audition_plans_share_seed_and_reference(self):
+        plans = build_audition_plans(self.profile, self.vocab, seeds=3, seed_step=100)
+        identity = [row for row in plans if row["condition"] == "identity_only"]
+        styled = [row for row in plans if row["condition"] == "identity_style"]
+        self.assertEqual(len(identity), 3)
+        self.assertEqual([row["seed"] for row in identity], [row["seed"] for row in styled])
+        self.assertEqual(identity[0]["seed"], blueprint.build_plan(self.profile, self.vocab)["seed"])
+        for left, right in zip(identity, styled):
+            self.assertEqual(left["reference"], right["reference"])
+            self.assertEqual(left["design_model"], right["design_model"])
+            self.assertEqual(left["instruct"], blueprint.render_identity(self.profile, self.vocab))
+            self.assertEqual(right["instruct"], blueprint.build_plan(self.profile, self.vocab)["instruct"])
+        self.assertEqual(set(blueprint.STYLE_FIELDS), {
+            "register", "lexical_complexity", "sentence_complexity",
+            "colloquialism", "discourse_style",
+        })
+
+    def test_mark_auditioned_records_condition_and_reference_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wav = Path(tmp) / "identity_style.seed-7.wav"
+            with wave.open(str(wav), "wb") as audio:
+                audio.setnchannels(1)
+                audio.setsampwidth(2)
+                audio.setframerate(8000)
+                audio.writeframes(b"\0\0" * 8000 * 10)
+            pinned = mark_auditioned(
+                self.profile,
+                reference_file=wav,
+                design_seed=7,
+                by="listener",
+                condition="identity_style",
+                reference_file_path=str(wav),
+            )
+        pin = pinned["reference_pin"]
+        self.assertEqual(pin["condition"], "identity_style")
+        self.assertEqual(pin["reference_file"], str(wav))
+        self.assertEqual(pin["design_seed"], 7)
+        self.assertEqual(len(pin["reference_sha256"]), 64)
+        self.assertEqual(pinned["lifecycle"]["status"], "auditioned")
+        with self.assertRaises(ReviewError):
+            mark_auditioned(
+                self.profile, reference_file=wav, design_seed=7, by="listener",
+                condition="identity_plus_mood",
+            )
+
+    def _pin_condition(self, condition: str) -> tuple[dict, dict]:
+        vocabulary_path = ROOT / "blueprints" / "vocabulary.json"
+        with tempfile.TemporaryDirectory() as tmp:
+            # A styling clause is required for the two conditions to differ, so
+            # the fixture carries real Style values rather than the bare archetype.
+            profile = copy.deepcopy(self.profile)
+            profile_path = Path(tmp) / "profile.json"
+            profile_path.write_text(json.dumps(profile), encoding="utf-8")
+            plan = blueprint.build_plan(profile, self.vocab)
+            self.assertNotEqual(plan["identity_prompt"], plan["instruct"])
+            wav = Path(tmp) / "seed-5.wav"
+            with wave.open(str(wav), "wb") as audio:
+                audio.setnchannels(1)
+                audio.setsampwidth(2)
+                audio.setframerate(8000)
+                audio.writeframes(b"\0\0" * 8000 * 9)
+            out = Path(tmp) / "out"
+            with redirect_stdout(io.StringIO()):
+                main([
+                    "review", "audition", str(profile_path),
+                    "--out", str(out), "--by", "listener",
+                    "--reference", str(wav), "--condition", condition,
+                    "--vocabulary", str(vocabulary_path),
+                ])
+            snapshots = sorted((out / "profiles").glob("*.json"))
+            self.assertEqual(len(snapshots), 1)
+            pin = json.loads(snapshots[0].read_text())["reference_pin"]
+        return pin, plan
+
+    def test_pin_records_the_instruction_that_produced_the_wav(self):
+        identity_pin, plan = self._pin_condition("identity_only")
+        self.assertEqual(identity_pin["condition"], "identity_only")
+        self.assertEqual(identity_pin["instruct"], plan["identity_prompt"])
+        self.assertEqual(identity_pin["combined_instruct_hash"], plan["identity_prompt_hash"])
+
+        style_pin, _ = self._pin_condition("identity_style")
+        self.assertEqual(style_pin["condition"], "identity_style")
+        self.assertEqual(style_pin["instruct"], plan["instruct"])
+        self.assertEqual(style_pin["combined_instruct_hash"], plan["combined_instruct_hash"])
+        self.assertEqual(identity_pin["reference_sha256"], style_pin["reference_sha256"])
+
+    def test_audit_links_generated_reference_takes(self):
+        report = {
+            "voices": [
+                {
+                    "profile_id": "npc_77", "condition": "identity_only",
+                    "takes": [{
+                        "condition": "identity_only",
+                        "ref": "voices/npc_77/identity_only/refs/seed-1.wav",
+                        "seed": 1, "ref_seconds": 10.0, "ref_sha256": "a" * 64,
+                        "instruct": "Identity only.", "ref_in_range": True,
+                    }],
+                },
+                {
+                    "profile_id": "npc_77", "condition": "identity_style",
+                    "takes": [{
+                        "condition": "identity_style",
+                        "ref": "voices/npc_77/identity_style/refs/seed-1.wav",
+                        "seed": 1, "ref_seconds": 11.0, "ref_sha256": "b" * 64,
+                        "instruct": "Identity plus style.", "ref_in_range": True,
+                    }],
+                },
+            ],
+        }
+        entries = audit_entries(report)
+        self.assertEqual([entry["condition"] for entry in entries],
+                         ["identity_only", "identity_style"])
+        self.assertEqual(entries[0]["sha256"], "a" * 64)
+        self.assertTrue(all(entry["in_range"] for entry in entries))
+        html_report = render_style_audit(
+            review_report(
+                self.dossier, self.classification, self.profile, blueprint, self.vocab,
+            ),
+            entries,
+        )
+        self.assertIn("<audio controls", html_report)
+        self.assertIn("identity_style", html_report)
+        self.assertIn("Identity plus style.", html_report)
+
+
+class EvidencePassTests(unittest.TestCase):
+    """Citations come from a separate, explicitly recorded model pass."""
+
+    IDs = [f"L{index:03d}" for index in range(6)]
+
+    def setUp(self):
+        self.vocab = blueprint.load_vocabulary()
+        self.questions = build_questions(self.vocab)
+
+    def _answers(self, **register) -> dict:
+        answer = {
+            "type": "choice",
+            "choice": "formal",
+            "supporting_line_ids": [],
+            "counterexample_line_ids": [],
+            "patterns": [],
+            "rationale": "",
+            "diagnostics": {"raw_probabilities": {"formal": 0.7, "neutral": 0.3}},
+        }
+        answer.update(register)
+        return {"speech_style.register": answer}
+
+    def _line_response(self, probabilities: dict[str, float]) -> dict:
+        choice = max(probabilities, key=probabilities.get)
+        return {
+            "type": "choice",
+            "choice": choice,
+            "diagnostics": {
+                "raw_probabilities": probabilities,
+                "raw_confidence": probabilities[choice],
+                "model_self_reported_confidence": None,
+            },
+        }
+
+    def test_specs_cover_each_proposed_value_and_skip_abstentions(self):
+        answers = self._answers()
+        answers["speech_style.colloquialism"] = {
+            "type": "choice", "choice": None, "diagnostics": {"raw_probabilities": {}},
+        }
+        specs = evidence_question_specs(answers, self.questions, self.IDs)
+        self.assertEqual(
+            set(specs),
+            {"evidence.register.support", "evidence.register.counter"},
+        )
+        self.assertEqual(list(specs["evidence.register.support"]["criteria"]), self.IDs)
+        for spec in specs.values():
+            self.assertEqual(spec["type"], "choice")
+            self.assertIn("formal", spec["instructions"])
+        self.assertEqual(evidence_question_specs(answers, self.questions, []), {})
+
+    def test_mixed_value_asks_one_question_per_candidate_pattern(self):
+        answers = {
+            "speech_style.register": {
+                "type": "choice",
+                "choice": "mixed",
+                "diagnostics": {"raw_probabilities": {
+                    "formal": 0.5, "conversational": 0.4, "neutral": 0.1, "mixed": 0.0,
+                }},
+            },
+        }
+        specs = evidence_question_specs(answers, self.questions, self.IDs)
+        self.assertEqual(
+            set(specs),
+            {
+                "evidence.register.pattern.formal",
+                "evidence.register.pattern.conversational",
+                "evidence.register.pattern.neutral",
+            },
+        )
+        self.assertNotIn("evidence.register.support", specs)
+
+    def test_selection_ranks_only_above_flat_probability(self):
+        probabilities = {
+            "L000": 0.55, "L001": 0.2, "L002": 0.1,
+            "L003": 0.05, "L004": 0.05, "L005": 0.05,
+        }
+        selected = select_evidence(
+            self._answers(),
+            self.questions,
+            {
+                "evidence.register.support": self._line_response(probabilities),
+                "evidence.register.counter": self._line_response(
+                    {"L005": 0.5, "L004": 0.3, "L003": 0.2},
+                ),
+            },
+        )
+        citation = selected["fields"]["register"]
+        self.assertEqual(citation["supporting_line_ids"], ["L000", "L001", "L002"])
+        self.assertEqual(citation["counterexample_line_ids"], ["L005", "L004"])
+        self.assertAlmostEqual(citation["citation_balance"], 0.6)
+        self.assertEqual(selected["failures"], {})
+
+    def test_selection_never_duplicates_a_line_across_sides(self):
+        selected = select_evidence(
+            self._answers(),
+            self.questions,
+            {
+                "evidence.register.support": self._line_response({"L000": 0.6, "L001": 0.4}),
+                "evidence.register.counter": self._line_response({"L000": 0.7, "L002": 0.3}),
+            },
+        )
+        citation = selected["fields"]["register"]
+        self.assertEqual(citation["supporting_line_ids"], ["L000", "L001"])
+        self.assertEqual(citation["counterexample_line_ids"], ["L002"])
+
+    def test_applied_citations_are_marked_as_model_derived(self):
+        answers = self._answers()
+        evidence = select_evidence(
+            answers,
+            self.questions,
+            {
+                "evidence.register.support": self._line_response(
+                    {"L000": 0.5, "L001": 0.3, "L002": 0.2},
+                ),
+                "evidence.register.counter": self._line_response({"L003": 0.9, "L004": 0.1}),
+            },
+        )
+        evidence["source"] = EVIDENCE_SOURCE
+        evidence["version"] = "jev-evidence-pass-1.0"
+        applied = apply_evidence(answers, evidence)
+        answer = applied["speech_style.register"]
+        self.assertEqual(answer["supporting_line_ids"], ["L000", "L001", "L002"])
+        self.assertEqual(answer["diagnostics"]["evidence_source"], EVIDENCE_SOURCE)
+        self.assertEqual(
+            answer["diagnostics"]["evidence_questions"]["evidence.register.support"]["top_lines"][0],
+            {"line_id": "L000", "probability": 0.5},
+        )
+        # The value answer itself is untouched apart from the citations.
+        self.assertEqual(answers["speech_style.register"]["supporting_line_ids"], [])
+
+    def test_pass_splits_a_failing_chunk_instead_of_losing_all_citations(self):
+        calls = []
+
+        class ChunkedProvider:
+            name = "jev"
+            model_id = "jev-test"
+
+            def classify_state(self, state, questions):
+                calls.append(sorted(questions))
+                if len(questions) > 1:
+                    raise JevResponseError("request exceeds the available context size")
+                question_id = next(iter(questions))
+                return {
+                    "model": "jev-test",
+                    "answers": {question_id: self_answer()},
+                    "usage": {"input_tokens": 10, "output_tokens": 0},
+                }
+
+        def self_answer():
+            return {
+                "type": "choice",
+                "choice": "L000",
+                "diagnostics": {
+                    "raw_probabilities": {line_id: (1.0 if line_id == "L000" else 0.0)
+                                          for line_id in self.IDs},
+                    "raw_confidence": 1.0,
+                    "model_self_reported_confidence": None,
+                },
+            }
+
+        result = run_evidence_pass(
+            ChunkedProvider(), {"dialogue_samples": []}, self._answers(), self.questions, self.IDs,
+        )
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(result["failures"], {})
+        self.assertEqual(
+            result["fields"]["register"]["supporting_line_ids"], ["L000"],
+        )
+        self.assertEqual(result["usage"]["input_tokens"], 20)
+
+    def test_provider_without_request_state_records_a_failure(self):
+        class OfflineProvider:
+            name = "rules"
+            model_id = "rules-3.0"
+
+            def classify(self, dossier, questions):
+                raise AssertionError("evidence pass must not fall back to classify")
+
+        result = run_evidence_pass(
+            OfflineProvider(), {"dialogue_samples": []}, self._answers(), self.questions, self.IDs,
+        )
+        self.assertEqual(
+            set(result["failures"]),
+            {"evidence.register.support", "evidence.register.counter"},
+        )
+        self.assertEqual(result["fields"], {})
 
 
 class SpeechStyleBenchmarkProtocolTests(unittest.TestCase):
@@ -1779,6 +2227,22 @@ class StyleDecisionContractTests(unittest.TestCase):
         style = blueprint.render_style(profile, self.vocab)
         self.assertIn("formal in register", style)
         self.assertNotIn("discourse", style)
+
+    def test_recorded_sample_uses_request_ids_when_dossier_rows_have_no_id(self):
+        dossier = self._dossier()
+        for sample in dossier["dialogue_samples"]:
+            sample.pop("id")
+        state = compact_state(dossier, vocabulary=self.vocab)
+        result = classify_dossier(
+            dossier, RulesProvider(self.vocab), self.vocab, request_state=state,
+        )
+        recorded = result["speech_style_analysis"]["representative_sample"]
+        # Exact ordered copy of what the model received, not a re-derived set.
+        self.assertEqual(recorded, state["dialogue_samples"])
+        self.assertEqual(
+            [row["text"] for row in recorded],
+            [row["text"] for row in state["dialogue_samples"]],
+        )
 
     def test_trimmed_request_state_downgrades_field_evidence(self):
         dossier = self._dossier(count=40)
