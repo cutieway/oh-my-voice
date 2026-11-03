@@ -135,7 +135,7 @@ python3 -m tools.blueprint_pipeline.evaluation import-annotations \
   --annotator-b /path/to/annotator-b.zip
 ```
 
-The command validates all 80 IDs, frozen dialogue samples, six labels per
+The command validates all 80 IDs, frozen dialogue samples, five labels per
 item, and evidence fields, then preserves the original ZIPs and parsed forms
 under the ignored benchmark data directory in a new immutable import run. Use
 the returned run ID to create an anonymized adjudication form containing the
@@ -145,6 +145,14 @@ dialogue and both label sets plus their evidence notes:
 python3 -m tools.blueprint_pipeline.evaluation prepare-adjudication \
   --annotation-run RUN_ID
 ```
+
+The 12-item pilot uses the same commands with `--scope pilot` on import,
+adjudication preparation, adjudication import, and evaluation. A run's scope is
+recorded in the adjudication form and import manifests, and every adjudication
+step resolves the run with the requested scope, so a pilot run cannot be
+adjudicated or scored as a full run (or the reverse). Pilot evaluation reports
+inter-annotator agreement, the pilot gate, and pilot adjudication status only;
+it never scores locked-test items.
 
 After completing `gold.json`, import it and generate the evaluation report:
 

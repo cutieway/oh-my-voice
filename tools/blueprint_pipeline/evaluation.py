@@ -622,6 +622,7 @@ def prepare_benchmark(
         "schema_version": "2.0",
         "benchmark": BENCHMARK_VERSION,
         "protocol": PROTOCOL_VERSION,
+        "scope": "full",
         "status": "pending_independent_annotations_and_adjudication",
         "items": [
             {
@@ -2468,10 +2469,13 @@ def prepare_adjudication_form(
     *,
     root: Path | str = DEFAULT_ROOT,
     annotation_run: str | None = None,
+    scope: str = "full",
 ) -> dict:
     """Create a separate adjudication copy that includes both raw label sets."""
+    if scope not in {"pilot", "full"}:
+        raise ValueError("annotation scope must be 'pilot' or 'full'")
     root = Path(root)
-    resolved = _resolve_annotation_run(root, annotation_run)
+    resolved = _resolve_annotation_run(root, annotation_run, scope=scope)
     if resolved is None:
         raise FileNotFoundError("no imported independent annotation run is available")
     run_dir, run_manifest = resolved
@@ -2479,9 +2483,9 @@ def prepare_adjudication_form(
         name: read_json(run_dir / f"{name}.json")
         for name in ("annotator_a", "annotator_b")
     }
-    expected_items, _selection = _expected_annotation_items(root)
+    expected_items, _selection = _expected_annotation_items(root, scope)
     for name, payload in forms.items():
-        _validate_annotation_form(payload, expected_items, label=name, scope="full")
+        _validate_annotation_form(payload, expected_items, label=name, scope=scope)
     by_annotator = {
         name: {item["benchmark_id"]: item for item in payload["items"]}
         for name, payload in forms.items()
@@ -2532,12 +2536,18 @@ def prepare_adjudication_form(
         "schema_version": "2.0",
         "benchmark": BENCHMARK_VERSION,
         "protocol": PROTOCOL_VERSION,
+        "scope": scope,
         "source_annotation_run": run_manifest["annotation_run"],
         "status": "pending_manual_adjudication",
         "items": items,
     }
     output_path = write_immutable_json(root / "adjudicated" / "forms" / run_manifest["annotation_run"] / "gold.json", payload)
-    return {"annotation_run": run_manifest["annotation_run"], "adjudication_form_path": str(output_path), "item_count": len(items)}
+    return {
+        "annotation_run": run_manifest["annotation_run"],
+        "scope": scope,
+        "adjudication_form_path": str(output_path),
+        "item_count": len(items),
+    }
 
 
 def _adjudication_run_directories(root: Path, annotation_run: str) -> list[tuple[Path, dict]]:
@@ -2557,10 +2567,13 @@ def import_adjudication(
     root: Path | str = DEFAULT_ROOT,
     source: Path | str,
     annotation_run: str | None = None,
+    scope: str = "full",
 ) -> dict:
     """Validate and preserve a completed adjudication without replacing templates."""
+    if scope not in {"pilot", "full"}:
+        raise ValueError("annotation scope must be 'pilot' or 'full'")
     root = Path(root)
-    resolved = _resolve_annotation_run(root, annotation_run)
+    resolved = _resolve_annotation_run(root, annotation_run, scope=scope)
     if resolved is None:
         raise FileNotFoundError("no imported independent annotation run is available")
     source_run_dir, run_manifest = resolved
@@ -2573,8 +2586,17 @@ def import_adjudication(
         payload = json.loads(raw.decode("utf-8-sig"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError("adjudication submission must be valid UTF-8 JSON") from exc
-    if not isinstance(payload, dict) or set(payload) != {"schema_version", "benchmark", "protocol", "source_annotation_run", "status", "items"}:
+    required_keys = {"schema_version", "benchmark", "protocol", "source_annotation_run", "status", "items"}
+    if (
+        not isinstance(payload, dict)
+        or not required_keys <= set(payload)
+        or set(payload) - required_keys - {"scope"}
+    ):
         raise ValueError("adjudication submission has an unexpected schema")
+    if "scope" not in payload:
+        raise ValueError(
+            "adjudication submission is missing 'scope'; regenerate it with prepare-adjudication"
+        )
     if (
         payload.get("schema_version") != "2.0"
         or payload.get("protocol") != PROTOCOL_VERSION
@@ -2583,7 +2605,11 @@ def import_adjudication(
         or payload.get("status") not in {"pending_manual_adjudication", "complete_manual_adjudication"}
     ):
         raise ValueError("adjudication submission does not match the selected annotation run")
-    expected_items, _selection = _expected_annotation_items(root, "full")
+    if payload["scope"] != scope:
+        raise ValueError(
+            f"adjudication submission has scope {payload['scope']!r}, not the requested {scope!r}"
+        )
+    expected_items, _selection = _expected_annotation_items(root, scope)
     expected_ids = set(expected_items)
     submitted_items = payload.get("items")
     if not isinstance(submitted_items, list):
@@ -2595,10 +2621,10 @@ def import_adjudication(
         or len(set(item_ids)) != len(item_ids)
         or set(item_ids) != expected_ids
     ):
-        raise ValueError("adjudication item IDs do not match the frozen benchmark")
+        raise ValueError(f"adjudication item IDs do not match the frozen {scope} benchmark")
     forms = {name: read_json(source_run_dir / f"{name}.json") for name in ("annotator_a", "annotator_b")}
     for name, form in forms.items():
-        _validate_annotation_form(form, expected_items, label=name, scope="full")
+        _validate_annotation_form(form, expected_items, label=name, scope=scope)
     raw_labels = {
         name: {item["benchmark_id"]: {field: item["fields"][field]["label"] for field in FIELDS} for item in form["items"]}
         for name, form in forms.items()
@@ -2665,6 +2691,8 @@ def import_adjudication(
     _write_new_bytes(revision_dir / "gold.json", raw)
     import_manifest = {
         "benchmark": BENCHMARK_VERSION,
+        "protocol": PROTOCOL_VERSION,
+        "scope": scope,
         "annotation_run": run_id,
         "adjudication_revision": revision_dir.name,
         "imported_epoch_ns": imported_epoch_ns,
@@ -2678,15 +2706,46 @@ def import_adjudication(
     return {**import_manifest, "gold_path": str(revision_dir / "gold.json")}
 
 
-def _load_adjudication_source(root: Path, annotation_run: str | None) -> tuple[dict, str]:
+def _adjudication_payload_scope(payload: dict, path: Path) -> str:
+    scope = payload.get("scope")
+    if scope is None:
+        # Artifacts written before scope tracking are full-scope by definition.
+        return "full"
+    if scope not in {"pilot", "full"}:
+        raise ValueError(f"adjudication gold at {path} has an invalid scope: {scope!r}")
+    return scope
+
+
+def _load_adjudication_source(
+    root: Path,
+    annotation_run: str | None,
+    *,
+    scope: str = "full",
+) -> tuple[dict, str]:
     if annotation_run:
         revisions = _adjudication_run_directories(root, annotation_run)
         if revisions:
-            revision_dir, _manifest = revisions[-1]
-            return read_json(revision_dir / "gold.json"), str(revision_dir / "gold.json")
+            revision_dir, manifest = revisions[-1]
+            if manifest.get("scope") not in (None, scope):
+                raise ValueError(
+                    f"adjudication revision has scope {manifest.get('scope')!r}, not {scope!r}"
+                )
+            payload = read_json(revision_dir / "gold.json")
+            if _adjudication_payload_scope(payload, revision_dir / "gold.json") != scope:
+                raise ValueError(
+                    f"adjudication revision scope does not match the requested {scope!r} scope"
+                )
+            return payload, str(revision_dir / "gold.json")
         form_path = root / "adjudicated" / "forms" / annotation_run / "gold.json"
         if form_path.is_file():
-            return read_json(form_path), str(form_path)
+            payload = read_json(form_path)
+            if _adjudication_payload_scope(payload, form_path) != scope:
+                raise ValueError(
+                    f"adjudication form at {form_path} is not a {scope!r}-scope form"
+                )
+            return payload, str(form_path)
+    if scope != "full":
+        return {"items": []}, None
     template_path = root / "adjudicated" / "gold.json"
     return read_json(template_path), str(template_path)
 
@@ -3069,6 +3128,24 @@ def evaluate_benchmark(
             report["inter_annotator_evidence_agreement"] = evidence_agreement
             report["pilot_gate"] = _pilot_gate(agreement)
             report["note"] = "Pilot agreement only. Full annotation opens only when every field passes the gate."
+        gold_payload, gold_source_path = _load_adjudication_source(
+            root, selected_annotation_run, scope="pilot",
+        )
+        report["adjudication_source"] = gold_source_path
+        gold_by_id = {item["benchmark_id"]: item for item in gold_payload.get("items", [])}
+        gold_missing = [
+            {"benchmark_id": bid, "field": field}
+            for bid in ids
+            for field in FIELDS
+            if not ((gold_by_id.get(bid, {}).get("adjudicated_labels") or {}).get(field))
+        ]
+        report["adjudication_status"] = (
+            "pilot_adjudication_pending" if gold_missing else "pilot_adjudication_complete"
+        )
+        report["missing_adjudicated_count"] = len(gold_missing)
+        report["missing_adjudicated_preview"] = gold_missing[:30]
+        report["scoring_scope"] = "pilot_only"
+        report["locked_test_scored"] = False
         path = write_immutable_json(root / "reports" / "pilot_evaluation.json", report)
         return {**report, "report_path": str(path)}
     if missing:
@@ -3081,7 +3158,9 @@ def evaluate_benchmark(
     report["pilot_gate"] = _pilot_gate(agreement)
     report["guide_rule_compliance"] = _sample_evidence_floor_violations(root, selection, by_annotator)
 
-    gold_payload, gold_source_path = _load_adjudication_source(root, selected_annotation_run)
+    gold_payload, gold_source_path = _load_adjudication_source(
+        root, selected_annotation_run, scope=scope,
+    )
     report["adjudication_source"] = gold_source_path
     gold_by_id = {item["benchmark_id"]: item for item in gold_payload.get("items", [])}
     gold_missing = [
@@ -3412,10 +3491,12 @@ def main() -> None:
     prepare_adjudication = subparsers.add_parser("prepare-adjudication", help="create a comparison form from an imported annotation run")
     prepare_adjudication.add_argument("--root", default=str(DEFAULT_ROOT))
     prepare_adjudication.add_argument("--annotation-run")
+    prepare_adjudication.add_argument("--scope", choices=("pilot", "full"), default="full")
     import_gold = subparsers.add_parser("import-adjudication", help="validate and immutably import completed adjudication")
     import_gold.add_argument("--root", default=str(DEFAULT_ROOT))
     import_gold.add_argument("--source", required=True)
     import_gold.add_argument("--annotation-run")
+    import_gold.add_argument("--scope", choices=("pilot", "full"), default="full")
     qwen = subparsers.add_parser("qwen-base", help="run constrained JSON generation through a local OpenAI-compatible endpoint")
     qwen.add_argument("--root", default=str(DEFAULT_ROOT))
     qwen.add_argument("--endpoint", default="http://127.0.0.1:18082/v1/chat/completions")
@@ -3462,9 +3543,9 @@ def main() -> None:
     elif args.command == "import-annotations":
         result = import_annotation_forms(root=args.root, annotator_a=args.annotator_a, annotator_b=args.annotator_b, scope=args.scope)
     elif args.command == "prepare-adjudication":
-        result = prepare_adjudication_form(root=args.root, annotation_run=args.annotation_run)
+        result = prepare_adjudication_form(root=args.root, annotation_run=args.annotation_run, scope=args.scope)
     elif args.command == "import-adjudication":
-        result = import_adjudication(root=args.root, source=args.source, annotation_run=args.annotation_run)
+        result = import_adjudication(root=args.root, source=args.source, annotation_run=args.annotation_run, scope=args.scope)
     elif args.command == "qwen-base":
         result = run_qwen_base(root=args.root, endpoint=args.endpoint, condition=args.condition, model=args.model, model_path=args.model_path, limit=args.limit, only=set(args.only or []), timeout=args.timeout)
     elif args.command == "share-packets":

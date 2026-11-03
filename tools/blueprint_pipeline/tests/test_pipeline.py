@@ -1505,6 +1505,285 @@ class SpeechStyleBenchmarkProtocolTests(unittest.TestCase):
             self.assertEqual(sorted(evaluation._expected_annotation_items(root, "full")[0]), ["B1", "B2"])
 
 
+class PilotAdjudicationScopeTests(unittest.TestCase):
+    """Frozen pilot-run fixture: adjudication must follow the run's scope."""
+
+    PILOT_IDS = [f"P{index:02d}" for index in range(1, 13)]
+    FULL_ONLY_IDS = ["F01", "F02"]
+
+    def _item(self, benchmark_id: str) -> dict:
+        samples = [
+            {"id": f"{benchmark_id}-L01", "text": "The gate opens at dawn."},
+            {"id": f"{benchmark_id}-L02", "text": "We will be ready."},
+        ]
+        return {"sample_count": len(samples), "dialogue_samples": samples}
+
+    def _form(self, items: dict, scope: str) -> dict:
+        payload_items = []
+        for benchmark_id, item in items.items():
+            payload_items.append({
+                "benchmark_id": benchmark_id,
+                "sample_count": item["sample_count"],
+                "overall_evidence_sufficiency": "sufficient",
+                "annotator_notes": f"{benchmark_id} note",
+                "dialogue_samples": item["dialogue_samples"],
+                "fields": {
+                    field: {
+                        "label": next(iter(options)),
+                        "evidence_sufficient": "yes",
+                        "evidence_line_ids": [item["dialogue_samples"][0]["id"]],
+                        "notes": f"{benchmark_id} {field}",
+                    }
+                    for field, options in evaluation.FIELDS.items()
+                },
+            })
+        return {
+            "schema_version": "2.0",
+            "benchmark": evaluation.BENCHMARK_VERSION,
+            "protocol": evaluation.PROTOCOL_VERSION,
+            "scope": scope,
+            "instructions": "test",
+            "items": payload_items,
+        }
+
+    def _fixture(self, root: Path) -> dict:
+        items = {benchmark_id: self._item(benchmark_id) for benchmark_id in self.PILOT_IDS + self.FULL_ONLY_IDS}
+        (root / "dossiers").mkdir(parents=True)
+        public, selection = [], []
+        for benchmark_id, item in items.items():
+            path = root / "dossiers" / f"{benchmark_id}.json"
+            path.write_text(json.dumps({"benchmark_id": benchmark_id, "dialogue_samples": item["dialogue_samples"]}), encoding="utf-8")
+            public.append({"benchmark_id": benchmark_id, "dossier_path": str(path)})
+            selection.append({
+                "benchmark_id": benchmark_id,
+                "split": "development",
+                "stratum": "5-20",
+                "source_dossier_path": str(path),
+            })
+        (root / "manifest.json").write_text(json.dumps({
+            "public_dossiers": public,
+            "private_selection": selection,
+            "annotation_scopes": {
+                "pilot": {"item_ids": list(self.PILOT_IDS)},
+                "full": {"item_ids": list(items)},
+            },
+        }), encoding="utf-8")
+        pilot_dir = root / "annotations" / "submissions" / "run-pilot"
+        pilot_dir.mkdir(parents=True)
+        pilot_items = {benchmark_id: items[benchmark_id] for benchmark_id in self.PILOT_IDS}
+        for name in ("annotator_a", "annotator_b"):
+            (pilot_dir / f"{name}.json").write_text(json.dumps(self._form(pilot_items, "pilot")), encoding="utf-8")
+        (pilot_dir / "manifest.json").write_text(json.dumps({
+            "benchmark": evaluation.BENCHMARK_VERSION,
+            "protocol": evaluation.PROTOCOL_VERSION,
+            "scope": "pilot",
+            "annotation_run": "run-pilot",
+            "imported_epoch_ns": 1,
+            "imported_utc": "2026-11-01T00:00:00Z",
+        }), encoding="utf-8")
+        full_dir = root / "annotations" / "submissions" / "run-full"
+        full_dir.mkdir(parents=True)
+        for name in ("annotator_a", "annotator_b"):
+            (full_dir / f"{name}.json").write_text(json.dumps(self._form(items, "full")), encoding="utf-8")
+        (full_dir / "manifest.json").write_text(json.dumps({
+            "benchmark": evaluation.BENCHMARK_VERSION,
+            "protocol": evaluation.PROTOCOL_VERSION,
+            "scope": "full",
+            "annotation_run": "run-full",
+            "imported_epoch_ns": 2,
+            "imported_utc": "2026-11-01T00:00:01Z",
+        }), encoding="utf-8")
+        return {"items": items, "pilot_items": pilot_items, "root": root}
+
+    def _complete(self, root: Path, form_path: str) -> dict:
+        payload = json.loads(Path(form_path).read_text())
+        for item in payload["items"]:
+            item["adjudicated_labels"] = {field: next(iter(options)) for field, options in evaluation.FIELDS.items()}
+            item["adjudication_reasons"] = {field: "annotator_agreement" for field in evaluation.FIELDS}
+        payload["status"] = "complete_manual_adjudication"
+        return payload
+
+    def _run_cli(self, *argv: str) -> dict:
+        stdout = io.StringIO()
+        with patch.object(sys, "argv", ["evaluation", *argv]), redirect_stdout(stdout):
+            evaluation.main()
+        return json.loads(stdout.getvalue())
+
+    def test_documented_pilot_workflow_runs_end_to_end(self):
+        import zipfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = self._fixture(root)
+            packet_root = root / "annotations" / "pilot"
+            packet_root.mkdir(parents=True)
+            for name in ("annotator_a", "annotator_b"):
+                (packet_root / f"{name}.json").write_text(
+                    json.dumps(self._form(fixture["pilot_items"], "pilot")), encoding="utf-8",
+                )
+            (root / "annotations" / "annotation_guide.md").write_text("# guide\n", encoding="utf-8")
+
+            packets = self._run_cli("share-packets", "--root", str(root), "--scope", "pilot")
+            annotated = []
+            for name in ("annotator_a", "annotator_b"):
+                with zipfile.ZipFile(Path(packets["packets"][name]["path"])) as archive:
+                    form = json.loads(archive.read("annotation_form.json"))
+                path = root / f"returned-{name}.json"
+                path.write_text(json.dumps(form), encoding="utf-8")
+                annotated.append(path)
+
+            imported = self._run_cli(
+                "import-annotations", "--root", str(root), "--scope", "pilot",
+                "--annotator-a", str(annotated[0]), "--annotator-b", str(annotated[1]),
+            )
+            self.assertEqual(imported["scope"], "pilot")
+            self.assertEqual(imported["item_count_per_annotator"], 12)
+            run_id = imported["annotation_run"]
+
+            prepared = self._run_cli(
+                "prepare-adjudication", "--root", str(root), "--scope", "pilot", "--annotation-run", run_id,
+            )
+            self.assertEqual(prepared["item_count"], 12)
+
+            submission = root / "gold.json"
+            submission.write_text(json.dumps(self._complete(root, prepared["adjudication_form_path"])), encoding="utf-8")
+            adjudicated = self._run_cli(
+                "import-adjudication", "--root", str(root), "--scope", "pilot",
+                "--annotation-run", run_id, "--source", str(submission),
+            )
+            self.assertEqual(adjudicated["scope"], "pilot")
+
+            report = self._run_cli(
+                "evaluate", "--root", str(root), "--scope", "pilot", "--annotation-run", run_id,
+            )
+            self.assertEqual(report["scoring_scope"], "pilot_only")
+            self.assertEqual(report["adjudication_status"], "pilot_adjudication_complete")
+            self.assertNotIn("gold_metrics", report)
+
+    def test_prepare_adjudication_pilot_creates_twelve_item_form(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._fixture(root)
+            result = evaluation.prepare_adjudication_form(root=root, annotation_run="run-pilot", scope="pilot")
+            self.assertEqual(result["scope"], "pilot")
+            self.assertEqual(result["item_count"], 12)
+            payload = json.loads(Path(result["adjudication_form_path"]).read_text())
+            self.assertEqual(payload["scope"], "pilot")
+            self.assertEqual(sorted(item["benchmark_id"] for item in payload["items"]), sorted(self.PILOT_IDS))
+            for item in payload["items"]:
+                self.assertEqual(item["annotator_a_labels"], {field: next(iter(options)) for field, options in evaluation.FIELDS.items()})
+                self.assertEqual(item["annotator_a_evidence"]["annotator_notes"], f"{item['benchmark_id']} note")
+                self.assertEqual(
+                    item["annotator_a_evidence"]["field_evidence"]["register"]["evidence_line_ids"],
+                    [f"{item['benchmark_id']}-L01"],
+                )
+
+    def test_import_adjudication_pilot_accepts_and_rejects_tampering(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = self._fixture(root)
+            form_path = evaluation.prepare_adjudication_form(root=root, annotation_run="run-pilot", scope="pilot")["adjudication_form_path"]
+            payload = self._complete(root, form_path)
+
+            changed_samples = copy.deepcopy(payload)
+            changed_samples["items"][0]["dialogue_samples"][0]["text"] = "Altered line."
+            path = root / "changed-samples.json"
+            path.write_text(json.dumps(changed_samples), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "dialogue samples differ"):
+                evaluation.import_adjudication(root=root, source=path, annotation_run="run-pilot", scope="pilot")
+
+            changed_labels = copy.deepcopy(payload)
+            changed_labels["items"][0]["annotator_b_labels"]["register"] = "conversational"
+            path = root / "changed-labels.json"
+            path.write_text(json.dumps(changed_labels), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "annotator B raw labels were changed"):
+                evaluation.import_adjudication(root=root, source=path, annotation_run="run-pilot", scope="pilot")
+
+            path = root / "gold.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            result = evaluation.import_adjudication(root=root, source=path, annotation_run="run-pilot", scope="pilot")
+            self.assertEqual(result["scope"], "pilot")
+            self.assertEqual(result["adjudicated_item_count"], 12)
+
+    def test_scope_mismatch_is_rejected_both_ways(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._fixture(root)
+            with self.assertRaisesRegex(ValueError, "not 'full'"):
+                evaluation.prepare_adjudication_form(root=root, annotation_run="run-pilot", scope="full")
+            with self.assertRaisesRegex(ValueError, "not 'pilot'"):
+                evaluation.prepare_adjudication_form(root=root, annotation_run="run-full", scope="pilot")
+
+            pilot_form = evaluation.prepare_adjudication_form(root=root, annotation_run="run-pilot", scope="pilot")["adjudication_form_path"]
+            pilot_gold = self._complete(root, pilot_form)
+            full_form = evaluation.prepare_adjudication_form(root=root, annotation_run="run-full", scope="full")["adjudication_form_path"]
+            full_gold = self._complete(root, full_form)
+
+            pilot_path = root / "pilot-gold.json"
+            pilot_path.write_text(json.dumps(pilot_gold), encoding="utf-8")
+            full_path = root / "full-gold.json"
+            full_path.write_text(json.dumps(full_gold), encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "not 'full'"):
+                evaluation.import_adjudication(root=root, source=pilot_path, annotation_run="run-pilot", scope="full")
+            with self.assertRaisesRegex(ValueError, "not 'pilot'"):
+                evaluation.import_adjudication(root=root, source=full_path, annotation_run="run-full", scope="pilot")
+
+            relabelled = copy.deepcopy(pilot_gold)
+            relabelled["scope"] = "full"
+            relabelled_path = root / "relabelled-scope.json"
+            relabelled_path.write_text(json.dumps(relabelled), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "not the requested 'pilot'"):
+                evaluation.import_adjudication(root=root, source=relabelled_path, annotation_run="run-pilot", scope="pilot")
+
+    def test_full_scope_default_is_unchanged_through_the_cli(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._fixture(root)
+            stdout = io.StringIO()
+            with patch.object(sys, "argv", [
+                "evaluation", "prepare-adjudication", "--root", str(root), "--annotation-run", "run-full",
+            ]), redirect_stdout(stdout):
+                evaluation.main()
+            prepared = json.loads(stdout.getvalue())
+            self.assertEqual(prepared["scope"], "full")
+            self.assertEqual(prepared["item_count"], len(self.PILOT_IDS) + len(self.FULL_ONLY_IDS))
+
+            payload = self._complete(root, prepared["adjudication_form_path"])
+            submission = root / "gold.json"
+            submission.write_text(json.dumps(payload), encoding="utf-8")
+            stdout = io.StringIO()
+            with patch.object(sys, "argv", [
+                "evaluation", "import-adjudication", "--root", str(root),
+                "--annotation-run", "run-full", "--source", str(submission),
+            ]), redirect_stdout(stdout):
+                evaluation.main()
+            imported = json.loads(stdout.getvalue())
+            self.assertEqual(imported["scope"], "full")
+            self.assertEqual(imported["adjudicated_item_count"], len(self.PILOT_IDS) + len(self.FULL_ONLY_IDS))
+
+    def test_pilot_evaluate_reports_pilot_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._fixture(root)
+            report = evaluation.evaluate_benchmark(root=root, annotation_run="run-pilot", scope="pilot")
+            self.assertEqual(report["scope"], "pilot")
+            self.assertEqual(report["scoring_scope"], "pilot_only")
+            self.assertFalse(report["locked_test_scored"])
+            self.assertNotIn("gold_metrics", report)
+            self.assertEqual(report["annotation_status"], "pilot_raw_annotations_complete")
+            self.assertEqual(report["adjudication_status"], "pilot_adjudication_pending")
+            self.assertEqual(report["inter_annotator_agreement"]["register"]["n"], 12)
+            self.assertEqual(report["pilot_gate"]["status"], "pass")
+
+            form_path = evaluation.prepare_adjudication_form(root=root, annotation_run="run-pilot", scope="pilot")["adjudication_form_path"]
+            submission = root / "gold.json"
+            submission.write_text(json.dumps(self._complete(root, form_path)), encoding="utf-8")
+            evaluation.import_adjudication(root=root, source=submission, annotation_run="run-pilot", scope="pilot")
+            report = evaluation.evaluate_benchmark(root=root, annotation_run="run-pilot", scope="pilot")
+            self.assertEqual(report["adjudication_status"], "pilot_adjudication_complete")
+            self.assertNotIn("gold_metrics", report)
+
+
 class CompactStateAndSampleTests(unittest.TestCase):
     def setUp(self):
         self.vocab = blueprint.load_vocabulary()
