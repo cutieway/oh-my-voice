@@ -143,15 +143,16 @@ dotnet run --project tools/xivdata -- npc-index --lang en > /tmp/game-npc-index.
 python3 tools/blueprint_pipeline/cli.py inventory --game-index /tmp/game-npc-index.json
 python3 tools/blueprint_pipeline/cli.py dossiers --game-index /tmp/game-npc-index.json --limit 25
 python3 tools/blueprint_pipeline/cli.py classify --provider rules --limit 25
-python3 tools/blueprint_pipeline/cli.py classify --provider jev --allow-network --limit 25
+python3 tools/blueprint_pipeline/cli.py classify --provider jev --limit 25
 python3 tools/blueprint_pipeline/cli.py inspect npc_1003075 --review-report
 python3 tools/blueprint_pipeline/cli.py validate
 python3 tools/blueprint_pipeline/cli.py report
 ```
 
-Rules classification is offline. Jev calls require
-`--allow-network`; Jev also requires `TYPESAFE_API_KEY` in the environment and
-defaults to 25 dossiers per run. Larger batches require `--allow-bulk` and
+Rules classification is offline. Jev defaults to a loopback endpoint and needs
+no network opt-in or API key there. Non-loopback endpoints require
+`--allow-remote` plus `TYPESAFE_API_KEY` in the environment. Jev defaults to 25
+dossiers per run. Larger batches require `--allow-bulk` and
 print a request, token, and approximate cost estimate first. Cached outputs are
 immutable under gitignored `data/blueprints/`, so unchanged dossiers and
 classifier settings resume without duplicate API work. Jev cannot process

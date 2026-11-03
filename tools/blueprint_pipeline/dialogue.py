@@ -167,15 +167,13 @@ def analyze_dialogue(lines: list[dict], vocabulary: dict | None = None) -> dict[
         register = "neutral"
 
     if average_word_length < 4.0 and vocabulary_diversity < 0.35:
-        vocabulary_complexity = "plain"
-    elif average_word_length >= 6.4:
-        vocabulary_complexity = "educated"
-    elif average_word_length >= 5.5 and vocabulary_diversity >= 0.48:
-        vocabulary_complexity = "specialized"
-    elif vocabulary_diversity >= 0.58:
-        vocabulary_complexity = "poetic"
+        lexical_complexity = "plain"
+    elif average_word_length >= 6.2 or (
+        average_word_length >= 5.5 and vocabulary_diversity >= 0.5
+    ):
+        lexical_complexity = "advanced"
     else:
-        vocabulary_complexity = "ordinary"
+        lexical_complexity = "ordinary"
 
     sentence_complexity = "complex" if avg_clauses >= 2.0 or average_sentence_length >= 24 else (
         "mixed" if avg_clauses >= 1.35 or average_sentence_length >= 12 else "simple"
@@ -186,16 +184,26 @@ def analyze_dialogue(lines: list[dict], vocabulary: dict | None = None) -> dict[
     diction_style = "precise" if formal_rate >= 0.035 else (
         "relaxed" if colloquialism == "high" else "plain"
     )
-    if avg_clauses >= 1.8 and punctuation[","] / max(1, len(texts)) >= 0.6:
-        rhetorical_style = "flowing"
-    elif questions / max(1, len(texts)) >= 0.35:
-        rhetorical_style = "inquisitive"
+    narrative_markers = sum(
+        len(re.findall(r"\b(?:after|before|then|once|when|while|later|finally)\b", text, re.IGNORECASE))
+        for text in texts
+    )
+    reflective_markers = sum(
+        len(re.findall(r"\b(?:perhaps|maybe|wonder|remember|regret|if only|suppose|doubt)\b", text, re.IGNORECASE))
+        for text in texts
+    )
+    if questions / max(1, len(texts)) >= 0.35:
+        discourse_style = "inquisitive"
+    elif exclamations / max(1, len(texts)) >= 0.2 and sentence_complexity != "complex":
+        discourse_style = "exhortative"
+    elif narrative_markers / max(1, len(texts)) >= 1.0 and avg_clauses >= 1.35:
+        discourse_style = "narrative"
+    elif reflective_markers / max(1, len(texts)) >= 0.5:
+        discourse_style = "reflective"
     elif sentence_complexity == "simple":
-        rhetorical_style = "direct"
-    elif sum(len(row) <= 5 for row in tokenized) / max(1, len(texts)) >= 0.45:
-        rhetorical_style = "fragmented"
+        discourse_style = "direct"
     else:
-        rhetorical_style = "measured"
+        discourse_style = "explanatory"
 
     contraction_frequency = "high" if contraction_rate >= 0.055 else (
         "moderate" if contraction_rate >= 0.02 else "low"
@@ -295,12 +303,28 @@ def analyze_dialogue(lines: list[dict], vocabulary: dict | None = None) -> dict[
     }
     interpretation = {
         "register": register,
-        "vocabulary_complexity": vocabulary_complexity,
+        "lexical_complexity": lexical_complexity,
         "sentence_complexity": sentence_complexity,
         "colloquialism": colloquialism,
-        "diction_style": diction_style,
-        "rhetorical_style": rhetorical_style,
-        "contraction_frequency": contraction_frequency,
+        "discourse_style": discourse_style,
+        "lexical_features": {
+            "diction_style": diction_style,
+            "contraction_frequency": contraction_frequency,
+            "technical_or_domain_specific": (
+                "present" if vocabulary_diversity >= 0.6 else "not_observed"
+            ),
+            "poetic_or_figurative": (
+                "present" if vocabulary_diversity >= 0.58 and average_word_length >= 5.5
+                else "not_observed"
+            ),
+            "archaic_or_formulaic": (
+                "present" if formal_rate >= 0.025 and formal_hits >= 3 else "not_observed"
+            ),
+            "regional_or_dialectal_spelling": (
+                "present" if signal_lines["dialect"] >= 2 else "not_observed"
+            ),
+        },
+        "verbal_habits": habits,
         "speech_habits": habits,
         "method": "rules-derived interpretation from the measurements above; not acoustic evidence",
     }
@@ -334,7 +358,14 @@ def _rank(canonical_id: str, line: dict) -> str:
 
 def sample_id(canonical_id: str, line: dict) -> str:
     """Stable opaque ID safe to send to a text-only classifier."""
-    token = f"{canonical_id}:{_line_key(line)}:{DIALOGUE_SAMPLER_VERSION}"
+    key = _line_key(line)
+    if not key:
+        # Hand-built or trimmed rows may carry no database id. Hash the text so
+        # distinct lines never collapse into one opaque request id.
+        key = "text:" + hashlib.sha256(
+            str(line.get("text") or "").encode("utf-8")
+        ).hexdigest()
+    token = f"{canonical_id}:{key}:{DIALOGUE_SAMPLER_VERSION}"
     return "L" + hashlib.sha256(token.encode("utf-8")).hexdigest()[:16].upper()
 
 
@@ -362,6 +393,39 @@ def sample_manifest_hash(
     return hashlib.sha256(
         json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
+
+
+_UNKNOWN_CONTEXT_VALUES = {"", "unknown", "none", "null", "n/a", "na"}
+
+
+def known_context_part(value: object) -> str | None:
+    text = str(value or "").strip().casefold()
+    return None if text in _UNKNOWN_CONTEXT_VALUES else text
+
+
+def independent_context_key(sample: dict) -> str | None:
+    """Canonical local context key for one sampled line.
+
+    A source/sheet pair is the preferred identity. If only one side is known,
+    it is used alone; unknown placeholders never create a fake independent
+    context. Case and repeated exports collapse to one key.
+    """
+    source = known_context_part(sample.get("source"))
+    sheet = known_context_part(sample.get("sheet"))
+    if source and sheet:
+        return f"{source}::{sheet}"
+    if source:
+        return f"{source}::*"
+    if sheet:
+        return f"*::{sheet}"
+    return None
+
+
+def independent_context_count(samples: list[dict]) -> int:
+    return len({
+        key for sample in samples
+        if (key := independent_context_key(sample)) is not None
+    })
 
 
 NEAR_DUPLICATE_JACCARD = 0.82
@@ -525,22 +589,21 @@ def _public_sample(line: dict, *, signals: bool = False) -> dict:
     return sample
 
 
-def _group_key(line: dict) -> tuple[str, str]:
-    return (str(line.get("source") or "unknown"), str(line.get("sheet") or "unknown"))
+def _group_key(line: dict) -> str:
+    context = independent_context_key(line)
+    return context if context is not None else "*::unknown"
 
 
-def _group_rank(canonical_id: str, group: tuple[str, str]) -> str:
-    return hashlib.sha256(
-        f"{canonical_id}:{group[0]}:{group[1]}".encode("utf-8")
-    ).hexdigest()
+def _group_rank(canonical_id: str, group: str) -> str:
+    return hashlib.sha256(f"{canonical_id}:{group}".encode("utf-8")).hexdigest()
 
 
 def select_representative_samples(
     canonical_id: str,
     lines: list[dict],
     *,
-    max_count: int = 24,
-    max_chars: int = 6000,
+    max_count: int = 40,
+    max_chars: int = 12000,
     vocabulary: dict | None = None,
 ) -> list[dict]:
     """Select a deterministic, signal-free sample for primary Style classification.
@@ -678,8 +741,8 @@ def build_dialogue_sample_pools(
     lines: list[dict],
     *,
     vocabulary: dict | None = None,
-    max_count: int = 24,
-    max_chars: int = 6000,
+    max_count: int = 40,
+    max_chars: int = 12000,
     targeted_count: int = 24,
     targeted_chars: int = 4000,
     corpus_hash: str | None = None,
@@ -736,11 +799,12 @@ def evidence_sufficiency(
     sampled_lines = len(samples)
     sampled_words = sum(len(words(str(sample.get("text") or ""))) for sample in samples)
     sources = {
-        str(sample.get("source") or "unknown") for sample in samples
+        source for sample in samples
+        if (source := known_context_part(sample.get("source"))) is not None
     }
     contexts = {
-        (str(sample.get("source") or "unknown"), str(sample.get("sheet") or "unknown"))
-        for sample in samples
+        key for sample in samples
+        if (key := independent_context_key(sample)) is not None
     }
     unique_corpus_lines = int(
         statistics.get("unique_line_count") or statistics.get("dialogue_count") or 0
@@ -760,7 +824,7 @@ def evidence_sufficiency(
         return (
             sampled_lines >= math.ceil(int(rule["lines"]) * multiplier)
             and sampled_words >= math.ceil(int(rule["words"]) * multiplier)
-            and len(sources) >= int(rule["sources"])
+            and len(contexts) >= int(rule["contexts"])
         )
     if met("strong"):
         tier = "strong"
@@ -782,3 +846,22 @@ def evidence_sufficiency(
         "thresholds": tiers,
         "field_multiplier": multiplier,
     }
+
+
+def prompt_evidence_sufficiency(
+    statistics: dict,
+    samples: list[dict],
+    *,
+    vocabulary: dict | None = None,
+    field: str | None = None,
+) -> dict[str, Any]:
+    """Evidence metadata for a model request, without source or sheet names.
+
+    Source and context names remain available in the application's audit record;
+    the classifier only needs aggregate counts to judge sufficiency.
+    """
+    evidence = evidence_sufficiency(
+        statistics, samples, vocabulary=vocabulary, field=field,
+    )
+    evidence.pop("sources", None)
+    return evidence

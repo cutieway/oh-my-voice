@@ -159,17 +159,17 @@ python3 tools/blueprint_pipeline/cli.py inventory --game-index /tmp/game-npc-ind
 python3 tools/blueprint_pipeline/cli.py dossiers --game-index /tmp/game-npc-index.json --limit 25
 python3 tools/blueprint_pipeline/cli.py classify --provider rules --limit 25
 
-# Jev is opt-in. Configure the key in the environment and begin with a pilot.
-export TYPESAFE_API_KEY
-python3 tools/blueprint_pipeline/cli.py classify --provider jev --allow-network --limit 25
+# Jev defaults to a loopback endpoint. Remote endpoints require --allow-remote.
+python3 tools/blueprint_pipeline/cli.py classify --provider jev --limit 25
 
 python3 tools/blueprint_pipeline/cli.py inspect npc_1003075 --review-report
 python3 tools/blueprint_pipeline/cli.py validate
 python3 tools/blueprint_pipeline/cli.py report
 ```
 
-Jev calls require `--allow-network`; Jev defaults to at most 25
-records per invocation. Larger batches require `--allow-bulk`, and the CLI
+Loopback Jev endpoints need no network opt-in; non-loopback endpoints are
+rejected unless `--allow-remote` is passed explicitly. Jev defaults to at most
+25 records per invocation. Larger batches require `--allow-bulk`, and the CLI
 prints request count, approximate input tokens, and a rough cost estimate
 before sending. `--resume` reuses matching dossier/config/model results;
 `--force` reruns classification and explicitly permits a generated result to
@@ -210,17 +210,21 @@ assignment registries are immutable snapshots under gitignored `data/`.
 
 ## Speech style
 
-The five style fields (`register`, `vocabulary_complexity`,
-`sentence_complexity`, `colloquialism`, `rhetorical_style`) are classified from
-dialogue and stored in the profile with their probabilities and method. When all
-five are present, `render_instruct` appends their clause after the identity
-sentence; the identity text itself never changes.
+The five taxonomy-v3 style fields (`register`, `lexical_complexity`,
+`sentence_complexity`, `colloquialism`, `discourse_style`) are classified from
+dialogue and stored in the profile with their evidence and method. `render_instruct`
+appends every supported field after the identity sentence, omitting missing
+fields; the identity text itself never changes. All five fields remain
+experimental and unvalidated until the v3 pilot, human gold, JEV stability, and
+VoiceDesign A/B gates clear; `discourse_style` is the least established because
+its taxonomy is new.
 
 Listening on 2026-11-03 preferred styled takes over identity-only takes for
 every sampled voice, so the clause is part of the default render rather than an
-optional flag. The earlier mood layer was removed on the same date: it was a
-second reference per state, and its interaction with the style clause made
-delivery changes hard to attribute.
+optional flag. That is a listening preference, not a benchmark result. The
+earlier mood layer was removed on the same date: it was a second reference per
+state, and its interaction with the style clause made delivery changes hard to
+attribute.
 
 Style is still not a per-line control. The Base model speaks the text it is
 given, and the text already carries its own wording; the clause describes the

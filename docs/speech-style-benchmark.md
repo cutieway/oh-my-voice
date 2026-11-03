@@ -37,7 +37,7 @@ The runtime already exists; nothing needs installing.
 | `llama-server` with `/v1/systemone` | works, no install | pin `llama-cpp-12032` ships the route in `libllama-server-impl.so`; the model rejects text generation with `use /v1/systemone` |
 | `Bespoke-Nimble-9B-v3-Q4_K_M.gguf` | loads and answers | ROCm, 9B Q4_K_M, ~1.9 s per NPC, ~10k input tokens per request |
 | Pipeline call path | works end to end | `evaluation.py nimble --condition text_only --limit 2` returned 5 fields with probability distributions, zero failures |
-| Output plausibility | good on spot check | `"Ye got to make 'im pay!"` -> `colloquialism: high` (0.80), `register: conversational` (0.81), `vocabulary_complexity: plain` (0.50) |
+| Output plausibility | good on spot check (taxonomy v2, historical) | `"Ye got to make 'im pay!"` -> `colloquialism: high` (0.80), `register: conversational` (0.81), `vocabulary_complexity: plain` (0.50) |
 
 Compose draft profiles (archetype acoustics + classified style) and audition
 them:
@@ -65,6 +65,35 @@ python3 -m tools.blueprint_pipeline.evaluation jev \
 Request shape the server accepts: `state` is chat messages, `choice` criteria
 must be an object (`{"label": "description"}`), `score` criteria a list. The
 pipeline's `jev.build_questions()` already emits this.
+
+## 3a. Taxonomy v3 status (2026-11-03)
+
+The five production fields are now `register`, `lexical_complexity`,
+`sentence_complexity`, `colloquialism`, and `discourse_style`, with construct
+definitions in `blueprints/vocabulary.json` and the rename/meaning changes in
+`blueprints/migrations/style-taxonomy-v3.md`. Benchmark v2 is frozen and stays
+immutable; v3 labels and definitions differ, so v2 scores do not transfer.
+
+| Item | Status | Evidence |
+|---|---|---|
+| Taxonomy v3 defined and versioned | implemented | `vocabulary.json` `taxonomy_version: 3.0`; questions and definitions are non-overlapping |
+| Application-derived status and mixed gates | implemented | Production validation requires three valid cited lines per field, two recurring patterns with three unique cited lines each for `mixed`, and two independent contexts |
+| Local default, remote opt-in | implemented | Loopback endpoint is the default; non-loopback requires `--allow-remote` |
+| Anonymized request (opaque IDs, text, aggregate counts) | implemented | No NPC identity, lore, source names, or sheet names |
+| Request-visible evidence tiers | implemented | 40-line representative capacity reaches `strong` (40 lines / 600 words / 3 contexts) |
+| Benchmark v3 dev/test split | **done** | 80 items, 20 development / 60 locked test, seeded NPC split; forms are blank |
+| Two-annotator blind pilot (12 NPCs) | **not_run** | Blank v3 forms exist; no completed labels |
+| Human gold labels | **not_run** | `adjudicated/gold.json` is `pending_independent_annotations_and_adjudication` |
+| Local JEV predictions | **not_run** | No live JEV endpoint was available |
+| JEV repeat / order / sample-size stability | **not_run** | Blocked on predictions |
+| Rules baseline predictions | runs | Explicitly tagged `rules_baseline`; not a validation result |
+| VoiceDesign A/B of Style fields | **pending** | Protocol in `docs/style-ab-2026-11-02.md` is v2 history; v3 matrix not run |
+
+No accuracy claim is made. Every Style field is experimental until the v3 pilot
+and gold labels exist. `discourse_style` remains the least established field
+because its taxonomy is new. Full protocol:
+`docs/speech-style-benchmark-v3.md`; reference A/B protocol:
+`docs/style-ab-v3-protocol.md`.
 
 ## 3b. Where style is allowed to act
 
@@ -100,7 +129,8 @@ blueprints. It is infrastructure, not a prerequisite for trying the classifier.
 
 | Piece | State |
 |---|---|
-| Frozen benchmark v2 (80 items, 20 development / 60 test, 5 fields) | done, immutable; split is by NPC, not line |
+| Frozen benchmark v2 (80 items, 20 development / 60 test, 5 fields) | done, immutable; split is by NPC, not line; taxonomy v2 only |
+| Benchmark v3 (80 items, 20 development / 60 locked test, v3 labels) | manifest and blind forms frozen; labels blank, gold pending |
 | Blind forms + share packets for annotators | done; both annotation files are present but blank |
 | Rules baseline (`RulesProvider`) | runs |
 | Qwen3.5-9B-Base baseline (text only / assisted) | runs |
@@ -117,11 +147,14 @@ blueprints. It is infrastructure, not a prerequisite for trying the classifier.
    exactly the five validated style fields; `diction_style` and
    `contraction_frequency` were removed, and `generator.VALIDATED_STYLE_FIELDS`
    keeps them out of profiles even if a dossier analysis produces them.
-3. **`mixed` is now storable; `insufficient_evidence` is not a label.** The
-   production dimensions accept `mixed` as a real outcome. An insufficient
-   evidence result is stored as `value: null` with
-   `status: insufficient_evidence`, and the renderer omits it. A `mixed` result
-   requires at least one counterexample line.
+3. **`mixed` is a value, not a status.** The production dimensions accept
+   `mixed` as a real classification value paired with `status: supported` (or
+   `provisional`). An insufficient evidence result is stored as `value: null`
+   with `status: insufficient_evidence`, and the renderer omits it. A `mixed`
+   value requires two recurring patterns, each citing at least three unique request
+   lines across at least two independent contexts; one counterexample is not
+   evidence of mixture. Any answer using `status: mixed` is rejected, even if its
+   value is valid.
 4. **Probabilities are raw scores, not calibrated.** Model self-reported
    confidence and probability distributions are diagnostic only. Acceptance
    depends on valid labels, cited line IDs, the evidence floor, stability, and
@@ -177,7 +210,8 @@ two-annotator protocol only pays off once the field set has stopped moving.
 1. ~~Align the pipeline questions with the validated field set~~ done: five
    Style fields only; `diction_style` and `contraction_frequency` stay out.
 2. ~~Decide the `mixed` / `insufficient_evidence` mapping~~ done: `mixed` is a
-   real label; insufficient evidence is `value: null` plus status.
+   classification value with status `supported` or `provisional`; insufficient
+   evidence is `value: null` plus status.
 3. Run the classifier over all 8+ line NPCs, write `speech_style` into blueprints,
    and keep per-field status and citations.
 4. Complete the two blind annotation forms and adjudication; measure per-field

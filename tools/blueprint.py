@@ -53,10 +53,10 @@ FIELD_TO_VOCAB = {
 
 STYLE_FIELDS = (
     "register",
-    "vocabulary_complexity",
+    "lexical_complexity",
     "sentence_complexity",
     "colloquialism",
-    "rhetorical_style",
+    "discourse_style",
 )
 
 EVIDENCE_RULES = {

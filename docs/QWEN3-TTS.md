@@ -294,14 +294,16 @@ python3 tools/blueprint_pipeline/cli.py inventory --game-index /tmp/game-npc-ind
 python3 tools/blueprint_pipeline/cli.py dossiers --game-index /tmp/game-npc-index.json --limit 25
 python3 tools/blueprint_pipeline/cli.py classify --provider rules --limit 25
 
-# Network use is explicit. Set TYPESAFE_API_KEY in the shell for Jev.
-python3 tools/blueprint_pipeline/cli.py classify --provider jev --allow-network --limit 25
+# Jev defaults to loopback. Remote endpoints need --allow-remote and a key.
+python3 tools/blueprint_pipeline/cli.py classify --provider jev --limit 25
 
 python3 tools/blueprint.py render archetype_neutral_clear_mid
 ./scripts/voicebank.sh archetype_neutral_clear_mid
 ```
 
-Jev requires `--allow-network`; rules need no credentials.
+Jev defaults to a loopback endpoint and needs no remote opt-in or key there;
+rules need no credentials either. Non-loopback endpoints require
+`--allow-remote` and `TYPESAFE_API_KEY`.
 The Jev preflight prints a workload and approximate token-cost estimate, and
 requests are capped at 25 dossiers unless `--allow-bulk` is supplied. Jev
 accepts text/structured state only: it cannot hear WAV files and does not

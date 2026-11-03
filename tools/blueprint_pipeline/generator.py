@@ -16,10 +16,10 @@ from .evidence import creative_evidence, make_evidence
 # `contraction_frequency` failed the benchmark and stay out until they pass.
 VALIDATED_STYLE_FIELDS = (
     "register",
-    "vocabulary_complexity",
+    "lexical_complexity",
     "sentence_complexity",
     "colloquialism",
-    "rhetorical_style",
+    "discourse_style",
 )
 
 IDENTITY_FIELDS = (
@@ -166,30 +166,41 @@ def build_individual_profile(
     # Cached pre-2.0 classifications predate statuses; their labels are kept
     # readable for migration. A current record that omits status is unresolved.
     legacy_classification = not classification.get("schema_version")
+
+    def normalized_style_decision(decision):
+        # Schema 2.0 used `mixed` as both a value and a status. Migrate only
+        # the unambiguous case; a mixed status with any other value was the
+        # conflation this schema removes, so it stays unresolved.
+        value = decision.get("value")
+        status = decision.get("status") or (
+            "supported" if legacy_classification else "unresolved"
+        )
+        if status == "mixed":
+            status = "supported" if value == "mixed" else "unresolved"
+        return {**decision, "value": value, "status": status}
+
+    def accepted(decision):
+        normalized = normalized_style_decision(decision)
+        return normalized["value"] is not None and normalized["status"] == "supported"
+
     speech_style = {}
     for field, decision in (classification.get("speech_style") or {}).items():
         if field not in VALIDATED_STYLE_FIELDS:
             continue
-        value = decision.get("value")
-        status = decision.get("status") or ("supported" if legacy_classification else "unresolved")
-        if value is not None and status in {"supported", "mixed"}:
-            speech_style[field] = value
+        normalized = normalized_style_decision(decision)
+        if accepted(normalized):
+            speech_style[field] = normalized["value"]
     full_analysis = classification.get("speech_style_analysis") or {}
     dimensions = {
-        field: decision
+        field: normalized_style_decision(decision)
         for field, decision in (full_analysis.get("dimensions") or {}).items()
         if field in VALIDATED_STYLE_FIELDS
     }
     if not dimensions:
         dimensions = {
-            field: decision
+            field: normalized_style_decision(decision)
             for field, decision in (classification.get("speech_style") or {}).items()
-            if field in VALIDATED_STYLE_FIELDS
-            and (
-                decision.get("status")
-                or ("supported" if legacy_classification else "unresolved")
-            ) in {"supported", "mixed"}
-            and decision.get("value") is not None
+            if field in VALIDATED_STYLE_FIELDS and accepted(decision)
         }
     analysis = (
         {
@@ -202,12 +213,9 @@ def build_individual_profile(
         if dimensions
         else None
     )
-    confidence_values = [
-        float(answer.get("confidence"))
-        for answer in (classification.get("answers") or {}).values()
-        if answer.get("type") in {"choice", "score"} and answer.get("confidence") is not None
-    ]
-    confidence = min(confidence_values) if confidence_values else None
+    # Model self-reported confidence is diagnostic only. Classification
+    # strength is carried by evidence_tier, never promoted to profile confidence.
+    confidence = None
     source_url = f"game:ENpcBase/{identity_context.get('npc_id')}"
     profile = {
         "schema_version": vocabulary["schema_version"],

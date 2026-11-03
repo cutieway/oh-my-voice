@@ -71,17 +71,18 @@ class ShippedBlueprintTests(unittest.TestCase):
         data = profile("archetype_masculine_clear_mid")
         data["speech_style"] = {
             "register": "formal",
-            "vocabulary_complexity": "educated",
+            "lexical_complexity": "advanced",
             "sentence_complexity": "complex",
             "colloquialism": "low",
-            "rhetorical_style": "measured",
+            "discourse_style": "explanatory",
         }
         data["speech_style_analysis"] = None
         instruct = blueprint.render_instruct(data, self.vocab)
         identity = blueprint.render_identity(data, self.vocab)
-        self.assertTrue(instruct.startswith(identity + " "))
+        self.assertEqual(instruct[: len(identity)], identity)
+        self.assertTrue(blueprint.render_style(data, self.vocab))
         self.assertIn("formal in register", instruct)
-        self.assertIn("rhetorical shape", instruct)
+        self.assertIn("discourse shape", instruct)
 
     def test_render_is_deterministic(self):
         data = profile()

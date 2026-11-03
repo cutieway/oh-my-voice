@@ -625,13 +625,13 @@
       "template": " The wording is {dimensions}.",
       "parts": {
         "register": "{value} in register",
-        "vocabulary_complexity": "{value} in vocabulary",
+        "lexical_complexity": "{value} in vocabulary",
         "sentence_complexity": "{value} in sentence structure",
         "colloquialism": "{value} in colloquialism",
-        "rhetorical_style": "{value} in rhetorical shape"
+        "discourse_style": "{value} in discourse shape"
       }
     },
-    "style_note": "Rendered only from supported or mixed Style fields; provisional, insufficient, unresolved, and rejected fields are omitted. The Identity sentence stays byte-identical when Style changes.",
+    "style_note": "Rendered only from Style fields with status supported (including fields whose value is mixed); provisional, insufficient, unresolved, and rejected fields are omitted. The Identity sentence stays byte-identical when Style changes.",
     "article_rule": "Use 'An' when the rendered phrase starts with a vowel sound (adult, ageless, ancient, elderly, androgynous), otherwise 'A'.",
     "banned_identity_words": [
       "happy",
@@ -721,48 +721,40 @@
         "values": {
           "formal": {
             "render": "formal",
-            "classification_description": "Uses consistently formal constructions and formal signal words."
+            "classification_description": "Consistently ceremonial or official grammar and address forms; vocabulary complexity and contractions are judged separately."
           },
           "neutral": {
             "render": "neutral",
-            "classification_description": "Neither strongly formal nor strongly colloquial."
+            "classification_description": "Ordinary grammatical register with no sustained ceremonial or casual stance."
           },
           "conversational": {
             "render": "conversational",
-            "classification_description": "Uses casual constructions, colloquial terms, or frequent contractions."
+            "classification_description": "Consistently casual grammar and address forms; do not infer this from contractions or slang alone."
           },
           "mixed": {
             "render": "mixed",
-            "classification_description": "Recurring, meaningful variation between two or more patterns."
+            "classification_description": "Formality shifts with a stable contextual rule, such as formal address in one setting and casual grammar in another."
           }
         }
       },
-      "vocabulary_complexity": {
-        "question": "How complex is the character’s vocabulary, based on the sampled text?",
+      "lexical_complexity": {
+        "question": "How lexically complex is the character’s word choice, independent of subject matter?",
         "values": {
           "plain": {
             "render": "plain",
-            "classification_description": "Mostly common, short words and direct phrasing."
+            "classification_description": "Mostly high-frequency concrete words; lexical rarity only, not sentence length."
           },
           "ordinary": {
             "render": "ordinary",
-            "classification_description": "Everyday vocabulary with a typical range."
-          },
-          "specialized": {
-            "render": "specialized",
-            "classification_description": "Repeated technical or domain-specific vocabulary."
-          },
-          "poetic": {
-            "render": "poetic",
-            "classification_description": "Unusually figurative, image-rich, or lyrical word choice."
-          },
-          "mixed": {
-            "render": "mixed",
-            "classification_description": "Recurring, meaningful variation between two or more patterns."
+            "classification_description": "Everyday range of high- and mid-frequency words with no sustained difficult vocabulary."
           },
           "advanced": {
             "render": "advanced",
-            "classification_description": "Frequent less-common or demanding words; describes wording, not the speaker."
+            "classification_description": "Frequent less-common words across topics; technical, poetic, archaic and dialectal choices are separate audit features, not complexity levels."
+          },
+          "mixed": {
+            "render": "mixed",
+            "classification_description": "Two complexity levels recur in distinct, stable contexts."
           }
         }
       },
@@ -771,15 +763,15 @@
         "values": {
           "simple": {
             "render": "simple",
-            "classification_description": "Mostly short utterances with few subordinate clauses."
+            "classification_description": "Sustained single-clause grammar; length alone does not make structure complex."
           },
           "mixed": {
             "render": "mixed",
-            "classification_description": "A mixture of short and multi-clause utterances."
+            "classification_description": "Single- and multi-clause grammar both recur without one clearly dominating."
           },
           "complex": {
             "render": "complex",
-            "classification_description": "Frequently long utterances or multiple subordinate clauses."
+            "classification_description": "Subordination or coordinated clauses recur as the normal structure."
           }
         }
       },
@@ -788,52 +780,56 @@
         "values": {
           "low": {
             "render": "low",
-            "classification_description": "Rare colloquial signal words and informal constructions."
+            "classification_description": "Nonstandard or slang forms are rare across contexts; contractions alone do not raise this field."
           },
           "moderate": {
             "render": "moderate",
-            "classification_description": "Some colloquial wording mixed with neutral phrasing."
+            "classification_description": "Nonstandard or slang forms recur but do not dominate ordinary lines."
           },
           "high": {
             "render": "high",
-            "classification_description": "Frequent colloquial words, contractions, or informal constructions."
+            "classification_description": "Nonstandard or slang forms are the normal lexical choice across contexts."
           },
           "mixed": {
             "render": "mixed",
-            "classification_description": "Recurring, meaningful variation between two or more patterns."
+            "classification_description": "Nonstandard forms are sustained in one context and absent in another."
           }
         }
       },
-      "rhetorical_style": {
-        "question": "What rhetorical pattern is most representative of the dialogue?",
+      "discourse_style": {
+        "question": "What recurring way does the character organize and direct discourse?",
         "values": {
-          "measured": {
-            "render": "measured",
-            "classification_description": "Balanced, deliberate statements."
-          },
           "direct": {
             "render": "direct",
-            "classification_description": "Short, plain statements that get to the point."
+            "classification_description": "Claims and requests are stated without hedging, framing, or extended setup."
           },
-          "flowing": {
-            "render": "flowing",
-            "classification_description": "Long linked clauses and continuous phrasing."
-          },
-          "fragmented": {
-            "render": "fragmented",
-            "classification_description": "Many short fragments or interrupted phrases."
+          "explanatory": {
+            "render": "explanatory",
+            "classification_description": "The recurring move is to explain causes, sequences, or conditions so the listener understands."
           },
           "inquisitive": {
             "render": "inquisitive",
-            "classification_description": "Questions form a prominent recurring pattern."
+            "classification_description": "The recurring move is asking questions rather than asserting."
           },
-          "emphatic": {
-            "render": "emphatic",
-            "classification_description": "Exclamations or marked emphasis recur in the wording."
+          "persuasive": {
+            "render": "persuasive",
+            "classification_description": "The recurring move is to argue for a course of action with reasons or appeals."
+          },
+          "exhortative": {
+            "render": "exhortative",
+            "classification_description": "The recurring move is to urge, command, or rally the listener toward action."
+          },
+          "reflective": {
+            "render": "reflective",
+            "classification_description": "The recurring move is to weigh uncertainty, memory, or inner conflict rather than settle a claim."
+          },
+          "narrative": {
+            "render": "narrative",
+            "classification_description": "The recurring move is to recount events in sequence as a story."
           },
           "mixed": {
             "render": "mixed",
-            "classification_description": "Recurring, meaningful variation between two or more patterns."
+            "classification_description": "Two or more discourse moves recur in distinct, stable contexts."
           }
         }
       },
@@ -864,10 +860,10 @@
     },
     "defaults": {
       "register": "neutral",
-      "vocabulary_complexity": "ordinary",
+      "lexical_complexity": "ordinary",
       "sentence_complexity": "mixed",
       "colloquialism": "low",
-      "rhetorical_style": "measured",
+      "discourse_style": "explanatory",
       "speech_habits": [
         "none_observed"
       ]
@@ -934,20 +930,20 @@
       "minimum": {
         "lines": 8,
         "words": 100,
-        "sources": 1
+        "contexts": 1
       },
       "supported": {
         "lines": 20,
         "words": 300,
-        "sources": 2
+        "contexts": 2
       },
       "strong": {
         "lines": 40,
         "words": 600,
-        "sources": 3
+        "contexts": 3
       },
       "field_multipliers": {
-        "rhetorical_style": 1.25
+        "discourse_style": 1.25
       },
       "note": "Initial floors from the v2 annotation protocol; tune only on development data."
     }
@@ -976,10 +972,10 @@
         "instructions": "Which register does the character habitually use across ordinary dialogue? Use mixed for recurring shifts and abstain when the sample is too sparse.",
         "values": "speech_style.register"
       },
-      "speech_style.vocabulary_complexity": {
+      "speech_style.lexical_complexity": {
         "type": "choice",
-        "instructions": "What kind of vocabulary does the character habitually choose? Judge wording only, not intelligence, education, or social class; proper names and quest terms are not advanced vocabulary.",
-        "values": "speech_style.vocabulary_complexity"
+        "instructions": "How difficult is the character's habitual word choice? Judge lexical rarity only, not sentence length, technical topic, poetry, archaism, dialect, intelligence, education, or class; proper names and quest terms are not advanced vocabulary.",
+        "values": "speech_style.lexical_complexity"
       },
       "speech_style.sentence_complexity": {
         "type": "choice",
@@ -991,18 +987,13 @@
         "instructions": "How frequently does the character use informal spoken-language forms across contexts?",
         "values": "speech_style.colloquialism"
       },
-      "speech_style.rhetorical_style": {
+      "speech_style.discourse_style": {
         "type": "choice",
-        "instructions": "What recurring way of constructing ideas appears in the dialogue? This is written rhetoric, not vocal speed or loudness.",
-        "values": "speech_style.rhetorical_style"
+        "instructions": "What recurring way does the character organize discourse: state, explain, question, persuade, urge, reflect, or narrate? This is written discourse, not vocal speed, loudness, or emotion.",
+        "values": "speech_style.discourse_style"
       }
     },
     "thresholds": {
-      "choice_confidence": 0.55,
-      "choice_probability": 0.35,
-      "noul_yes": 0.75,
-      "noul_no": 0.25,
-      "distinctiveness_score": 3.7,
       "min_dialogue_lines_for_individual": 50,
       "min_dialogue_lines_for_review": 5,
       "min_dialogue_lines_for_mood": 40,
@@ -1014,7 +1005,8 @@
       "Acceptance depends on valid labels, cited line IDs present in the request, sample sufficiency, stability, and held-out benchmark metrics.",
       "RulesProvider results are recorded as method=rules_baseline and are never merged into JEV fields.",
       "A field below the minimum evidence floor is null with status=insufficient_evidence; no first-option or neutral default is inserted.",
-      "Mixed is a real outcome and is preserved; unresolved evidence yields null with status=unresolved.",
+      "Status describes evidence sufficiency only. mixed is a classification value, never a status; a mixed value uses status supported or provisional.",
+      "Unresolved evidence yields null with status=unresolved.",
       "Thresholds and evidence floors are initial project settings and must be calibrated on development data only."
     ],
     "acoustic_family_compatibility": "Primary and optional secondary timbres must use different acoustic families. Distinctive traits cannot repeat the selected primary family.",

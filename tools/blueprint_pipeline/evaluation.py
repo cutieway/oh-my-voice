@@ -30,7 +30,12 @@ from .config import (
 )
 from .dossier import build_dossiers
 from .inventory import build_inventory
-from .dialogue import analyze_dialogue, evidence_sufficiency, words
+from .dialogue import (
+    analyze_dialogue,
+    independent_context_key,
+    prompt_evidence_sufficiency,
+    words,
+)
 from .jev import JevError, JevProvider, build_questions as build_style_questions
 
 try:
@@ -39,14 +44,20 @@ except ModuleNotFoundError:
     from tools import blueprint as blueprint_renderer
 
 
-BENCHMARK_VERSION = "speech-style-benchmark-v2"
-PROTOCOL_VERSION = "annotation-protocol-v2"
-DEFAULT_ROOT = Path("data/blueprints/evaluation/benchmark_v2")
-DEFAULT_SEED = "oh-my-voice-benchmark-v1-2026-11-01"
-# v2 keeps the v1 population, seed, and frozen sample lines so the protocol change
-# is the only difference between the two benchmarks. The experimental
-# `diction_style` field is removed: it overlapped vocabulary/diction and was the
-# least stable field in the v1 stability run.
+BENCHMARK_VERSION = "speech-style-benchmark-v3"
+PROTOCOL_VERSION = "annotation-protocol-v3"
+DEFAULT_ROOT = Path("data/blueprints/evaluation/benchmark_v3")
+DEFAULT_SEED = "oh-my-voice-benchmark-v3-2026-11-03"
+# Benchmark v2 remains frozen at data/blueprints/evaluation/benchmark_v2 and
+# must not be rebuilt with these v3 labels.
+# Frozen benchmark sample size. Production sampling uses
+# MAX_DIALOGUE_SAMPLE_COUNT (40) so the strong tier is reachable; benchmark
+# items use a fixed 24-line snapshot for comparability across versions.
+BENCHMARK_SAMPLE_COUNT = 24
+# Taxonomy v3 replaces the overlapping v2 fields. `lexical_complexity` measures
+# difficulty only; technical, poetic, archaic and dialectal choices are
+# audit-only features. `discourse_style` replaces `rhetorical_style` and is
+# retained only if the human pilot clears its agreement gate.
 FIELDS: dict[str, dict[str, str]] = {
     "register": {
         "formal": "Predominantly formal constructions, honorifics, or elevated forms of address.",
@@ -55,14 +66,12 @@ FIELDS: dict[str, dict[str, str]] = {
         "mixed": "Substantial, recurring shifts between contrasting registers.",
         "insufficient_evidence": "Too little or unrepresentative text to judge a predominant register.",
     },
-    "vocabulary_complexity": {
-        "plain": "Mostly common, familiar words and direct phrasing.",
-        "ordinary": "Everyday vocabulary with a typical range.",
-        "advanced": "Frequent less-common or demanding words; this describes the wording, not the speaker.",
-        "specialized": "Repeated technical or domain-specific vocabulary.",
-        "poetic": "Unusually figurative, image-rich, or lyrical word choice.",
-        "mixed": "Meaningful variation between simpler and more demanding vocabulary.",
-        "insufficient_evidence": "Too little usable text to judge vocabulary complexity.",
+    "lexical_complexity": {
+        "plain": "Mostly high-frequency, familiar words.",
+        "ordinary": "Everyday high- and mid-frequency range without sustained difficulty.",
+        "advanced": "Frequent less-common words across topics; this describes word difficulty, not the speaker.",
+        "mixed": "Two complexity levels recur in distinct, stable contexts.",
+        "insufficient_evidence": "Too little usable text to judge lexical complexity.",
     },
     "sentence_complexity": {
         "simple": "Predominantly short, structurally simple utterances.",
@@ -77,34 +86,35 @@ FIELDS: dict[str, dict[str, str]] = {
         "mixed": "Colloquial wording varies substantially across the sample.",
         "insufficient_evidence": "Too little usable text to judge colloquial wording.",
     },
-    "rhetorical_style": {
-        "measured": "Balanced, deliberate statements are the recurring pattern.",
-        "direct": "Short, plain statements that get to the point are the recurring pattern.",
-        "flowing": "Long linked clauses and continuous phrasing recur.",
-        "fragmented": "Short fragments or interrupted phrases recur.",
-        "inquisitive": "Questions form a prominent recurring pattern.",
-        "emphatic": "Exclamations or marked emphasis form a prominent recurring pattern.",
-        "mixed": "No single rhetorical pattern predominates across the sample.",
-        "insufficient_evidence": "Too little usable text to judge rhetorical pattern.",
+    "discourse_style": {
+        "direct": "Claims and requests are stated without framing or extended setup.",
+        "explanatory": "Causes, sequences, or conditions are explained so the listener understands.",
+        "inquisitive": "Questions are the recurring discourse move.",
+        "persuasive": "A course of action is argued with reasons or appeals.",
+        "exhortative": "The listener is urged, commanded, or rallied toward action.",
+        "reflective": "Uncertainty, memory, or inner conflict is weighed rather than settled.",
+        "narrative": "Events are recounted in sequence as a story.",
+        "mixed": "Two or more discourse moves recur in distinct, stable contexts.",
+        "insufficient_evidence": "Too little usable text to judge discourse style.",
     },
 }
 FIELD_SCALE_DISPLAY = {
     "register": "nominal",
-    "vocabulary_complexity": "ordinal, plain < ordinary < advanced, plus specialized/poetic",
+    "lexical_complexity": "ordinal, plain < ordinary < advanced",
     "sentence_complexity": "ordinal, simple < mixed < complex",
     "colloquialism": "ordinal, low < moderate < high",
-    "rhetorical_style": "nominal",
+    "discourse_style": "nominal",
 }
 FIELD_SCALES = {
     "register": "nominal",
-    "vocabulary_complexity": "ordinal_core_plus_off_scale",
+    "lexical_complexity": "ordinal",
     "sentence_complexity": "ordinal",
     "colloquialism": "ordinal",
-    "rhetorical_style": "nominal",
+    "discourse_style": "nominal",
 }
 # Only the ordered core of each ordinal field participates in weighted kappa.
 ORDINAL_FIELD_LABELS = {
-    "vocabulary_complexity": ["plain", "ordinary", "advanced"],
+    "lexical_complexity": ["plain", "ordinary", "advanced"],
     "sentence_complexity": ["simple", "mixed", "complex"],
     "colloquialism": ["low", "moderate", "high"],
 }
@@ -142,10 +152,10 @@ CONDITION_PAIRS = (
 # Boundary rules that keep the overlapping fields separable.
 FIELD_BOUNDARIES = {
     "register": "Rate formality of address and construction only. Do not raise the label because a line is long (sentence complexity) or contains rare words (vocabulary complexity).",
-    "vocabulary_complexity": "Rate word rarity and specialization only. Do not raise the label because a sentence has many clauses (sentence complexity) or because the wording is formal (register).",
-    "sentence_complexity": "Rate length and clause structure only. Do not raise the label because the words are rare (vocabulary complexity) or the tone is formal (register).",
-    "colloquialism": "Rate slang, idioms, contractions, and informal constructions only. A blunt or direct line is not colloquial unless it uses informal wording; a single interjection is not enough.",
-    "rhetorical_style": "Rate the recurring utterance shape only (questions, exclamations, fragments, linked clauses, balanced statements). Do not re-score formality or word rarity here.",
+    "lexical_complexity": "Rate word difficulty only. Technical, poetic, archaic and dialectal choices are separate audit features, not complexity levels. Do not raise the label because a sentence has many clauses (sentence complexity) or because the wording is formal (register).",
+    "sentence_complexity": "Rate clause structure only. Do not raise the label because the words are rare (lexical complexity) or the tone is formal (register).",
+    "colloquialism": "Rate informal grammar, slang, reductions, and casual markers only. A blunt or direct line is not colloquial unless it uses informal wording; a single interjection is not enough.",
+    "discourse_style": "Rate the recurring discourse move only (state, explain, question, persuade, urge, reflect, narrate). Do not re-score formality, word rarity, or sentence structure here.",
 }
 FIELD_GUIDANCE: dict[str, list[dict[str, str]]] = {
     "register": [
@@ -154,12 +164,11 @@ FIELD_GUIDANCE: dict[str, list[dict[str, str]]] = {
         {"label": "conversational", "text": "Yeah, he's in the hall. I'll let him know you're here.", "why": "Contractions and informal phrasing throughout."},
         {"label": "mixed", "text": "Yeah, he's in the hall. I shall inform the steward at once, if it pleases you.", "why": "Two contrasting registers recur, not one stray line."},
     ],
-    "vocabulary_complexity": [
-        {"label": "plain", "text": "Take the box. Put it there. Come back later.", "why": "Common words only."},
-        {"label": "ordinary", "text": "Leave the crate by the door and come back after the meeting.", "why": "Everyday vocabulary."},
-        {"label": "advanced", "text": "The discrepancy in the ledger demands a meticulous accounting of every consignment.", "why": "Repeated less-common words."},
-        {"label": "specialized", "text": "The aetherial condenser's pressure differential must not exceed the calibrated threshold.", "why": "Domain terms recur."},
-        {"label": "poetic", "text": "The tide remembers every name the shore has taken.", "why": "Figurative, lyrical wording."},
+    "lexical_complexity": [
+        {"label": "plain", "text": "Take the box. Put it there. Come back later.", "why": "High-frequency words only."},
+        {"label": "ordinary", "text": "Leave the crate by the door and come back after the meeting.", "why": "Everyday high- and mid-frequency words."},
+        {"label": "advanced", "text": "The discrepancy in the ledger demands a meticulous accounting of every consignment.", "why": "Less-common words recur; difficulty is the only criterion."},
+        {"label": "mixed", "text": "Take the box now. Later, the discrepancy in the ledger will demand a meticulous accounting.", "why": "Plain and advanced words recur in distinct contexts."},
     ],
     "sentence_complexity": [
         {"label": "simple", "text": "Wait here. He is coming. Do not speak.", "why": "Short, single-clause utterances."},
@@ -171,13 +180,14 @@ FIELD_GUIDANCE: dict[str, list[dict[str, str]]] = {
         {"label": "moderate", "text": "The shipment hasn't arrived yet. I'll ask around at the gate.", "why": "Contractions and light informality, no slang."},
         {"label": "high", "text": "Ain't no shipment yet. I'll poke around the gate, yeah?", "why": "Slang and informal constructions recur."},
     ],
-    "rhetorical_style": [
-        {"label": "measured", "text": "The gate opens at dawn. We will be ready by then. There is no cause for alarm.", "why": "Balanced statements are the pattern."},
-        {"label": "direct", "text": "Gate. Dawn. Be ready.", "why": "Short, plain statements that get to the point."},
-        {"label": "flowing", "text": "The gate opens at dawn, and we will be ready by then, though there is no cause for alarm, and no reason to hurry.", "why": "Linked clauses recur."},
-        {"label": "fragmented", "text": "The gate. Dawn. Ready, or not.", "why": "Fragments and interrupted phrases recur."},
-        {"label": "inquisitive", "text": "Who told you that? When did the gate open? Did anyone else see it?", "why": "Questions form the prominent pattern."},
-        {"label": "emphatic", "text": "The gate opens at dawn! Be ready! There is no cause for alarm!", "why": "Exclamations and marked emphasis recur."},
+    "discourse_style": [
+        {"label": "direct", "text": "Gate. Dawn. Be ready.", "why": "Claims and requests are stated without framing."},
+        {"label": "explanatory", "text": "The gate opens at dawn because the watch changes then, so we should be ready before first light.", "why": "Causes and conditions are explained."},
+        {"label": "inquisitive", "text": "Who told you that? When did the gate open? Did anyone else see it?", "why": "Questions are the recurring move."},
+        {"label": "persuasive", "text": "We should leave before dawn. The roads are safer then, and the watch will not stop us.", "why": "A course of action is argued with reasons."},
+        {"label": "exhortative", "text": "Move! Take the gate! Do not let them close it!", "why": "The listener is urged toward immediate action."},
+        {"label": "reflective", "text": "Perhaps I should have told them. I wonder whether the gate was ever open at all.", "why": "Uncertainty and memory are weighed rather than settled."},
+        {"label": "narrative", "text": "We reached the gate at dawn. The watch changed, and then we slipped through before anyone saw us.", "why": "Events are recounted in sequence."},
     ],
 }
 MEASUREMENT_KEYS = (
@@ -188,13 +198,13 @@ MEASUREMENT_KEYS = (
     "colloquial_signal_rate_per_word", "punctuation", "question_count",
     "statement_count", "exclamation_count", "honorific_and_form_of_address_count",
 )
-RULE_ALIASES = {"educated": "advanced"}
+
 QUESTION_INSTRUCTIONS = {
     "register": "Classify the predominant register of the supplied dialogue. Judge formality of address and construction only; ignore word rarity, sentence length, and the character's identity, occupation, status, or personality.",
-    "vocabulary_complexity": "Classify the vocabulary in the supplied dialogue. Judge word rarity and specialization only; ignore sentence length, formality of tone, and the speaker's intelligence, education, or social class.",
-    "sentence_complexity": "Classify the structural complexity of the supplied utterances by length and clause structure only; ignore word rarity and formality of tone.",
-    "colloquialism": "Classify how often the supplied dialogue uses colloquial wording, idioms, slang, contractions, and informal constructions; ignore bluntness and a single isolated interjection.",
-    "rhetorical_style": "Classify the recurring utterance shape in the supplied dialogue (questions, exclamations, fragments, linked clauses, balanced statements). Do not re-score formality or word rarity, and do not infer character personality.",
+    "lexical_complexity": "Classify the difficulty of word choice in the supplied dialogue. Judge lexical rarity only; ignore clause length, technical topic, poetry, archaism, dialect, formality, and the speaker's intelligence, education, or social class.",
+    "sentence_complexity": "Classify the structural complexity of the supplied utterances by clause structure only; ignore word rarity and formality of tone.",
+    "colloquialism": "Classify how often the supplied dialogue uses informal grammar, slang, reductions, and casual discourse markers; ignore bluntness and a single isolated interjection.",
+    "discourse_style": "Classify the recurring discourse move in the supplied dialogue (state, explain, question, persuade, urge, reflect, narrate). Do not re-score formality, word rarity, sentence structure, emotion, or personality.",
 }
 
 
@@ -297,7 +307,7 @@ def build_speech_style_state(benchmark_dossier: dict, *, condition: str = "assis
         "taxonomy_version": STYLE_TAXONOMY_VERSION,
         "prompt_version": STYLE_PROMPT_VERSION,
         "sampler_version": DIALOGUE_SAMPLER_VERSION,
-        "evidence_sufficiency": evidence_sufficiency(
+        "evidence_sufficiency": prompt_evidence_sufficiency(
             {"unique_line_count": len(samples)}, samples,
             vocabulary=blueprint_renderer.load_vocabulary(),
         ),
@@ -450,7 +460,9 @@ def prepare_benchmark(
         chosen.extend((stratum, c) for c in pool[:20])
 
     selected_ids = {c["canonical_id"] for _, c in chosen}
-    dossier_records = build_dossiers(db, out=cache, only=selected_ids, sample_count=24)
+    dossier_records = build_dossiers(
+        db, out=cache, only=selected_ids, sample_count=BENCHMARK_SAMPLE_COUNT,
+    )
     by_identity = {record["canonical_id"]: record for record in dossier_records}
     if set(by_identity) != selected_ids:
         raise RuntimeError(f"dossier builder omitted {sorted(selected_ids - set(by_identity))}")
@@ -558,8 +570,8 @@ def prepare_benchmark(
         })
         full = (source_dossier.get("dialogue_analysis") or {}).get("interpretation") or {}
         sample = (private["sample_analysis"].get("interpretation") or {})
-        full_labels = {f: RULE_ALIASES.get(full.get(f), full.get(f)) for f in class_fields}
-        sample_labels = {f: RULE_ALIASES.get(sample.get(f), sample.get(f)) for f in class_fields}
+        full_labels = {f: full.get(f) for f in class_fields}
+        sample_labels = {f: sample.get(f) for f in class_fields}
         for system, labels, measurements, evidence_scope in (
             ("rules_full", full_labels, (source_dossier.get("dialogue_analysis") or {}).get("measurements") or {}, "full_dialogue_corpus"),
             ("rules_sample", sample_labels, private["sample_analysis"].get("measurements") or {}, "frozen_representative_sample"),
@@ -749,9 +761,9 @@ def prepare_benchmark(
     write_immutable_json(root / "reports" / "protocol.json", {
         "benchmark": BENCHMARK_VERSION,
         "protocol": PROTOCOL_VERSION,
-        "changes_from_v1": {
-            "fields": "diction_style removed (overlap with vocabulary_complexity and lowest stability in v1); five core fields retained.",
-            "boundaries": "Per-field boundary rules added to the guide and to model instructions to separate register / vocabulary / sentence complexity.",
+        "changes_from_previous": {
+            "fields": "lexical_complexity replaces vocabulary_complexity with a difficulty-only ordinal scale; technical, poetic, archaic and dialectal choices move to audit-only lexical features. discourse_style replaces rhetorical_style.",
+            "boundaries": "Per-field boundary rules separate register / lexical difficulty / sentence structure / discourse move; register is presentation, not identity.",
             "decision_rules": "Evidence floor, majority rule, mixed threshold, tie-break, and mandatory 1-3 line citations are operational and validated on import.",
             "scales": FIELD_SCALES,
             "ordinal_labels": ORDINAL_FIELD_LABELS,
@@ -968,26 +980,71 @@ def run_nimble(
     return {**report, "report_path": str(report_path)}
 
 
-def _reject_invalid_jev_citations(answers: dict, sample_ids: set[str]) -> dict:
+def _reject_invalid_jev_citations(
+    answers: dict,
+    sample_ids: set[str],
+    *,
+    sample_contexts: dict[str, str | None] | None = None,
+    min_supporting: int = 3,
+    min_mixed_patterns: int = 2,
+    min_pattern_support: int = 3,
+) -> dict:
     """Apply the production citation rules to frozen benchmark answers."""
     for question_id, answer in answers.items():
         if not isinstance(answer, dict) or answer.get("type") != "choice":
             continue
-        if answer.get("status") not in {"supported", "mixed", "provisional"}:
+        status = answer.get("status")
+        if status == "mixed":
+            answer["choice"] = None
+            if "label" in answer:
+                answer["label"] = None
+            answer["status"] = "rejected"
+            answer["rationale"] = (
+                "Status describes evidence sufficiency; use status supported with value mixed."
+            )
             continue
+        if status not in {"supported", "provisional"}:
+            continue
+        value = answer.get("choice") or answer.get("label")
         supporting = list(answer.get("supporting_line_ids") or [])
         counterexamples = list(answer.get("counterexample_line_ids") or [])
-        invalid = [
-            line_id for line_id in supporting + counterexamples
-            if line_id not in sample_ids
+        patterns = list(answer.get("patterns") or [])
+        pattern_ids = [
+            line_id
+            for pattern in patterns
+            for line_id in (pattern.get("line_ids") or [])
         ]
+        cited = supporting + counterexamples + pattern_ids
+        invalid = [line_id for line_id in cited if line_id not in sample_ids]
         reason = None
         if invalid:
             reason = f"Cited line IDs absent from the request: {invalid[:3]}."
-        elif len(supporting) < 2:
-            reason = "Supported Style fields require at least two cited lines."
-        elif answer.get("status") == "mixed" and not counterexamples:
-            reason = "A mixed result requires at least one counterexample line."
+        elif len(cited) != len(set(cited)):
+            reason = "A line ID cannot be cited more than once across a field."
+        elif value == "mixed":
+            if len(patterns) < min_mixed_patterns:
+                reason = "A mixed value requires at least two recurring patterns."
+            elif any(
+                len(pattern.get("line_ids") or []) < min_pattern_support
+                for pattern in patterns
+            ):
+                reason = (
+                    f"Each mixed pattern requires at least {min_pattern_support} cited lines."
+                )
+            elif sample_contexts is not None:
+                context_keys = {
+                    sample_contexts.get(line_id) for line_id in pattern_ids
+                }
+                context_keys.discard(None)
+                if len(context_keys) < 2:
+                    reason = (
+                        "A mixed value requires its cited pattern lines to span at "
+                        "least two independent contexts."
+                    )
+        elif len(supporting) < min_supporting:
+            reason = (
+                f"Supported Style fields require at least {min_supporting} cited lines."
+            )
         if reason:
             answer["choice"] = None
             if "label" in answer:
@@ -1068,7 +1125,16 @@ def run_jev(
                 for sample in state.get("dialogue_samples") or []
                 if sample.get("id")
             }
-            _reject_invalid_jev_citations(payload.get("answers") or {}, state_ids)
+            sample_contexts = {
+                str(sample.get("id")): independent_context_key(sample)
+                for sample in dossier.get("dialogue_samples") or []
+                if sample.get("id")
+            }
+            _reject_invalid_jev_citations(
+                payload.get("answers") or {},
+                state_ids,
+                sample_contexts=sample_contexts,
+            )
             elapsed_ms = round((time.perf_counter() - started) * 1000, 3)
             record = {
                 "benchmark_id": entry["benchmark_id"],

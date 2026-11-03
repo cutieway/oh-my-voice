@@ -26,7 +26,6 @@ from blueprint_pipeline.archetypes import (
 )
 from blueprint_pipeline.cache import (
     json_files,
-    object_hash,
     read_json,
     safe_component,
     write_content_addressed,
@@ -41,7 +40,6 @@ from blueprint_pipeline.config import (
     DEFAULT_JEV_KEY_ENV,
     DEFAULT_JEV_MODEL,
     DEFAULT_OUT,
-    DEFAULT_THRESHOLDS,
 )
 from blueprint_pipeline.dossier import build_dossiers, latest_dossiers
 from blueprint_pipeline.game_data import load_game_index
@@ -51,7 +49,14 @@ from blueprint_pipeline.casting import cast_identity
 from blueprint_pipeline.generator import build_individual_profile, validate_generated_profile
 from blueprint_pipeline.identity import canonical_id
 from blueprint_pipeline.inventory import build_inventory
-from blueprint_pipeline.jev import JevProvider, build_questions, compact_state
+from blueprint_pipeline.jev import (
+    GUARDRAILS,
+    JevProvider,
+    build_questions,
+    compact_state,
+    is_loopback_endpoint,
+    request_fingerprint,
+)
 from blueprint_pipeline.reporting import build_pipeline_report, review_report
 from blueprint_pipeline.review import (
     apply_manual_changes,
@@ -73,7 +78,6 @@ def _base_options(command: argparse.ArgumentParser) -> None:
     command.add_argument("--dry-run", action="store_true")
     command.add_argument("--force", action="store_true")
     command.add_argument("--resume", action=argparse.BooleanOptionalAction, default=True)
-    command.add_argument("--allow-network", action="store_true")
 
 
 def make_parser() -> argparse.ArgumentParser:
@@ -96,7 +100,11 @@ def make_parser() -> argparse.ArgumentParser:
             sub.add_argument("--model", default=DEFAULT_JEV_MODEL)
             sub.add_argument("--endpoint", default=DEFAULT_JEV_ENDPOINT)
             sub.add_argument("--api-key-env", default=DEFAULT_JEV_KEY_ENV)
-            sub.add_argument("--min-confidence", type=float)
+            sub.add_argument(
+                "--allow-remote",
+                action="store_true",
+                help="explicitly allow a non-loopback JEV endpoint",
+            )
             sub.add_argument(
                 "--input-usd-per-million-tokens",
                 type=float,
@@ -195,18 +203,25 @@ def cmd_dossiers(args) -> int:
     return 0
 
 
-def _classification_request_key(dossier: dict, provider: str, model: str, vocabulary: dict, min_confidence: float | None) -> str:
-    del min_confidence  # acceptance no longer depends on model self-reported confidence
-    policy = dict(DEFAULT_THRESHOLDS)
-    policy.update(vocabulary.get("classification", {}).get("thresholds", {}))
-    config = {
-        "provider": provider,
-        "model_requested": model,
-        "thresholds": policy,
-        "questions": build_questions(vocabulary),
-        "vocabulary_hash": object_hash(vocabulary),
-    }
-    return object_hash({"dossier_hash": dossier.get("input_hash"), "config": config})
+def _classification_request_key(
+    provider_name: str,
+    model: str,
+    vocabulary: dict,
+    endpoint: str | None,
+    state: dict | None,
+) -> str:
+    # The dossier hash is already carried by the prepared state. Hashing the
+    # exact state, questions, guardrails and endpoint prevents a threshold,
+    # prompt, sampler or endpoint change from reusing an old verdict.
+    return request_fingerprint(
+        provider=provider_name,
+        endpoint=endpoint,
+        model=model,
+        state=state,
+        questions=build_questions(vocabulary),
+        vocabulary=vocabulary,
+        guardrails=GUARDRAILS,
+    )
 
 
 def _save_profile(profile: dict, out: Path, force: bool) -> tuple[dict, Path]:
@@ -240,16 +255,6 @@ def _load_assignments(out: Path) -> dict[str, dict]:
         for row in payload.get("assignments") or []:
             latest[row.get("canonical_id")] = row
     return latest
-
-
-def _confidence(classification: dict) -> float | None:
-    values = [
-        float(answer["confidence"])
-        for answer in (classification.get("answers") or {}).values()
-        if isinstance(answer, dict) and answer.get("type") in {"choice", "score"}
-        and answer.get("confidence") is not None
-    ]
-    return min(values) if values else None
 
 
 def _route_classification(dossier: dict, classification: dict, vocabulary: dict, out: Path, force: bool) -> tuple[dict, Path | None]:
@@ -287,7 +292,7 @@ def _route_classification(dossier: dict, classification: dict, vocabulary: dict,
                 candidate, classification,
                 profile_id=profile["character"]["id"],
                 reason=(classification.get("profile_allocation") or {}).get("reason") or "individual design supported by dialogue evidence",
-                confidence=_confidence(classification),
+                confidence=None,
                 status="draft",
             )
             assignment["profile_kind"] = "character"
@@ -298,7 +303,7 @@ def _route_classification(dossier: dict, classification: dict, vocabulary: dict,
         classification,
         profile_id=archetype_assignment["profile_id"],
         reason=(classification.get("profile_allocation") or {}).get("reason") or "shared archetype preferred by evidence thresholds",
-        confidence=_confidence(classification),
+        confidence=None,
         status="needs_review" if classification.get("status") == "needs_review" else "draft",
     )
     assignment["profile_kind"] = "archetype"
@@ -307,10 +312,15 @@ def _route_classification(dossier: dict, classification: dict, vocabulary: dict,
 
 
 def cmd_classify(args) -> int:
-    if args.provider == "jev" and not args.allow_network and not args.dry_run:
-        raise ValueError("Jev classification requires --allow-network")
-    if args.min_confidence is not None and not 0 <= args.min_confidence <= 1:
-        raise ValueError("--min-confidence must be between 0 and 1")
+    if (
+        args.provider == "jev"
+        and not args.dry_run
+        and not is_loopback_endpoint(args.endpoint)
+        and not args.allow_remote
+    ):
+        raise ValueError(
+            "Remote Jev endpoints require explicit opt-in with --allow-remote"
+        )
     if args.input_usd_per_million_tokens < 0:
         raise ValueError("--input-usd-per-million-tokens must be nonnegative")
     vocabulary = blueprint_renderer.load_vocabulary(args.vocabulary)
@@ -336,26 +346,38 @@ def cmd_classify(args) -> int:
     cache_root = args.cache_dir / "classifications"
     cached = _latest_records(cache_root, "*.json")
     provider_model = args.model if args.provider == "jev" else RulesProvider(vocabulary).model_id
-    cache_keys = [
-        _classification_request_key(dossier, args.provider, provider_model, vocabulary, args.min_confidence)
+    states = [
+        compact_state(dossier, vocabulary=vocabulary)
+        if args.provider == "jev" else None
         for dossier in records
+    ]
+    cache_keys = [
+        _classification_request_key(
+            args.provider,
+            provider_model,
+            vocabulary,
+            args.endpoint if args.provider == "jev" else None,
+            state,
+        )
+        for state in states
     ]
     reusable = [
         args.resume and not args.force
         and any(value.get("cache_key") == cache_key for value, _ in cached.values())
         for cache_key in cache_keys
     ]
-    def _request_plan(dossier: dict) -> tuple[int, int]:
-        if args.provider != "jev":
+    def _request_plan(state: dict | None) -> tuple[int, int]:
+        if state is None:
             return 0, 0
         return 1, len(json.dumps({
             "model": args.model,
-            "state": compact_state(dossier, vocabulary=vocabulary),
+            "state": state,
             "questions": questions,
         }, ensure_ascii=False).encode())
 
     plans = [
-        _request_plan(item) for item, can_reuse in zip(records, reusable) if not can_reuse
+        _request_plan(state)
+        for state, can_reuse in zip(states, reusable) if not can_reuse
     ]
     request_bytes = [total for _, total in plans]
     request_count = sum(count for count, _ in plans)
@@ -383,15 +405,18 @@ def cmd_classify(args) -> int:
 
     provider = (
         JevProvider(
-            endpoint=args.endpoint, model=args.model, api_key_env=args.api_key_env,
+            endpoint=args.endpoint,
+            model=args.model,
+            api_key_env=args.api_key_env,
             vocabulary=vocabulary,
+            allow_remote=args.allow_remote,
         )
         if args.provider == "jev" else RulesProvider(vocabulary)
     )
     assignments = _load_assignments(args.out)
     completed = 0
     reused = 0
-    for dossier, cache_key in zip(records, cache_keys):
+    for dossier, state, cache_key in zip(records, states, cache_keys):
         old = next((value for value, _ in cached.values() if value.get("cache_key") == cache_key), None)
         if old and args.resume and not args.force:
             classification = old
@@ -402,6 +427,7 @@ def cmd_classify(args) -> int:
                 provider,
                 vocabulary,
                 model_id=args.model if args.provider == "jev" else None,
+                request_state=state,
             )
             classification["cache_key"] = cache_key
             path = write_content_addressed(cache_root, safe_component(classification.get("canonical_id") or "unknown"), classification)

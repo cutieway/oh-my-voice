@@ -340,7 +340,7 @@
             "null"
           ]
         },
-        "vocabulary_complexity": {
+        "lexical_complexity": {
           "type": [
             "string",
             "null"
@@ -358,7 +358,7 @@
             "null"
           ]
         },
-        "rhetorical_style": {
+        "discourse_style": {
           "type": [
             "string",
             "null"

@@ -84,34 +84,47 @@ Five questions, from `blueprints/vocabulary.json` `classification.questions`:
 | Question | Type | Feeds |
 |---|---|---|
 | `speech_style.register` | choice | `speech_style.register` |
-| `speech_style.vocabulary_complexity` | choice | `speech_style.vocabulary_complexity` |
+| `speech_style.lexical_complexity` | choice | `speech_style.lexical_complexity` |
 | `speech_style.sentence_complexity` | choice | `speech_style.sentence_complexity` |
 | `speech_style.colloquialism` | choice | `speech_style.colloquialism` |
-| `speech_style.rhetorical_style` | choice | `speech_style.rhetorical_style` |
+| `speech_style.discourse_style` | choice | `speech_style.discourse_style` |
 
 Identity, voice evidence, and individual-design decisions are deterministic
 policy, not model questions. The model is text-only: it must not measure pitch,
 timbre, resonance, speech rate, breathiness, or accent.
 
 The model sees an identity-blind `compact_state` (`jev.py`): stable sample IDs,
-the sampled text, coverage counts, evidence-sufficiency metadata, version tags,
-and guardrails. It never sees NPC names, race, clan, sex, appearance, voice
-evidence, wiki text, lore quotes, or rules-derived interpretation. Optional
-assisted measurements are excluded from the production Style request.
+the sampled text, aggregate numeric coverage and evidence-sufficiency counts,
+version tags, and guardrails. Source and sheet names stay in the application's
+provenance record, never in the request. It never sees NPC names, race, clan,
+sex, appearance, voice evidence, wiki text, lore quotes, or rules-derived
+interpretation. Optional assisted measurements are excluded from the production
+Style request.
 
-Each answer carries `choice`, `status`, `supporting_line_ids`,
-`counterexample_line_ids`, and optional `rationale`. A supported field requires
-at least two cited lines that exist in the request. A `mixed` result requires at
-least one counterexample line. Model self-reported confidence and probability
-distributions are diagnostic only; acceptance depends on valid labels, valid
-citations, and the evidence floor.
+Each answer carries `choice`, `supporting_line_ids`,
+`counterexample_line_ids`, optional `patterns`, and optional `rationale`.
+`choice` is the model's proposed classification value. The model does not
+assign status; the application derives `supported`, `provisional`,
+`insufficient_evidence`, `unresolved`, or `rejected` from the exact
+request-visible sample. `mixed` is a value, never a status. A supported field
+requires at least three cited lines that exist in the request. A `mixed` value
+requires two recurring patterns, each with at least three cited lines, unique
+across patterns, and spanning at least two independent contexts. One
+counterexample is not enough. Model self-reported confidence and probability
+distributions are retained as diagnostics only; they never become assignment
+confidence or calibrated quality.
 
 `dialogue_coverage` reports how much of the corpus the samples represent
-(`sampled_lines / unique_lines`) and sets a `warning` below 25%. Gerolt is 24 of
-1,552 lines (1.5%), and the state says so, so a confident answer cannot pretend
-to have read the whole character. If the request exceeds the byte limit,
-`compact_state` drops samples in stable ID order, then recomputes coverage and
-`sample_manifest_hash`; it never drops the evidence metadata first.
+(`sampled_lines / unique_lines`) and sets a `warning` below 25%. A 40-line
+sample of a 1,552-line character is 2.6%, and the state says so, so a confident
+answer cannot pretend to have read the whole character. If the request exceeds
+the byte limit, `compact_state` removes samples in a deterministic balanced
+order, preferring strata that can lose a sample without emptying a length
+bucket or a source/sheet context. It recomputes coverage and
+`sample_manifest_hash` after every removal and never drops the evidence
+metadata first. `budget_reduction`
+reports retained/lost length buckets, source and context counts, and explicit
+lost-count fields when the limit makes full coverage impossible.
 
 ### Style provenance
 
@@ -136,17 +149,31 @@ does not churn the reference key. `identity_prompt_hash` never includes Style.
 not the whole corpus. Floors live in `vocabulary.json`
 `speech_style.sufficiency`:
 
-| Tier | Lines | Words | Sources | Effect |
+| Tier | Lines | Words | Contexts | Effect |
 |---|---:|---:|---:|---|
 | `strong` | 40 | 600 | 3 | eligible for supported fields |
 | `supported` | 20 | 300 | 2 | eligible for supported fields |
 | `provisional` | 8 | 100 | 1 | label stored, marked `provisional`, not rendered |
 | `insufficient` | below minimum | below minimum | below minimum | `value: null`, `status: insufficient_evidence` |
 
-`rhetorical_style` carries a 1.25 multiplier because its pattern needs more
+The representative request capacity is 40 lines / 12,000 characters, so the
+`strong` tier is reachable from the classifier's actual sample rather than
+being a full-corpus target. An independent context is a canonical
+`source::sheet` pair, case-folded. If only one side is known it is used alone;
+`unknown`/`n/a`/empty placeholders never create a context, and repeated exports
+of the same pair collapse to one key. Source count remains in the audit record
+but does not substitute for context diversity.
+
+The frozen benchmark v2 dossiers keep their 24-line snapshots so the staged
+artifacts stay reproducible; those benchmark items cannot reach `strong`.
+Benchmark v3 uses the same frozen 24-line item snapshots for comparability.
+Production uses the 40-line capacity above.
+
+`discourse_style` carries a 1.25 multiplier because its pattern needs more
 evidence. A field below the floor gets no first-option, neutral, or majority
-default. `mixed` is a real outcome and is preserved; unresolved evidence yields
-`null` with `status: unresolved`.
+default. `mixed` is a real classification value and is preserved with
+`status: supported` or `provisional`; unresolved evidence yields `null` with
+`status: unresolved`.
 
 Profile allocation is deterministic: verified recorded voice routes to the
 official audio path; fewer than 50 unique dialogue lines routes to a shared
@@ -173,24 +200,28 @@ Removed from the question set on 2026-11-01:
 
 | Field | Asked? | Benchmark | In profile | In instruct |
 |---|---|---|---|---|
-| `register` | yes | staged; gold pending | supported/mixed only | yes |
-| `vocabulary_complexity` | yes | staged; gold pending | supported/mixed only | yes |
-| `sentence_complexity` | yes | staged; gold pending | supported/mixed only | yes |
-| `colloquialism` | yes | staged; gold pending | supported/mixed only | yes |
-| `rhetorical_style` | yes | staged; gold pending | supported/mixed only | yes |
+| `register` | yes | staged; gold pending | status `supported` only | yes |
+| `lexical_complexity` | yes | taxonomy v3 pilot pending | status `supported` only | yes |
+| `sentence_complexity` | yes | taxonomy v3 pilot pending | status `supported` only | yes |
+| `colloquialism` | yes | taxonomy v3 pilot pending | status `supported` only | yes |
+| `discourse_style` | yes | taxonomy v3 pilot pending; experimental | status `supported` only | yes |
 | `diction_style` | no | dropped from benchmark v2 | never | no |
 | `contraction_frequency` | no | never validated | never | no |
 | `speech_habits` | no | no | no | no |
 
-`mixed` is a real label in every production dimension. `insufficient_evidence`
-is not a label: it maps to `value: null` plus `status: insufficient_evidence`.
-The old `educated` vocabulary value is now `advanced`; the rules baseline aliases
-the old name so cached measurements still load.
+`mixed` is a real value in every production dimension, paired with status
+`supported` (or `provisional`). `insufficient_evidence` is not a label: it maps
+to `value: null` plus `status: insufficient_evidence`. Taxonomy v3 renamed
+`vocabulary_complexity` to `lexical_complexity` (`educated` -> `advanced`,
+`specialized`/`poetic` -> audit-only features) and `rhetorical_style` to
+`discourse_style`. Migration details are in
+`blueprints/migrations/style-taxonomy-v3.md`; old cached classifications are
+not silently reinterpreted.
 
 `generator.VALIDATED_STYLE_FIELDS` is the allow-list a profile is built from, and
-`generator.build_individual_profile` additionally requires `status` in
-`{supported, mixed}`. A provisional, unresolved, rejected, or insufficient field
-cannot reach `profile.speech_style`, even though it remains in
+`generator.build_individual_profile` additionally requires `status` to be
+`supported`. A provisional, unresolved, rejected, or insufficient field cannot
+reach `profile.speech_style`, even though it remains in
 `profile.speech_style_analysis` for audit.
 
 When at least one validated field is supported, `render_style()` appends one
@@ -228,7 +259,7 @@ Old cached classifications and generated profiles used a different
 | Old | New |
 |---|---|
 | `fields.<field>.confidence` | `fields.<field>.model_self_reported_confidence` (diagnostic only) |
-| `fields.<field>.value` with no status | `fields.<field>.value` + `status` in `supported`, `mixed`, `provisional`, `insufficient_evidence`, `unresolved`, `rejected` |
+| `fields.<field>.value` with no status | `fields.<field>.value` + `status` in `supported`, `provisional`, `insufficient_evidence`, `unresolved`, `rejected`; legacy `mixed` status maps to `supported` only when the value is `mixed`, otherwise `unresolved` |
 | `method` only | `method` (`jev` or `rules_baseline`) + `provider` + `model_id` |
 | no citations | `supporting_line_ids`, `counterexample_line_ids`, `support_ratio` |
 | no versions | `taxonomy_version`, `classifier_version`, `prompt_version`, `sampler_version` |
@@ -236,10 +267,16 @@ Old cached classifications and generated profiles used a different
 | no sample manifest or budget metadata | `sample_manifest_hash`, `budget_reduction` |
 | `profile_allocation.style_distinctiveness` | ignored; no replacement until archetypes carry Style labels |
 
+Speech-style schema 2.1 separates `mixed` the classification value from
+`mixed` the old decision status. New records use status `supported` (or
+`provisional`) for a mixed value; `status: mixed` is rejected. On load, a
+legacy `mixed` status is read as `supported` only when its value is `mixed`;
+any other legacy pair is read as `unresolved` rather than promoted.
+
 Old cached classifications may still contain identity questions
 (`identity.*`, `presentation`, `pitch`, and related acoustic fields) and the
 dropped `diction_style` / `contraction_frequency` dimensions; they are ignored.
-Old `educated` values read as `advanced`. Rendered Identity no longer appends
+They are not migrated into taxonomy v3 labels. Rendered Identity no longer appends
 an unconditional neutral delivery tail; re-render it rather than preserving a
 stale prompt. Old profiles remain valid; missing statuses are read as
 `supported` only when a value exists, so existing `speech_style` labels still
@@ -257,7 +294,7 @@ the reference rather than inventing them.
 
 `dialogue.build_dialogue_sample_pools` produces two independent pools:
 
-- **Representative** — 24 lines (≤6,000 chars) for the production Style
+- **Representative** — 40 lines (≤12,000 chars) for the production Style
   request. This pool carries no regex signal tags, so the classifier cannot be
   nudged by the rules baseline's own vocabulary.
 - **Targeted** — up to 24 lines (≤4,000 chars) for rare-habit verification.
@@ -317,7 +354,7 @@ python3 -m tools.blueprint_pipeline.cli dossiers \
 python3 -m tools.blueprint_pipeline.cli classify --provider jev \
   --endpoint http://127.0.0.1:8081/v1/systemone \
   --model data/models/qwen3.5-9b/Bespoke-Nimble-9B-v3-Q4_K_M.gguf \
-  --allow-network --only npc_1003075 ...
+  --only npc_1003075 ...
 
 # 4. compose: casting + style
 python3 -m tools.blueprint_pipeline.cli compose \

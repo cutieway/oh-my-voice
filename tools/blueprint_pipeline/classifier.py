@@ -11,12 +11,23 @@ from .config import (
     DIALOGUE_SAMPLER_VERSION,
     SPEECH_STYLE_SCHEMA_VERSION,
     STYLE_CLASSIFIER_VERSION,
+    STYLE_EVIDENCE_POLICY_VERSION,
     STYLE_FIELDS,
     STYLE_PROMPT_VERSION,
     STYLE_TAXONOMY_VERSION,
 )
-from .dialogue import evidence_sufficiency, sample_id, sample_manifest_hash
-from .jev import build_questions, compact_state
+from .dialogue import (
+    evidence_sufficiency,
+    independent_context_key,
+    sample_id,
+    sample_manifest_hash,
+)
+from .jev import (
+    GUARDRAILS,
+    build_questions,
+    compact_state,
+    request_fingerprint,
+)
 
 
 class ClassifierProvider(ABC):
@@ -28,14 +39,14 @@ class ClassifierProvider(ABC):
         raise NotImplementedError
 
 
-RULES_ALIASES = {"educated": "advanced"}
+
 
 
 class RulesProvider(ClassifierProvider):
     """Explicitly selected deterministic baseline. It never acts as a fallback."""
 
     name = "rules"
-    model_id = "rules-2.0"
+    model_id = "rules-3.0"
 
     def __init__(self, vocabulary: dict):
         self.vocabulary = vocabulary
@@ -48,21 +59,12 @@ class RulesProvider(ClassifierProvider):
                 raise ValueError(f"rules baseline does not answer {question_id}")
             field = question_id.split(".", 1)[1]
             value = analysis.get(field)
-            value = RULES_ALIASES.get(value, value)
             criteria = question["criteria"]
-            status = "supported" if value in criteria else "insufficient_evidence"
             if value not in criteria:
                 value = None
             answers[question_id] = {
                 "type": "choice",
                 "choice": value,
-                "status": status,
-                "probabilities": (
-                    {key: 1.0 if key == value else 0.0 for key in criteria}
-                    if value is not None else {}
-                ),
-                "confidence": 1.0 if value is not None else None,
-                "model_self_reported_confidence": None,
                 "supporting_line_ids": [],
                 "counterexample_line_ids": [],
                 "rationale": (
@@ -117,22 +119,22 @@ def _decision_for_field(
     question: dict,
     provider: ClassifierProvider,
     sample_ids: set[str],
+    sample_contexts: dict[str, str | None],
     tier: dict,
     analysis: dict,
     model_id: str,
 ) -> dict:
     value = answer.get("choice")
-    # Missing status is unresolved, not an implicit supported label.
-    status = answer.get("status") or "unresolved"
     method = "rules_baseline" if provider.name == "rules" else "jev"
+    diagnostics = answer.get("diagnostics") or {}
     base = {
         "method": method,
         "provider": provider.name,
         "model_id": model_id,
         "evidence_tier": tier["tier"],
         "evidence": tier,
-        "model_self_reported_confidence": answer.get("model_self_reported_confidence"),
-        "probabilities": answer.get("probabilities"),
+        "model_reported_status": answer.get("model_reported_status") or answer.get("status"),
+        "diagnostics": diagnostics,
     }
     if tier["tier"] == "insufficient":
         return {
@@ -141,81 +143,152 @@ def _decision_for_field(
             "status": "insufficient_evidence",
             "supporting_line_ids": [],
             "counterexample_line_ids": [],
-            "support_ratio": None,
+            "patterns": [],
+            "citation_balance": None,
             "rationale": "The sample is below the minimum evidence floor.",
             "rules_baseline_estimate": (
                 analysis.get(field) if method == "rules_baseline" else None
             ),
         }
-    if status in {"insufficient_evidence", "unresolved", "rejected"}:
-        return {
-            **base,
-            "value": None,
-            "status": status,
-            "supporting_line_ids": list(answer.get("supporting_line_ids") or []),
-            "counterexample_line_ids": list(answer.get("counterexample_line_ids") or []),
-            "support_ratio": None,
-            "rationale": answer.get("rationale") or f"Classifier abstained with status {status}.",
-        }
-    if value not in question["criteria"]:
+    if value is not None and value not in question["criteria"]:
         return {
             **base,
             "value": None,
             "status": "rejected",
             "supporting_line_ids": [],
             "counterexample_line_ids": [],
-            "support_ratio": None,
+            "patterns": [],
+            "citation_balance": None,
             "rationale": f"Classifier returned an unsupported label {value!r}.",
         }
+
+    # RulesProvider is a deterministic offline baseline. It supplies no JEV
+    # citations; its status still comes from the same request-visible tier.
+    if method == "rules_baseline":
+        if value is None:
+            return {
+                **base,
+                "value": None,
+                "status": "unresolved",
+                "supporting_line_ids": [],
+                "counterexample_line_ids": [],
+                "patterns": [],
+                "citation_balance": None,
+                "rationale": "Rules baseline produced no supported label.",
+            }
+        return {
+            **base,
+            "value": value,
+            "status": "provisional" if tier["tier"] == "provisional" else "supported",
+            "supporting_line_ids": [],
+            "counterexample_line_ids": [],
+            "patterns": [],
+            "citation_balance": None,
+            "rationale": answer.get("rationale") or "",
+        }
+
     supporting = list(answer.get("supporting_line_ids") or [])
     counterexamples = list(answer.get("counterexample_line_ids") or [])
-    if method == "jev":
-        invalid = [line_id for line_id in supporting + counterexamples if line_id not in sample_ids]
-        if invalid:
+    patterns = list(answer.get("patterns") or [])
+    pattern_ids = [
+        line_id for pattern in patterns for line_id in pattern.get("line_ids") or []
+    ]
+    cited = supporting + counterexamples + pattern_ids
+    invalid = [line_id for line_id in cited if line_id not in sample_ids]
+    if invalid:
+        return {
+            **base,
+            "value": None,
+            "status": "rejected",
+            "supporting_line_ids": supporting,
+            "counterexample_line_ids": counterexamples,
+            "patterns": patterns,
+            "citation_balance": None,
+            "rationale": f"Classifier cited line IDs absent from the request: {invalid[:3]}.",
+        }
+    if value is None:
+        return {
+            **base,
+            "value": None,
+            "status": "unresolved",
+            "supporting_line_ids": supporting,
+            "counterexample_line_ids": counterexamples,
+            "patterns": patterns,
+            "citation_balance": None,
+            "rationale": answer.get("rationale") or "Classifier abstained.",
+        }
+
+    minimum = int(question.get("min_supporting", 3))
+    if value == "mixed":
+        minimum_patterns = int(question.get("min_mixed_patterns", 2))
+        minimum_pattern_support = int(question.get("min_pattern_support", 3))
+        allowed_pattern_labels = set(question["criteria"]) - {"mixed"}
+        if len(patterns) < minimum_patterns:
+            reason = "A mixed value requires at least two recurring patterns."
+        elif any(pattern.get("label") not in allowed_pattern_labels for pattern in patterns):
+            reason = "A mixed pattern label is not valid for this field."
+        elif len(pattern_ids) != len(set(pattern_ids)):
+            reason = "A line ID cannot be cited by more than one mixed pattern."
+        elif any(len(pattern.get("line_ids") or []) < minimum_pattern_support for pattern in patterns):
+            reason = f"Each mixed pattern requires at least {minimum_pattern_support} cited lines."
+        elif set(pattern_ids) & set(counterexamples):
+            reason = "A mixed pattern line cannot also be a counterexample."
+        elif set(pattern_ids) & set(supporting):
+            reason = "A mixed pattern line cannot also be a supporting line."
+        else:
+            context_keys = {
+                sample_contexts.get(line_id) for line_id in pattern_ids
+            }
+            context_keys.discard(None)
+            if len(context_keys) < 2:
+                reason = "A mixed value requires its cited pattern lines to span at least two independent contexts."
+            else:
+                reason = None
+        if reason:
             return {
                 **base,
                 "value": None,
                 "status": "rejected",
-                "supporting_line_ids": supporting,
+                "supporting_line_ids": pattern_ids,
                 "counterexample_line_ids": counterexamples,
-                "support_ratio": None,
-                "rationale": f"Classifier cited line IDs absent from the request: {invalid[:3]}.",
+                "patterns": patterns,
+                "citation_balance": None,
+                "rationale": reason,
             }
-        if len(supporting) < 2:
-            return {
-                **base,
-                "value": None,
-                "status": "rejected",
-                "supporting_line_ids": supporting,
-                "counterexample_line_ids": counterexamples,
-                "support_ratio": None,
-                "rationale": "Supported Style fields require at least two cited lines.",
-            }
-        if status == "mixed" and not counterexamples:
-            return {
-                **base,
-                "value": None,
-                "status": "rejected",
-                "supporting_line_ids": supporting,
-                "counterexample_line_ids": [],
-                "support_ratio": None,
-                "rationale": "A mixed result requires at least one counterexample line.",
-            }
-    if tier["tier"] == "provisional":
-        status = "provisional"
-    elif status == "supported":
-        status = "supported"
+        return {
+            **base,
+            "value": "mixed",
+            "status": "provisional" if tier["tier"] == "provisional" else "supported",
+            "supporting_line_ids": pattern_ids,
+            "counterexample_line_ids": counterexamples,
+            "patterns": patterns,
+            "citation_balance": None,
+            "rationale": answer.get("rationale") or "",
+        }
+
+    if len(supporting) < minimum:
+        return {
+            **base,
+            "value": None,
+            "status": "rejected",
+            "supporting_line_ids": supporting,
+            "counterexample_line_ids": counterexamples,
+            "patterns": [],
+            "citation_balance": None,
+            "rationale": f"Supported Style fields require at least {minimum} cited lines.",
+        }
     total_citations = len(supporting) + len(counterexamples)
-    support_ratio = (
+    citation_balance = (
         round(len(supporting) / total_citations, 4) if total_citations else None
     )
     return {
         **base,
         "value": value,
-        "status": status,
+        "status": "provisional" if tier["tier"] == "provisional" else "supported",
         "supporting_line_ids": supporting,
         "counterexample_line_ids": counterexamples,
-        "support_ratio": support_ratio,
+        "patterns": [],
+        "citation_balance": citation_balance,
         "rationale": answer.get("rationale") or "",
     }
 
@@ -230,7 +303,7 @@ def _profile_allocation(
     lines = int(statistics.get("unique_line_count") or statistics.get("dialogue_count") or 0)
     supported = [
         field for field, decision in decisions.items()
-        if decision.get("status") in {"supported", "mixed"} and decision.get("value") is not None
+        if decision.get("status") == "supported" and decision.get("value") is not None
     ]
     provisional = [
         field for field, decision in decisions.items()
@@ -282,15 +355,12 @@ def classify_dossier(
     *,
     model_id: str | None = None,
     thresholds: dict | None = None,
-    min_confidence: float | None = None,
+    request_state: dict | None = None,
 ) -> dict:
     policy = dict(DEFAULT_THRESHOLDS)
     policy.update(vocabulary.get("classification", {}).get("thresholds", {}))
     if thresholds:
         policy.update(thresholds)
-    # Kept as a compatibility input; acceptance no longer depends on model
-    # self-reported confidence, which is diagnostic only.
-    del min_confidence
     identity = dossier.get("identity") or {}
     canonical_id = str(identity.get("canonical_id") or "")
     gate_reason = _identity_gate(dossier)
@@ -336,10 +406,11 @@ def classify_dossier(
     statistics = dossier.get("statistics") or {}
     samples = dossier.get("dialogue_samples") or []
     sent_state = None
-    if provider.name == "jev":
-        # The HTTP provider trims the state to the request budget. Evidence and
-        # citation validity must describe the lines the model actually saw.
-        sent_state = compact_state(dossier, vocabulary=vocabulary)
+    if request_state is not None or provider.name == "jev":
+        # One prepared state is used for sending, citations, evidence,
+        # manifest and the cache fingerprint. The caller may pass the exact
+        # state it already hashed even for the offline baseline.
+        sent_state = request_state or compact_state(dossier, vocabulary=vocabulary)
         sent_ids = {
             str(sample.get("id"))
             for sample in sent_state.get("dialogue_samples") or []
@@ -353,10 +424,18 @@ def classify_dossier(
         str(sample.get("id") or sample_id(canonical_id, sample))
         for sample in samples
     }
+    sample_contexts = {
+        str(sample.get("id") or sample_id(canonical_id, sample)): independent_context_key(sample)
+        for sample in samples
+    }
     analysis = (dossier.get("dialogue_analysis") or {}).get("interpretation") or {}
-    response = provider.classify(dossier, questions)
+    if sent_state is not None and hasattr(provider, "classify_state"):
+        response = provider.classify_state(sent_state, questions)
+    else:
+        response = provider.classify(dossier, questions)
     answers = dict(response.get("answers") or {})
     resolved_model_id = response.get("model") or model_id or provider.model_id
+    resolved_model_revision = response.get("model_revision")
 
     decisions: dict[str, dict] = {}
     decision_checks: dict[str, dict] = {}
@@ -380,10 +459,11 @@ def classify_dossier(
                 "evidence": tier,
                 "supporting_line_ids": [],
                 "counterexample_line_ids": [],
-                "support_ratio": None,
+                "patterns": [],
+                "citation_balance": None,
                 "rationale": "Classifier response omitted this field.",
-                "model_self_reported_confidence": None,
-                "probabilities": None,
+                "diagnostics": {},
+                "model_reported_status": None,
             }
         else:
             decisions[field] = _decision_for_field(
@@ -392,15 +472,16 @@ def classify_dossier(
                 question=question,
                 provider=provider,
                 sample_ids=sample_ids,
+                sample_contexts=sample_contexts,
                 tier=tier,
                 analysis=analysis,
                 model_id=resolved_model_id,
             )
         decision = decisions[field]
         decision_checks[field] = {
-            "accepted": decision["status"] in {"supported", "mixed"},
+            "accepted": decision["status"] == "supported",
             "status": decision["status"],
-            "confidence": decision.get("model_self_reported_confidence"),
+            "evidence_tier": decision["evidence_tier"],
         }
 
     usage = {
@@ -441,19 +522,53 @@ def classify_dossier(
 
     manifest = dossier.get("sample_manifest") or {}
     measurements = (dossier.get("dialogue_analysis") or {}).get("measurements") or {}
+    prepared_manifest_hash = (
+        (sent_state or {}).get("sample_manifest_hash")
+        if sent_state is not None
+        else sample_manifest_hash(
+            canonical_id, samples, corpus_hash=manifest.get("corpus_hash"),
+        )
+    )
+    provider_description = (
+        provider.describe() if hasattr(provider, "describe") else {}
+    )
+    request_key = request_fingerprint(
+        provider=provider.name,
+        endpoint=provider_description.get("endpoint"),
+        model=model_id or provider.model_id,
+        state=sent_state,
+        questions=questions,
+        vocabulary=vocabulary,
+        guardrails=GUARDRAILS,
+    )
+    response_key = request_fingerprint(
+        provider=provider.name,
+        endpoint=provider_description.get("endpoint"),
+        model=model_id or provider.model_id,
+        state=sent_state,
+        questions=questions,
+        vocabulary=vocabulary,
+        resolved_model_revision=resolved_model_revision,
+        guardrails=GUARDRAILS,
+    )
     analysis_record = {
         "schema_version": SPEECH_STYLE_SCHEMA_VERSION,
         "method": provider.name,
         "provider": provider.name,
         "model_id": resolved_model_id,
+        "model_revision": resolved_model_revision,
+        "endpoint": provider_description.get("endpoint"),
+        "endpoint_class": provider_description.get("endpoint_class"),
+        "request_fingerprint": request_key,
+        "response_fingerprint": response_key,
         "taxonomy_version": STYLE_TAXONOMY_VERSION,
         "classifier_version": STYLE_CLASSIFIER_VERSION,
         "prompt_version": STYLE_PROMPT_VERSION,
+        "schema_version_contract": SPEECH_STYLE_SCHEMA_VERSION,
         "sampler_version": DIALOGUE_SAMPLER_VERSION,
+        "evidence_policy_version": STYLE_EVIDENCE_POLICY_VERSION,
         "corpus_hash": dossier.get("input_hash"),
-        "sample_manifest_hash": sample_manifest_hash(
-            canonical_id, samples, corpus_hash=manifest.get("corpus_hash"),
-        ),
+        "sample_manifest_hash": prepared_manifest_hash,
         "budget_reduction": (
             (sent_state or {}).get("budget_reduction")
         ),
@@ -463,10 +578,15 @@ def classify_dossier(
             "unique_words": measurements.get("word_count"),
             "sampled_lines": len(samples),
             "sampled_words": sum(len(str(sample.get("text") or "").split()) for sample in samples),
-            "sources_covered": len({str(sample.get("source") or "unknown") for sample in samples}),
-            "contexts_covered": len({
-                (str(sample.get("source") or "unknown"), str(sample.get("sheet") or "unknown"))
+            "sources_covered": len({
+                key.split("::", 1)[0]
                 for sample in samples
+                if (key := independent_context_key(sample)) is not None
+                and not key.startswith("*::")
+            }),
+            "contexts_covered": len({
+                key for sample in samples
+                if (key := independent_context_key(sample)) is not None
             }),
             "evidence_tier": evidence_sufficiency(
                 statistics, samples, vocabulary=vocabulary,
@@ -482,18 +602,50 @@ def classify_dossier(
                 "method": "rules_baseline_evidence_collection",
                 "note": "Not a production Style field; retained for habit verification only.",
             },
+            "lexical_features": {
+                "taxonomy": analysis.get("lexical_features") or {},
+                "contraction_frequency": (
+                    "high" if float(measurements.get("contraction_rate_per_word") or 0) >= 0.055
+                    else "moderate" if float(measurements.get("contraction_rate_per_word") or 0) >= 0.02
+                    else "low"
+                ),
+                "contraction_rate_per_word": measurements.get("contraction_rate_per_word"),
+                "average_word_length": measurements.get("average_word_length"),
+                "vocabulary_diversity": measurements.get("vocabulary_diversity"),
+                "honorific_and_form_of_address_count": measurements.get("honorific_and_form_of_address_count"),
+                "question_count": measurements.get("question_count"),
+                "exclamation_count": measurements.get("exclamation_count"),
+                "method": "deterministic_text_counts",
+                "note": "Audit-only. Not a production Style field and never rendered into the voice instruction.",
+            },
+            "verbal_habits": {
+                "value": analysis.get("verbal_habits") or analysis.get("speech_habits") or [],
+                "method": "deterministic_text_counts",
+                "note": "Candidate textual mannerisms; a human must confirm they are recurring and character-specific.",
+            },
         },
+        "validated": False,
+        "validation_note": "Experimental until human gold benchmark and VoiceDesign A/B gates pass.",
     }
     configuration = {
         "config_version": CLASSIFIER_CONFIG_VERSION,
         "thresholds": policy,
         "question_count": len(questions),
         "model_requested": model_id or provider.model_id,
+        "model_revision": resolved_model_revision,
+        "endpoint": provider_description.get("endpoint"),
+        "endpoint_class": provider_description.get("endpoint_class"),
+        "request_fingerprint": request_key,
+        "state_hash": object_hash(sent_state) if sent_state is not None else None,
+        "questions_hash": object_hash(questions),
+        "guardrails_hash": object_hash(list(GUARDRAILS)),
         "vocabulary_hash": object_hash(vocabulary),
         "taxonomy_version": STYLE_TAXONOMY_VERSION,
         "classifier_version": STYLE_CLASSIFIER_VERSION,
         "prompt_version": STYLE_PROMPT_VERSION,
+        "schema_version_contract": SPEECH_STYLE_SCHEMA_VERSION,
         "sampler_version": DIALOGUE_SAMPLER_VERSION,
+        "evidence_policy_version": STYLE_EVIDENCE_POLICY_VERSION,
     }
     return {
         "schema_version": "2.0",
