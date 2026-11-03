@@ -42,37 +42,35 @@ carries race, clan, sex, body type and height before any model call.
 
 ## Casting rules
 
-`casting.cast_identity(identity)` returns one decision per acoustic field:
-`{"value", "rule", "facts"}`. The rule name is written into the profile evidence
-as `casting:<rule>`, so the audition page shows exactly why each value exists.
+`casting.cast_identity(identity)` returns one decision per identity field:
+`{"value", "rule", "evidence_type", "rule_version", "facts", ...}`. The rule
+name and provenance are written into the profile, so the audition page shows
+exactly why each value exists.
 
 | Field | Rule | Basis |
 |---|---|---|
-| `presentation` | `sex_presentation` | `ENpcBase.Sex` |
-| `perceived_age` | `body_type_age` / none | `BodyType` 4 → `young_teen`, 3 → `mature` (both `creative_selection`); otherwise `adult` as evidence level **`default`**, not a game fact |
-| `pitch` | `sex_race_pitch_ladder`, or `sex_race_age_pitch_ladder` when an age band is known | sex base band shifted by race (Roegadyn/Hrothgar down, Lalafell up) and, when an age band exists, by age |
-| `pitch_range` | `age_race_range` | children wide, elders narrow, else race default with a stable per-NPC choice |
-| `resonance` | `age_race_resonance` | race placement, overridden by age for children/elders |
-| `timbre_primary` | `race_timbre_family` | each race has a three-value family (Hyur clear/warm/bright, Roegadyn rich/dark/gravelly, Elezen silvery/bright/clear, ...); the NPC picks one |
-| `articulation` | `race_or_stable_articulation` | race default, else a stable per-NPC pick among relaxed/rounded/fluid |
-| `speaking_pace` | `age_pace` | child brisk, elder slow, else a stable per-NPC pick among measured/moderate |
-| `intonation` | `race_or_stable_intonation` | race default, else a stable per-NPC pick among natural/restrained/expressive |
-| `accent` | project default | `General British`, light |
+| `model_gender` | `enpcbase_gender_as_recorded` | `ENpcBase.Gender` (0 male, 1 female), only for a recognized playable-race model; unknown, non-playable, and zero-default rows are null |
+| `presentation` | `sex_to_voice_presentation` | deterministic male → masculine / female → feminine convention |
+| `race`, `clan`, `non_playable_race` | `*_as_recorded` | `ENpcBase.Race` / `Tribe`; unknown values warn and normalize to null while the raw value stays in `facts` |
+| `perceived_age` | `body_type_*` | BodyType 3 → elderly (game fact), 4 → youthful (game fact), 1 → adult only as a labelled project convention, otherwise null |
+| `pitch` | `gender_base_pitch` / `body_type_child_pitch` | sex baseline (`low_mid` male, `mid_high` female) and the BodyType 4 child override; race, height and muscle never shift it |
+| `pitch_range` | none | null unless measured from audio |
+| `perceived_vocal_size`, `vocal_weight` | `race_morphology_prior` | weak documented race/clan/gender morphology priors, recorded as `prior_score` / `casting_strength` |
+| `timbre_primary`, `timbre_secondary`, `timbre_preferences` | `size_weight_timbre_preference` | optional preferences derived only from the size/weight axes |
+| `resonance`, `articulation`, `speaking_pace`, `intonation` | none | null unless measured from verified audio; customization sliders are not vocal anatomy |
+| `distinctive_traits` | none | null unless explicit approved evidence exists |
 
-Stable per-NPC choices hash `canonical_id`, so two Hyur Midlander men differ
-in timbre, range, articulation, intonation and pace while every rebuild of the
-same NPC is identical. `Height` is exported but not
-used: its `0` value means "no override" and its scale differs per race.
+Morphology priors are creative casting scores, not probabilities, confidence, or
+measured acoustics. They use the values in `casting.py` (`RACE_MORPHOLOGY_PRIOR`,
+`CLAN_MORPHOLOGY_PRIOR`, `RACE_GENDER_MORPHOLOGY_PRIOR`) and remain
+configurable/versioned. No race forces chest/head/forward/throaty resonance,
+timbre, pitch range, pace or accent. Hrothgar Helion/Lost are preserved as
+social-status labels with no biological or acoustic effect.
 
-All casting evidence is `creative_selection` — it describes the voice being
-created, never the original actor — except values that are pure project
-fallbacks (`perceived_age: adult` without an age fact, `accent`), which are
-recorded as `default`. A profile may still be overridden by hand.
-
-`BodyType` only bounds age at the extremes. Measured 2026-11-01 against 12 NPCs
-with documented ages, `BodyType` alone matched 2/11 and `bt1 → adult` was wrong for
-Merlwyb, Momodi, Hildibrand, Godbert and Kan-E-Senna — so `bt1` produces the
-`default` band rather than an age claim.
+`has_recorded_voice` is separate from casting. An SCD/container reference or a
+`has_se_voice_reference` flag is only a raw game fact; acoustic routing changes
+only when verified speaker-to-audio evidence exists. Verified game facts are
+never removed from the record.
 
 ## What the model is asked
 

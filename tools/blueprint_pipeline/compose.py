@@ -21,6 +21,10 @@ def compose_archetype_style_profile(
     routes generic NPCs to a shared archetype profile; it is not used here.
     """
     del archetype
+    identity = dossier.get("identity") or {}
     return build_individual_profile(
-        dossier, classification, cast_identity(dossier.get("identity") or {}), vocabulary,
+        dossier,
+        classification,
+        cast_identity(identity, npc_id=identity.get("npc_id")),
+        vocabulary,
     )

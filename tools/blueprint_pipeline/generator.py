@@ -8,6 +8,7 @@ except ModuleNotFoundError:
     from tools import blueprint as blueprint_renderer
 
 from .cache import object_hash
+from .casting import RULES_VERSION
 from .evidence import creative_evidence, make_evidence
 
 
@@ -21,6 +22,96 @@ VALIDATED_STYLE_FIELDS = (
     "rhetorical_style",
 )
 
+IDENTITY_FIELDS = (
+    "presentation",
+    "perceived_age",
+    "perceived_vocal_size",
+    "vocal_weight",
+    "pitch",
+    "pitch_range",
+    "timbre_primary",
+    "timbre_secondary",
+    "timbre_preferences",
+    "resonance",
+    "articulation",
+    "speaking_pace",
+    "intonation",
+    "distinctive_traits",
+)
+
+PROVENANCE_KEYS = (
+    "rule",
+    "evidence_type",
+    "rule_version",
+    "prior_score",
+    "casting_strength",
+    "facts",
+    "factors",
+    "rationale",
+    "sources",
+    "source",
+    "quote",
+    "note",
+)
+
+_EVIDENCE_LEVEL = {
+    "game_fact": "explicit",
+    "lore_fact": "supported_inference",
+    "explicit_audio": "explicit",
+    "creative_selection": "creative_selection",
+    "default": "default",
+    "unknown": "unknown",
+}
+
+
+def _evidence_level(decision: dict) -> str:
+    level = decision.get("level")
+    if level:
+        return str(level)
+    return _EVIDENCE_LEVEL.get(str(decision.get("evidence_type")), "creative_selection")
+
+
+def _provenance(decision: dict) -> dict:
+    record = {
+        key: decision[key]
+        for key in PROVENANCE_KEYS
+        if decision.get(key) not in (None, [], {})
+    }
+    record.setdefault("rule_version", decision.get("rule_version") or RULES_VERSION)
+    record.setdefault("evidence_type", decision.get("evidence_type") or "unknown")
+    return record
+
+
+def _evidence_note(field: str, decision: dict) -> str:
+    rule = decision.get("rule") or "no_rule"
+    evidence_type = decision.get("evidence_type") or "unknown"
+    rule_version = decision.get("rule_version") or RULES_VERSION
+    parts = [
+        decision.get("rationale")
+        or decision.get("note")
+        or f"Deterministic casting rule `{rule}` applied to verified game facts.",
+        f"rule={rule}",
+        f"evidence_type={evidence_type}",
+        f"rule_version={rule_version}",
+    ]
+    if decision.get("prior_score") is not None:
+        parts.append(f"prior_score={decision['prior_score']}")
+    if decision.get("casting_strength") is not None:
+        parts.append(f"casting_strength={decision['casting_strength']}")
+    facts = decision.get("facts") or {}
+    compact_facts = {
+        key: value for key, value in facts.items()
+        if value not in (None, "", [], {})
+    }
+    if compact_facts:
+        parts.append(
+            "facts=" + ", ".join(f"{key}={value}" for key, value in compact_facts.items())
+        )
+    sources = decision.get("sources") or ([decision["source"]] if decision.get("source") else [])
+    if sources:
+        parts.append("sources=" + "; ".join(str(source) for source in sources))
+    return f"{field}: " + " | ".join(parts)
+
 
 def build_individual_profile(
     dossier: dict,
@@ -28,54 +119,47 @@ def build_individual_profile(
     casting: dict,
     vocabulary: dict,
 ) -> dict:
-    """Compose an NPC profile: acoustics cast from game data, style classified."""
+    """Compose an NPC profile: casting decisions plus independently classified style.
+
+    Every non-null identity field carries both a blueprint evidence record and a
+    structured provenance record. Null fields are omitted from the prompt, never
+    replaced with arbitrary defaults.
+    """
     identity_context = dossier.get("identity") or {}
-    identity = {}
-    evidence = {}
-    identity_fields = (
-        "presentation", "perceived_age", "pitch", "pitch_range", "timbre_primary",
-        "timbre_secondary", "resonance", "articulation", "speaking_pace",
-        "intonation", "distinctive_traits",
-    )
-    for field in identity_fields:
+    identity: dict[str, Any] = {}
+    evidence: dict[str, dict] = {}
+    provenance: dict[str, dict] = {}
+
+    for field in IDENTITY_FIELDS:
         decision = casting.get(field) or {}
         value = decision.get("value")
         identity[field] = value
         if value is None or value == []:
             continue
-        level = decision.get("level") or "creative_selection"
-        rule = decision.get("rule")
-        facts = decision.get("facts") or {}
-        note = decision.get("note") or (
-            "Deterministic casting rule "
-            f"`{rule}` applied to game facts "
-            f"({', '.join(f'{key}={value}' for key, value in facts.items() if value not in (None, ''))}). "
-            "This describes the synthetic voice we create, not the original actor."
-        )
+        level = _evidence_level(decision)
+        source = decision.get("source")
+        quote = decision.get("quote")
+        if level in {"explicit", "supported_inference"} and not (source and quote):
+            level = "creative_selection"
+        note = _evidence_note(field, decision)
         if level == "default":
-            evidence[field] = make_evidence(field, "default", note=note)
+            evidence[field] = make_evidence(field, "default", note=note, source=source)
+        elif level in {"explicit", "supported_inference"}:
+            evidence[field] = make_evidence(
+                field,
+                level,
+                source_type=str(decision.get("evidence_type") or "game_fact"),
+                source=source,
+                quote=quote,
+                note=note,
+            )
         else:
             evidence[field] = creative_evidence(
-                field, note, source=f"casting:{rule or 'rule'}"
-            )
-
-    defaults = vocabulary["classification"]["defaults"]
-    # Required identity fields always get a deliberate value. The defaults are
-    # explicit creative fallbacks and are not inferred from physical metadata.
-    for field in ("presentation", "pitch", "timbre_primary", "articulation", "speaking_pace", "intonation"):
-        if identity.get(field) is None:
-            identity[field] = defaults[field]
-            evidence[field] = creative_evidence(
                 field,
-                "Project fallback for a synthetic cast; not a claim about an original recording.",
+                note,
+                source=source or f"casting:{decision.get('rule') or 'rule'}",
             )
-    accent_default = vocabulary["identity"]["accent"]["default"]
-    identity["accent"] = dict(accent_default)
-    evidence["accent"] = make_evidence(
-        "accent",
-        "default",
-        note="Project-wide accent fallback; replace only with source-backed evidence or an explicit creative decision.",
-    )
+        provenance[field] = _provenance(decision)
 
     speech_style = {}
     for field, decision in (classification.get("speech_style") or {}).items():
@@ -112,7 +196,7 @@ def build_individual_profile(
         if answer.get("type") in {"choice", "score"} and answer.get("confidence") is not None
     ]
     confidence = min(confidence_values) if confidence_values else None
-    source_url = f"game:ENpcResident/{identity_context.get('npc_id')}"
+    source_url = f"game:ENpcBase/{identity_context.get('npc_id')}"
     profile = {
         "schema_version": vocabulary["schema_version"],
         "profile_version": 1,
@@ -129,6 +213,11 @@ def build_individual_profile(
             "applies_to": identity_context.get("speaker_ids", []),
         },
         "identity": identity,
+        "identity_provenance": provenance,
+        "casting": {
+            "rules_version": RULES_VERSION,
+            "warnings": casting.get("warnings") or [],
+        },
         "speech_style": speech_style or None,
         "speech_style_analysis": analysis,
         "classification": {
@@ -153,7 +242,7 @@ def build_individual_profile(
             "identity_approved": False,
             "no_drift": False,
         },
-        "notes": "Synthetic voice draft. Acoustic fields are creative casting decisions unless their field evidence includes a source quote. Human audition and approval are still required.",
+        "notes": "Synthetic voice draft. Acoustic fields are creative casting decisions unless their evidence includes a verified audio source. Null optional fields are omitted from the prompt; human audition and approval are still required.",
     }
     return profile
 

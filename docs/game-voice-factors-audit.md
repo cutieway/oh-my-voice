@@ -103,14 +103,15 @@ They map onto existing fields without adding dead keys:
 
 | Proposed field | Current field | Status |
 |---|---|---|
-| Gender / voice presentation | `presentation` | masculine/feminine for unvoiced; null for voiced |
-| Perceived age | `perceived_age` | BodyType 3/4 only |
-| Pitch | `pitch` | weighted inference |
+| Gender / voice presentation | `presentation` | masculine/feminine for unvoiced; null for voiced or invalid gender |
+| Perceived age | `perceived_age` | BodyType 3 elderly, 4 youthful, 1 adult convention |
+| Pitch | `pitch` | gender baseline plus BodyType 4 child override |
 | Vocal register | `pitch` | the register band is the pitch value |
-| Timbre | `timbre_primary` | weighted inference |
+| Timbre | `timbre_primary` | optional size/weight preference |
 | Vocal texture | `timbre_primary` | husky/gravelly/smooth/etc. |
-| Resonance | `resonance` | weighted inference |
-| Vocal fullness | `resonance` | deep/chest/light bands |
+| Resonance | `resonance` | null unless measured from audio |
+| Vocal size | `perceived_vocal_size` | compact/average/large morphology prior |
+| Vocal fullness | `vocal_weight` | light/balanced/full morphology prior |
 | Accent | `accent` | null: no homeland/language data |
 | Articulation | `articulation` | null: jaw/mouth are indices, not anatomy |
 | Voice personality | `intonation` / `speaking_pace` | null: style/personality, not game identity |
@@ -126,18 +127,23 @@ control for one of them.
    body type, normalized height, scale, raw appearance fields. Sex is only a
    fact for a playable-race model; non-playable races, beasts, and monsters may
    have no gender, and their default byte is null.
-2. **Voiced NPCs skip appearance inference entirely.** If the identity has a
-   recorded voice reference or audio evidence, every voice-identity field is
-   null with rule `voiced_use_audio_evidence`. The audio pipeline fills them.
-3. **Unvoiced NPCs use weighted inference**, not single hard rules:
-   - presentation: playable-race sex → masculine/feminine, with a low confidence;
-   - perceived age: only `BodyType` 3 → mature, 4 → young_teen;
-   - pitch: weighted vote over sex, perceived age, race, height;
-   - pitch range: weighted vote over age and race;
-   - timbre: weighted vote over race, muscle tone, height, perceived age;
-   - resonance: weighted vote over race, muscle tone, height, perceived age.
-4. **Muscle tone never affects pitch.** It contributes to timbre and resonance
-   only, matching the perceptual evidence in the proposal.
+2. **Only verified audio evidence skips appearance inference.** An SCD
+   container reference or `has_se_voice_reference` flag is a raw game fact, not
+   proof that this NPC's own lines are recorded. With verified
+   speaker-to-audio evidence, acoustic fields are null with rule
+   `voiced_use_audio_evidence`; the audio pipeline fills them.
+3. **Unvoiced NPCs use deterministic pitch plus weak creative priors**:
+   - presentation: playable-race sex → masculine/feminine convention;
+   - perceived age: `BodyType` 3 → elderly, 4 → youthful, 1 → adult only as a
+     labelled project convention;
+   - pitch: gender baseline, with the BodyType 4 child override;
+   - pitch range: null unless measured from audio;
+   - perceived vocal size / vocal weight: weak documented race/clan/gender
+     morphology priors with `prior_score` / `casting_strength`;
+   - timbre preferences: optional, derived only from size/weight;
+   - resonance: null unless measured from audio.
+4. **Muscle tone never affects pitch or resonance.** Where `BustOrTone1` is
+   confirmed muscle, it is a weak vocal-weight cue only.
 5. **No articulation, pace, intonation, accent, or personality inference**:
    those need audio or dialogue/style evidence, not physical metadata.
 6. **Null means omit.** A missing field is not replaced by an adult, mid, or
@@ -146,15 +152,16 @@ control for one of them.
 ## Remaining risks
 
 - `BodyType 4` is used by children and young teenagers. Mapping it to
-  `young_teen` is conservative but still a model-level guess.
-- `BodyType 3` is the aged model; `mature` is chosen over `elderly` because the
-  model does not establish a numeric age.
+  `youthful` avoids asserting a precise age while still raising the pitch prior.
+- `BodyType 3` is the aged model; `elderly` follows the exporter name and does
+  not force a pitch change.
 - Height `50` is both the average slider value and the default for many NPCs.
-  A height of 50 is therefore weak evidence and carries low weight.
+  It is recorded but not used until race+gender ranges are validated.
 - Height `255` is the export fallback, not a tall character. Zero-default rows
-  also carry height `0`; casting only uses height when a playable race exists.
+  also carry height `0`; casting keeps `height_raw = 0` but normalizes `height`
+  to null for `body_type = 0`, because that zero is absent model data.
 - Scale is a model transform (0.1–8.0), not a body-size measurement; it is
-  recorded but not used in the weighted inference.
+  recorded but not used in casting.
 - `BustOrTone1` semantics are model-dependent. The race/sex gate is deliberately
   conservative; expanding it requires a model-level source or audition data.
 - The 5,389 zero-default rows must not be read as male adults. Their sex, race,

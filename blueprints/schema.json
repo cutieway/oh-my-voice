@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://oh-my-voice/blueprints/schema.json",
-  "title": "Qwen3-TTS voice blueprint, schema 1.1",
+  "title": "Qwen3-TTS voice blueprint, schema 1.2",
   "description": "Structural schema for synthetic voice profiles. Acoustic identity, speech style, classification provenance, and human approval are separate. tools/blueprint.py checks vocabulary membership, evidence, prompt rules, and lifecycle invariants.",
   "type": "object",
   "additionalProperties": false,
@@ -85,60 +85,94 @@
         }
       }
     },
-    "identity": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "presentation",
-        "pitch",
-        "timbre_primary",
-        "articulation",
-        "speaking_pace",
-        "intonation"
-      ],
-      "properties": {
-        "presentation": {
-          "type": "string"
-        },
-        "perceived_age": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "pitch": {
-          "type": "string"
-        },
-        "pitch_range": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "timbre_primary": {
-          "type": "string"
-        },
-        "timbre_secondary": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "resonance": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "articulation": {
-          "type": "string"
-        },
-        "speaking_pace": {
-          "type": "string"
-        },
-        "intonation": {
-          "type": "string"
-        },
+  "identity": {
+   "type": "object",
+   "additionalProperties": false,
+   "description": "Acoustic design fields. Every field is optional: unknown facts stay null and the renderer omits them.",
+   "properties": {
+    "presentation": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "perceived_age": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "perceived_vocal_size": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "vocal_weight": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "pitch": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "pitch_range": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "timbre_primary": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "timbre_secondary": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "timbre_preferences": {
+     "type": [
+      "array",
+      "null"
+     ],
+     "items": {
+      "type": "string"
+     },
+     "maxItems": 2,
+     "uniqueItems": true
+    },
+    "resonance": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "articulation": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "speaking_pace": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "intonation": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
         "accent": {
           "type": [
             "object",
@@ -159,7 +193,10 @@
           }
         },
         "distinctive_traits": {
-          "type": "array",
+          "type": [
+            "array",
+            "null"
+          ],
           "items": {
             "type": "string"
           },
@@ -208,6 +245,56 @@
           },
           "field": {
             "type": "string"
+          }
+        }
+      }
+    },
+    "identity_provenance": {
+      "type": "object",
+      "description": "Field -> structured casting provenance: rule, evidence type, rule version, prior score/strength, input facts, rationale and sources.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "rule": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "evidence_type": {
+            "enum": [
+              "game_fact",
+              "lore_fact",
+              "explicit_audio",
+              "creative_selection",
+              "default",
+              "unknown"
+            ]
+          },
+          "rule_version": {
+            "type": "string"
+          },
+          "prior_score": {
+            "type": "number"
+          },
+          "casting_strength": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "casting": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "rules_version": {
+          "type": "string"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "object"
           }
         }
       }
@@ -463,6 +550,30 @@
           "type": "number"
         },
         "pinned_on": {
+          "type": "string"
+        },
+        "reference_transcript": {
+          "type": "string"
+        },
+        "reference_transcript_sha256": {
+          "type": "string"
+        },
+        "design_model": {
+          "type": "string"
+        },
+        "identity_prompt_hash": {
+          "type": "string"
+        },
+        "style_profile_hash": {
+          "type": "string"
+        },
+        "combined_instruct_hash": {
+          "type": "string"
+        },
+        "casting_rules_version": {
+          "type": "string"
+        },
+        "renderer_version": {
           "type": "string"
         }
       }

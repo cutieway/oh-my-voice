@@ -29,7 +29,7 @@
   "identity": {
     "presentation": {
       "select": "one",
-      "required": true,
+      "required": false,
       "question": "How is the voice heard, not what the character's body or gender identity is?",
       "values": {
         "masculine": {
@@ -66,6 +66,10 @@
         "child": {
           "render": "child",
           "range": "5-12"
+        },
+        "youthful": {
+          "render": "youthful",
+          "range": "childlike or young-teen impression; no precise age claim"
         },
         "young_teen": {
           "render": "young teenage",
@@ -112,7 +116,7 @@
     },
     "pitch": {
       "select": "one",
-      "required": true,
+      "required": false,
       "values": {
         "very_low": {
           "render": "very low"
@@ -157,9 +161,51 @@
         "Optional. Omit when unsure; the model defaults to a natural range."
       ]
     },
+    "perceived_vocal_size": {
+      "select": "one",
+      "required": false,
+      "question": "How large does the voice sound?",
+      "values": {
+        "compact": {
+          "render": "compact"
+        },
+        "average": {
+          "render": "average-sized"
+        },
+        "large": {
+          "render": "larger-sounding"
+        }
+      },
+      "notes": [
+        "A deliberate synthetic-casting descriptor, not a measured formant scale or vocal-tract length.",
+        "Derived only from documented race/clan morphology; never from height sliders until race+gender ranges are validated.",
+        "Omit when there is no recognized morphology prior."
+      ]
+    },
+    "vocal_weight": {
+      "select": "one",
+      "required": false,
+      "question": "How full or light does the voice sound?",
+      "values": {
+        "light": {
+          "render": "lighter-sounding"
+        },
+        "balanced": {
+          "render": "balanced"
+        },
+        "full": {
+          "render": "full-bodied"
+        }
+      },
+      "notes": [
+        "A deliberate synthetic-casting descriptor, not vocal-fold mass, loudness, or a measured acoustic property.",
+        "Muscle tone may add at most a very weak weight cue for validated model combinations.",
+        "Omit when there is no recognized morphology prior."
+      ]
+    },
     "timbre_primary": {
       "select": "one",
-      "required": true,
+      "required": false,
       "question": "What is the dominant texture of the voice?",
       "values": {
         "clear": {
@@ -258,6 +304,17 @@
         "Preferred secondary use is a light modifier: slightly breathy, slightly nasal, a hint of reediness."
       ]
     },
+    "timbre_preferences": {
+      "select": "range",
+      "min": 0,
+      "max": 2,
+      "required": false,
+      "ref": "timbre_primary",
+      "notes": [
+        "Audit list of the supported timbre preferences behind timbre_primary and timbre_secondary.",
+        "Derived weakly from perceived vocal size/weight; never a forced race timbre or resonance placement."
+      ]
+    },
     "resonance": {
       "select": "optional_one",
       "required": false,
@@ -302,7 +359,7 @@
     },
     "articulation": {
       "select": "one",
-      "required": true,
+      "required": false,
       "values": {
         "crisp": {
           "render": "crisp"
@@ -354,7 +411,7 @@
     },
     "speaking_pace": {
       "select": "one",
-      "required": true,
+      "required": false,
       "values": {
         "very_slow": {
           "render": "very slow"
@@ -385,7 +442,7 @@
     },
     "intonation": {
       "select": "one",
-      "required": true,
+      "required": false,
       "values": {
         "flat": {
           "render": "flat"
@@ -543,22 +600,39 @@
   },
   "render": {
     "identity_word_target": [
-      25,
+      2,
       48
     ],
-    "identity_template": "{article} {age}{presentation} voice{pitch}{pitch_range}. It has a {timbre}{timbre_secondary}{resonance}. Speech is {articulation} with {intonation} intonation, at a {pace} pace{accent}.{traits} Neutral conversational delivery for game dialogue.",
-    "identity_parts": {
-      "age": "{age} ",
+    "identity_v2": {
+      "head": "{article} {head} voice",
+      "empty_head": "A voice",
       "pitch": " with a {pitch} pitch",
       "pitch_range": ", over a {pitch_range}",
-      "timbre": "{timbre} timbre",
-      "timbre_secondary": " with a hint of {timbre_secondary}",
-      "resonance": " and {resonance}",
-      "accent": ", carrying a {strength} {accent} accent",
-      "traits": " Notable vocal traits: {traits}."
+      "size_weight": " with {article} {size_weight} quality",
+      "size_weight_and": " and {article} {size_weight} quality",
+      "timbre_sentence": "It has {descriptors}.",
+      "timbre": "{article} {timbre} timbre",
+      "timbre_secondary": "a hint of {timbre_secondary} texture",
+      "speech_sentence": "Speech has {descriptors}.",
+      "articulation": "{articulation} articulation",
+      "intonation": "{intonation} intonation",
+      "pace": "a {pace} pace",
+      "accent_sentence": "It carries a {strength} {accent} accent.",
+      "traits_sentence": "Notable vocal traits: {traits}.",
+      "tail": "Neutral conversational delivery for game dialogue."
     },
-    "style_template": " The wording is {register} in register, {vocabulary_complexity} in vocabulary, {sentence_complexity} in sentence structure, {colloquialism} in colloquialism, and {rhetorical_style} in rhetorical shape.",
-    "style_note": "Appended by default when a profile carries speech_style; describes performed wording, and is never merged into the identity sentence.",
+    "style_v2": {
+      "min_dimensions": 1,
+      "template": " The wording is {dimensions}.",
+      "parts": {
+        "register": "{value} in register",
+        "vocabulary_complexity": "{value} in vocabulary",
+        "sentence_complexity": "{value} in sentence structure",
+        "colloquialism": "{value} in colloquialism",
+        "rhetorical_style": "{value} in rhetorical shape"
+      }
+    },
+    "style_note": "Appended by default when a profile carries speech_style; each supported dimension renders independently, so one missing JEV field does not suppress the clause. It describes performed wording and is never merged into the identity sentence.",
     "article_rule": "Use 'An' when the rendered phrase starts with a vowel sound (adult, ageless, ancient, elderly, androgynous), otherwise 'A'.",
     "banned_identity_words": [
       "happy",
@@ -885,16 +959,19 @@
   "classification": {
     "provider_contract": "RulesProvider works offline. JevProvider sends one structured System One request for independent decisions. Jev output selects from this vocabulary and never provides factual source citations.",
     "defaults": {
-      "presentation": "neutral",
+      "presentation": null,
       "perceived_age": null,
-      "pitch": "mid",
+      "perceived_vocal_size": null,
+      "vocal_weight": null,
+      "pitch": null,
       "pitch_range": null,
-      "timbre_primary": "clear",
+      "timbre_primary": null,
       "timbre_secondary": null,
+      "timbre_preferences": null,
       "resonance": null,
-      "articulation": "relaxed",
-      "speaking_pace": "moderate",
-      "intonation": "natural",
+      "articulation": null,
+      "speaking_pace": null,
+      "intonation": null,
       "distinctive_traits": []
     },
     "questions": {

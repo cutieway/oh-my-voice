@@ -1,0 +1,315 @@
+{
+  "npc_id": 1000533,
+  "note": "Same NPC, dossier and classification. Before is the archived archetype-composed profile; after is deterministic casting v2.",
+  "before": {
+    "identity": {
+      "accent": {
+        "profile": "general_british_english",
+        "strength": "light"
+      },
+      "articulation": "relaxed",
+      "distinctive_traits": [],
+      "intonation": "natural",
+      "perceived_age": null,
+      "pitch": "mid",
+      "pitch_range": null,
+      "presentation": "masculine",
+      "resonance": null,
+      "speaking_pace": "moderate",
+      "timbre_primary": "clear",
+      "timbre_secondary": null
+    },
+    "evidence": {
+      "accent": {
+        "field": "accent",
+        "level": "default",
+        "note": "Project-wide accent fallback; this is not source evidence."
+      },
+      "articulation": {
+        "field": "articulation",
+        "level": "creative_selection",
+        "note": "Project-designed synthetic archetype; this is not a claim about an original recording."
+      },
+      "intonation": {
+        "field": "intonation",
+        "level": "creative_selection",
+        "note": "Project-designed synthetic archetype; this is not a claim about an original recording."
+      },
+      "pitch": {
+        "field": "pitch",
+        "level": "creative_selection",
+        "note": "Project-designed synthetic archetype; this is not a claim about an original recording."
+      },
+      "presentation": {
+        "field": "presentation",
+        "level": "creative_selection",
+        "note": "Project-designed synthetic archetype; this is not a claim about an original recording."
+      },
+      "speaking_pace": {
+        "field": "speaking_pace",
+        "level": "creative_selection",
+        "note": "Project-designed synthetic archetype; this is not a claim about an original recording."
+      },
+      "timbre_primary": {
+        "field": "timbre_primary",
+        "level": "creative_selection",
+        "note": "Project-designed synthetic archetype; this is not a claim about an original recording."
+      }
+    },
+    "identity_prompt": "not re-rendered: the archived profile predates schema 1.2 and carries the removed accent field"
+  },
+  "after": {
+    "facts": {
+      "model_gender": "male",
+      "model_gender_reported": "male",
+      "gender_ignored_reason": null,
+      "race": "Hyur",
+      "race_reported": "Hyur",
+      "clan": "Midlander",
+      "clan_reported": "Midlander",
+      "non_playable_race": null,
+      "non_playable_race_reported": null,
+      "body_type": 1,
+      "body_type_reported": 1,
+      "height": 50,
+      "height_raw": 50,
+      "scale": null,
+      "scale_raw": null,
+      "bust_or_tone_1": null,
+      "extra_feature_2_or_bust": null,
+      "muscle_tone": null,
+      "bust": null,
+      "jaw": null,
+      "mouth": null,
+      "face": null,
+      "nose": null,
+      "eye_shape": null,
+      "eyebrows": null,
+      "hair_style": null,
+      "skin_color": null,
+      "has_scd": false,
+      "has_se_voice_reference": false,
+      "voice_evidence_verified": false,
+      "has_recorded_voice": false
+    },
+    "character": {
+      "id": "npc_1000533",
+      "name": "wandering minstrel",
+      "npc_id": 1000533,
+      "race": "Hyur",
+      "clan": "Midlander",
+      "sex": "male",
+      "role": null,
+      "source_url": "game:ENpcBase/1000533",
+      "applies_to": [
+        "wanderingminstrel"
+      ]
+    },
+    "identity": {
+      "presentation": "masculine",
+      "perceived_age": "adult",
+      "perceived_vocal_size": "average",
+      "vocal_weight": "balanced",
+      "pitch": "low_mid",
+      "pitch_range": null,
+      "timbre_primary": null,
+      "timbre_secondary": null,
+      "timbre_preferences": null,
+      "resonance": null,
+      "articulation": null,
+      "speaking_pace": null,
+      "intonation": null,
+      "distinctive_traits": null
+    },
+    "identity_provenance": {
+      "presentation": {
+        "rule": "sex_to_voice_presentation",
+        "evidence_type": "creative_selection",
+        "rule_version": "2.0",
+        "facts": {
+          "model_gender": "male",
+          "model_gender_reported": "male"
+        },
+        "rationale": "Deterministic project mapping from valid model gender to synthetic vocal presentation; it is not a measured property."
+      },
+      "perceived_age": {
+        "rule": "body_type_standard_adult_convention",
+        "evidence_type": "creative_selection",
+        "rule_version": "2.0",
+        "facts": {
+          "body_type": 1,
+          "body_type_reported": 1
+        },
+        "rationale": "BodyType 1 is the ordinary/default model; adult-appearing is a project casting convention, not chronological age.",
+        "note": "BodyType 1 has no chronological-age fact; Lalafell age is never inferred from race."
+      },
+      "perceived_vocal_size": {
+        "rule": "race_morphology_prior",
+        "evidence_type": "creative_selection",
+        "rule_version": "2.0",
+        "prior_score": 0.0,
+        "casting_strength": 0.0,
+        "facts": {
+          "race": "Hyur",
+          "clan": "Midlander",
+          "model_gender": "male",
+          "body_type": 1,
+          "muscle_tone": null,
+          "height_raw": 50
+        },
+        "factors": [
+          {
+            "name": "race_morphology_prior",
+            "value": "Hyur",
+            "size_delta": 0.0,
+            "weight_delta": 0.0,
+            "rationale": "Official lore describes Hyur as average in height and build; use as the baseline.",
+            "sources": [
+              "https://na.finalfantasyxiv.com/a_realm_reborn/world/races"
+            ]
+          }
+        ],
+        "rationale": "Perceived vocal size is a creative prior from documented race/clan morphology; it is not a measured formant scale, pitch, or official voice fact.",
+        "sources": [
+          "https://na.finalfantasyxiv.com/a_realm_reborn/world/races"
+        ],
+        "note": "Height is preserved as a raw slider but not used until validated race+gender ranges exist."
+      },
+      "vocal_weight": {
+        "rule": "race_morphology_prior",
+        "evidence_type": "creative_selection",
+        "rule_version": "2.0",
+        "prior_score": 0.0,
+        "casting_strength": 0.0,
+        "facts": {
+          "race": "Hyur",
+          "clan": "Midlander",
+          "model_gender": "male",
+          "body_type": 1,
+          "muscle_tone": null,
+          "height_raw": 50
+        },
+        "factors": [
+          {
+            "name": "race_morphology_prior",
+            "value": "Hyur",
+            "size_delta": 0.0,
+            "weight_delta": 0.0,
+            "rationale": "Official lore describes Hyur as average in height and build; use as the baseline.",
+            "sources": [
+              "https://na.finalfantasyxiv.com/a_realm_reborn/world/races"
+            ]
+          }
+        ],
+        "rationale": "Perceived vocal weight is a creative prior from documented morphology and, where valid, a weak muscle-tone cue. It is not vocal-fold mass, loudness, or a measured acoustic property.",
+        "sources": [
+          "https://na.finalfantasyxiv.com/a_realm_reborn/world/races"
+        ]
+      },
+      "pitch": {
+        "rule": "gender_base_pitch",
+        "evidence_type": "creative_selection",
+        "rule_version": "2.0",
+        "facts": {
+          "model_gender": "male",
+          "body_type": 1,
+          "body_type_reported": 1
+        },
+        "rationale": "A deliberate synthetic pitch convention from model gender; it is not a measured acoustic pitch."
+      }
+    },
+    "speech_style": {
+      "colloquialism": "low",
+      "register": "formal",
+      "rhetorical_style": "inquisitive",
+      "sentence_complexity": "complex",
+      "vocabulary_complexity": "ordinary"
+    },
+    "speech_style_analysis": {
+      "source": "blueprint_pipeline.classify",
+      "provider": "jev",
+      "model_id": "data/models/qwen3.5-9b/Bespoke-Nimble-9B-v3-Q4_K_M.gguf",
+      "classification": "npc_1000533",
+      "dossier_hash": "bcabf3510a6f09f79d587530d49d706d11e9747cb61175f9106242ee1eb32b02",
+      "fields": {
+        "colloquialism": {
+          "value": "low",
+          "confidence": 0.4758307938805256,
+          "probabilities": {
+            "high": 0.03768272528792599,
+            "low": 0.6505538625870171,
+            "moderate": 0.3117634121250569
+          },
+          "method": "deterministic_dialogue_analysis"
+        },
+        "register": {
+          "value": "formal",
+          "confidence": 0.732127930340546,
+          "probabilities": {
+            "conversational": 0.028283955367204603,
+            "formal": 0.8214186202270307,
+            "neutral": 0.15029742440576474
+          },
+          "method": "jev_choice"
+        },
+        "rhetorical_style": {
+          "value": "inquisitive",
+          "confidence": 0.7337156931238438,
+          "probabilities": {
+            "direct": 0.002490246618255325,
+            "emphatic": 0.09265691487984308,
+            "flowing": 0.04156741136345119,
+            "fragmented": 0.0010864587047010898,
+            "inquisitive": 0.7780964109365365,
+            "measured": 0.08410255749721282
+          },
+          "method": "jev_choice"
+        },
+        "sentence_complexity": {
+          "value": "complex",
+          "confidence": 0.3707392193240804,
+          "probabilities": {
+            "complex": 0.40262592217613125,
+            "mixed": 0.5804928128827203,
+            "simple": 0.016881264941148527
+          },
+          "method": "deterministic_dialogue_analysis"
+        },
+        "vocabulary_complexity": {
+          "value": "ordinary",
+          "confidence": 0.3387931765627238,
+          "probabilities": {
+            "educated": 0.15251705075367794,
+            "ordinary": 0.255487426018626,
+            "plain": 0.11564993135428714,
+            "poetic": 0.4710345412501791,
+            "specialized": 0.00531105062322984
+          },
+          "method": "deterministic_dialogue_analysis"
+        }
+      }
+    },
+    "identity_prompt": "An adult masculine voice with a low-mid pitch and an average-sized, balanced quality. Neutral conversational delivery for game dialogue.",
+    "style_prompt": " The wording is formal in register, ordinary in vocabulary, complex in sentence structure, low in colloquialism, and inquisitive in rhetorical shape.",
+    "instruct": "An adult masculine voice with a low-mid pitch and an average-sized, balanced quality. Neutral conversational delivery for game dialogue. The wording is formal in register, ordinary in vocabulary, complex in sentence structure, low in colloquialism, and inquisitive in rhetorical shape.",
+    "hashes": {
+      "identity_prompt_hash": "1c7643aa1ce0bba564f12aa765dc564f4b1f95cd2432a5f24a9426889fb121dc",
+      "style_profile_hash": "e68fe47b6e685ef97bf4ed7b48a7745050aebe362b810fb2c65103a1002e7914",
+      "combined_instruct_hash": "fb9de57b665dadd17921debd2fe98012c757d7340bff42a4011c0dc33cc1ac8c",
+      "seed": 20271723,
+      "casting_rules_version": "2.0",
+      "renderer_version": "2.0"
+    },
+    "warnings": []
+  },
+  "hash_separation_check": {
+    "same_identity": true,
+    "style_hash_changed": true,
+    "combined_hash_changed": true,
+    "identity_prompt_hash": "1c7643aa1ce0bba564f12aa765dc564f4b1f95cd2432a5f24a9426889fb121dc",
+    "style_profile_hash_before": "e68fe47b6e685ef97bf4ed7b48a7745050aebe362b810fb2c65103a1002e7914",
+    "style_profile_hash_after": "d119cb9352e8239eae9dec5c14b9c52886941e4b3c386bb4fa8d7c9bebf2461a",
+    "combined_instruct_hash_before": "fb9de57b665dadd17921debd2fe98012c757d7340bff42a4011c0dc33cc1ac8c",
+    "combined_instruct_hash_after": "dd90f7569101ad42c6ec5be74fc81438b0aa6898ad45c008db9a74a892ca33a4"
+  }
+}

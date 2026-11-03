@@ -268,7 +268,13 @@ def _route_classification(dossier: dict, classification: dict, vocabulary: dict,
     profile_path = None
     if classification.get("distinctive") and classification.get("status") == "ready_for_audition":
         profile = build_individual_profile(
-            dossier, classification, cast_identity(dossier.get("identity") or {}), vocabulary,
+            dossier,
+            classification,
+            cast_identity(
+                dossier.get("identity") or {},
+                npc_id=(dossier.get("identity") or {}).get("npc_id"),
+            ),
+            vocabulary,
         )
         errors = validate_generated_profile(profile, vocabulary)
         if errors:
@@ -572,12 +578,21 @@ def cmd_review(args) -> int:
     elif args.action == "audition":
         if not args.reference or args.seed is None:
             raise ValueError("review audition requires --reference WAV and --seed")
+        vocabulary = blueprint_renderer.load_vocabulary(args.vocabulary)
+        plan = blueprint_renderer.build_plan(profile, vocabulary)
         profile = mark_auditioned(
             profile,
             reference_file=args.reference,
             design_seed=args.seed,
             by=args.by,
             note=args.note,
+            reference_transcript=plan["reference"]["text"],
+            design_model=plan["design_model"],
+            identity_prompt_hash=plan["identity_prompt_hash"],
+            style_profile_hash=plan["style_profile_hash"],
+            combined_instruct_hash=plan["combined_instruct_hash"],
+            casting_rules_version=plan["casting_rules_version"],
+            renderer_version=plan["renderer_version"],
         )
     elif args.action == "approve":
         profile = approve_profile(profile, by=args.by)

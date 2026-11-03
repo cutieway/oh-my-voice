@@ -45,6 +45,13 @@ def mark_auditioned(
     design_seed: int,
     by: str,
     note: str | None = None,
+    reference_transcript: str | None = None,
+    design_model: str | None = None,
+    identity_prompt_hash: str | None = None,
+    style_profile_hash: str | None = None,
+    combined_instruct_hash: str | None = None,
+    casting_rules_version: str | None = None,
+    renderer_version: str | None = None,
 ) -> dict:
     if not by.strip():
         raise ReviewError("auditioning reviewer name is required")
@@ -58,6 +65,21 @@ def mark_auditioned(
         "ref_seconds": details["seconds"],
         "pinned_on": timestamp,
     }
+    if reference_transcript is not None:
+        new_pin["reference_transcript"] = reference_transcript
+        new_pin["reference_transcript_sha256"] = hashlib.sha256(
+            reference_transcript.encode("utf-8")
+        ).hexdigest()
+    for key, value in (
+        ("design_model", design_model),
+        ("identity_prompt_hash", identity_prompt_hash),
+        ("style_profile_hash", style_profile_hash),
+        ("combined_instruct_hash", combined_instruct_hash),
+        ("casting_rules_version", casting_rules_version),
+        ("renderer_version", renderer_version),
+    ):
+        if value is not None:
+            new_pin[key] = value
     updated["reference_pin"] = new_pin
     updated.setdefault("lifecycle", {})["status"] = "auditioned"
     updated["lifecycle"]["approval"] = None

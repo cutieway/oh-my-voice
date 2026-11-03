@@ -438,7 +438,7 @@ class SpeechStyleBenchmarkProtocolTests(unittest.TestCase):
         self.assertEqual(metrics["excluded_count"], 2)
         self.assertAlmostEqual(metrics["mean_absolute_label_distance"], 0.5)
 
-    def test_sex_is_a_hard_two_value_fact_with_null_fallback(self):
+    def test_sex_is_a_two_value_model_fact_with_null_fallback(self):
         cases = (
             ("male", "male", "masculine"),
             ("female", "female", "feminine"),
@@ -448,24 +448,23 @@ class SpeechStyleBenchmarkProtocolTests(unittest.TestCase):
         for raw, sex, presentation in cases:
             with self.subTest(raw=raw):
                 decisions = cast_identity(
-                    {"canonical_id": "npc_1", "sex": raw, "race": "Hyur"}
+                    {"canonical_id": "npc_1", "sex": raw, "race": "Hyur", "body_type": 1}
                 )
                 self.assertEqual(normalize_sex(raw), sex)
-                self.assertEqual(decisions["sex"]["value"], sex)
+                self.assertEqual(decisions["model_gender"]["value"], sex)
                 self.assertEqual(decisions["presentation"]["value"], presentation)
-        with self.assertRaises(ValueError):
-            normalize_sex("androgynous")
-        with self.assertRaises(ValueError):
-            normalize_sex("neutral")
+        self.assertIsNone(normalize_sex("androgynous"))
+        self.assertIsNone(normalize_sex("neutral"))
 
     def test_zero_default_body_type_has_no_sex_fact(self):
         decisions = cast_identity({
-            "canonical_id": "npc_1", "sex": "male", "body_type": 0, "height": 0,
+            "canonical_id": "npc_1", "sex": "male", "race": "Hyur", "body_type": 0, "height": 0,
         })
-        self.assertIsNone(decisions["sex"]["value"])
-        self.assertEqual(decisions["pitch"]["facts"]["sex_reported"], "male")
-        self.assertIsNone(decisions["pitch"]["facts"]["sex"])
-        self.assertIsNone(decisions["pitch"]["facts"]["height"])
+        self.assertIsNone(decisions["model_gender"]["value"])
+        self.assertEqual(decisions["facts"]["model_gender_reported"], "male")
+        self.assertEqual(decisions["facts"]["gender_ignored_reason"], "zero/default BodyType row")
+        self.assertIsNone(decisions["facts"]["height"])
+        self.assertEqual(decisions["facts"]["height_raw"], 0)
 
     def test_race_and_clan_facts_are_as_recorded(self):
         decisions = cast_identity(
@@ -477,22 +476,25 @@ class SpeechStyleBenchmarkProtocolTests(unittest.TestCase):
         monster = cast_identity({
             "canonical_id": "npc_1", "sex": "male", "race": "Amalj'aa",
         })
-        self.assertIsNone(monster["sex"]["value"])
+        self.assertIsNone(monster["model_gender"]["value"])
         self.assertIsNone(monster["race"]["value"])
         self.assertEqual(monster["non_playable_race"]["value"], "Amalj'aa")
-        with self.assertRaises(ValueError):
-            cast_identity(
-                {"canonical_id": "npc_1", "sex": "male", "race": "Hyur", "clan": "Raen"}
-            )
-        with self.assertRaises(ValueError):
-            cast_identity({"canonical_id": "npc_1", "sex": "male", "clan": "Midlander"})
+        mismatch = cast_identity(
+            {"canonical_id": "npc_1", "sex": "male", "race": "Hyur", "clan": "Raen"}
+        )
+        self.assertIsNone(mismatch["clan"]["value"])
+        self.assertTrue(any(row["field"] == "clan" for row in mismatch["warnings"]))
+        orphan = cast_identity({"canonical_id": "npc_1", "sex": "male", "clan": "Midlander"})
+        self.assertIsNone(orphan["clan"]["value"])
+        self.assertTrue(any(row["field"] == "clan" for row in orphan["warnings"]))
 
     def test_unavailable_identity_fields_are_null_not_defaulted(self):
         empty = cast_identity({"canonical_id": "npc_1"})
         for field in (
-            "presentation", "perceived_age", "pitch", "pitch_range",
-            "timbre_primary", "timbre_secondary", "resonance", "articulation",
-            "speaking_pace", "intonation", "distinctive_traits",
+            "presentation", "perceived_age", "perceived_vocal_size", "vocal_weight",
+            "pitch", "pitch_range", "timbre_primary", "timbre_secondary",
+            "timbre_preferences", "resonance", "articulation", "speaking_pace",
+            "intonation", "distinctive_traits",
         ):
             with self.subTest(field=field):
                 self.assertIsNone(empty[field]["value"])
@@ -502,18 +504,20 @@ class SpeechStyleBenchmarkProtocolTests(unittest.TestCase):
         )
         self.assertEqual(male["presentation"]["value"], "masculine")
         self.assertEqual(male["pitch"]["value"], "low_mid")
-        self.assertEqual(male["timbre_primary"]["value"], "clear")
-        self.assertEqual(male["resonance"]["value"], "rounded")
-        self.assertTrue(male["pitch"]["factors"])
+        self.assertIsNone(male["timbre_primary"]["value"])
+        self.assertIsNone(male["resonance"]["value"])
+        self.assertEqual(male["perceived_vocal_size"]["value"], "average")
+        self.assertEqual(male["vocal_weight"]["value"], "balanced")
 
         aged = cast_identity(
             {"canonical_id": "npc_1", "sex": "male", "race": "Hyur", "body_type": 3}
         )
-        self.assertEqual(aged["perceived_age"]["value"], "mature")
+        self.assertEqual(aged["perceived_age"]["value"], "elderly")
 
         voiced = cast_identity(
             {"canonical_id": "npc_1", "sex": "female", "race": "Hyur",
-             "has_se_voice_reference": True}
+             "has_se_voice_reference": True,
+             "voice_evidence": {"verified": True, "source": "audio:test"}}
         )
         for field in ("presentation", "perceived_age", "pitch", "pitch_range",
                       "timbre_primary", "resonance"):
@@ -521,44 +525,45 @@ class SpeechStyleBenchmarkProtocolTests(unittest.TestCase):
                 self.assertIsNone(voiced[field]["value"])
                 self.assertEqual(voiced[field]["rule"], "voiced_use_audio_evidence")
 
-    def test_muscle_tone_is_gated_by_race_and_sex(self):
+    def test_muscle_tone_and_bust_follow_the_export_field_semantics(self):
         male_hyur = cast_identity({
             "canonical_id": "npc_1", "sex": "male", "race": "Hyur",
             "body_type": 1, "bust_or_tone_1": 100,
         })
-        self.assertEqual(male_hyur["pitch"]["facts"]["muscle_tone"], 100)
-        self.assertNotIn(
-            "muscle_tone", {factor["name"] for factor in male_hyur["pitch"]["factors"]}
-        )
+        self.assertEqual(male_hyur["facts"]["muscle_tone"], 100)
+        self.assertIsNone(male_hyur["facts"]["bust"])
         female_hyur = cast_identity({
             "canonical_id": "npc_1", "sex": "female", "race": "Hyur",
-            "body_type": 1, "bust_or_tone_1": 100,
+            "body_type": 1, "bust_or_tone_1": 100, "extra_feature_2_or_bust": 40,
         })
-        self.assertIsNone(female_hyur["pitch"]["facts"]["muscle_tone"])
-        self.assertEqual(female_hyur["pitch"]["facts"]["bust"], 100)
+        self.assertEqual(female_hyur["facts"]["muscle_tone"], 100)
+        self.assertEqual(female_hyur["facts"]["bust"], 40)
         male_elezen = cast_identity({
             "canonical_id": "npc_1", "sex": "male", "race": "Elezen",
             "body_type": 1, "bust_or_tone_1": 100,
         })
-        self.assertIsNone(male_elezen["pitch"]["facts"]["muscle_tone"])
+        self.assertIsNone(male_elezen["facts"]["muscle_tone"])
+        self.assertIsNone(male_elezen["facts"]["bust"])
 
-    def test_height_fallback_is_not_a_fact(self):
+    def test_height_fallback_is_not_a_fact_and_never_moves_pitch(self):
         decisions = cast_identity({
             "canonical_id": "npc_1", "sex": "male", "race": "Hyur", "height": 255,
         })
-        self.assertIsNone(decisions["pitch"]["facts"]["height"])
-        self.assertNotIn(
-            "height", {factor["name"] for factor in decisions["pitch"]["factors"]}
-        )
+        self.assertIsNone(decisions["facts"]["height"])
+        self.assertEqual(decisions["pitch"]["value"], "low_mid")
         short = cast_identity({
             "canonical_id": "npc_1", "sex": "male", "race": "Hyur", "height": 0,
         })
-        self.assertEqual(short["pitch"]["facts"]["height"], 0)
+        tall = cast_identity({
+            "canonical_id": "npc_1", "sex": "male", "race": "Hyur", "height": 100,
+        })
+        self.assertEqual(short["facts"]["height"], 0)
+        self.assertEqual(short["pitch"]["value"], tall["pitch"]["value"])
 
     def test_audio_evidence_overrides_appearance(self):
         decisions = cast_identity({
             "canonical_id": "npc_1", "sex": "male", "race": "Roegadyn",
-            "voice_evidence": {"pitch": "high", "confidence": 0.9},
+            "voice_evidence": {"pitch": "high", "verified": True, "source": "audio:test"},
         })
         self.assertEqual(decisions["pitch"]["value"], "high")
         self.assertEqual(decisions["pitch"]["rule"], "audio_evidence")
@@ -587,7 +592,9 @@ class SpeechStyleBenchmarkProtocolTests(unittest.TestCase):
         self.assertEqual(profile["identity"]["presentation"], "masculine")
         self.assertEqual(profile["identity"]["pitch"], "low_mid")
         self.assertEqual(profile["evidence"]["pitch"]["level"], "creative_selection")
-        self.assertIn("weighted vote", profile["evidence"]["pitch"]["note"].lower())
+        self.assertIn("gender_base_pitch", profile["evidence"]["pitch"]["note"])
+        self.assertEqual(profile["identity_provenance"]["pitch"]["rule"], "gender_base_pitch")
+        self.assertEqual(profile["identity_provenance"]["pitch"]["rule_version"], "2.0")
         self.assertIsNone(profile["identity"]["perceived_age"])
         self.assertNotIn("perceived_age", profile["evidence"])
         self.assertEqual(set(profile["speech_style"]), {"register", "sentence_complexity"})
@@ -803,3 +810,279 @@ class CompactStateAndSampleTests(unittest.TestCase):
         lines = [{"voice_line_id": f"l{i}", "text": "Yes, there were many of them."} for i in range(10)]
         rates = analyze_dialogue(lines, self.vocab)["measurements"]["signal_line_rates"]
         self.assertEqual(rates["dialect_lines"], 0.0)
+
+
+class VoiceCastingSpecTests(unittest.TestCase):
+    """Spec-mandated casting, provenance and prompt-hash behaviour."""
+
+    def setUp(self):
+        self.vocab = blueprint.load_vocabulary()
+
+    @staticmethod
+    def cast(**identity):
+        identity.setdefault("canonical_id", "npc_1")
+        return cast_identity(identity)
+
+    def test_body_type_1_is_adult_appearing_convention(self):
+        decisions = self.cast(sex="male", race="Hyur", body_type=1)
+        age = decisions["perceived_age"]
+        self.assertEqual(age["value"], "adult")
+        self.assertEqual(age["evidence_type"], "creative_selection")
+        self.assertEqual(age["rule"], "body_type_standard_adult_convention")
+        self.assertEqual(decisions["pitch"]["value"], "low_mid")
+
+    def test_body_type_3_is_elderly_without_pitch_shift(self):
+        decisions = self.cast(sex="male", race="Hyur", body_type=3)
+        self.assertEqual(decisions["perceived_age"]["value"], "elderly")
+        self.assertEqual(decisions["perceived_age"]["evidence_type"], "game_fact")
+        self.assertEqual(decisions["pitch"]["value"], "low_mid")
+
+    def test_body_type_4_is_youthful_with_higher_pitch(self):
+        male = self.cast(sex="male", race="Hyur", body_type=4)
+        female = self.cast(sex="female", race="Hyur", body_type=4)
+        self.assertEqual(male["perceived_age"]["value"], "youthful")
+        self.assertNotEqual(male["perceived_age"]["value"], "young_teen")
+        self.assertEqual(male["pitch"]["value"], "mid_high")
+        self.assertEqual(female["pitch"]["value"], "high")
+
+    def test_lalafell_body_type_1_stays_adult_and_never_child_pitch(self):
+        decisions = self.cast(sex="female", race="Lalafell", body_type=1)
+        self.assertEqual(decisions["perceived_age"]["value"], "adult")
+        self.assertEqual(decisions["pitch"]["value"], "mid_high")
+        no_model = self.cast(sex="female", race="Lalafell")
+        self.assertIsNone(no_model["perceived_age"]["value"])
+
+    def test_elezen_lifespan_lore_never_changes_perceived_age(self):
+        young = self.cast(sex="male", race="Elezen", body_type=1)
+        older = self.cast(sex="male", race="Elezen", body_type=3)
+        self.assertEqual(young["perceived_age"]["value"], "adult")
+        self.assertEqual(older["perceived_age"]["value"], "elderly")
+
+    def test_female_hyur_and_roegadyn_split_muscle_from_bust(self):
+        for race in ("Hyur", "Roegadyn"):
+            with self.subTest(race=race):
+                decisions = self.cast(
+                    sex="female", race=race, body_type=1,
+                    bust_or_tone_1=35, extra_feature_2_or_bust=82,
+                )
+                self.assertEqual(decisions["facts"]["muscle_tone"], 35)
+                self.assertEqual(decisions["facts"]["bust"], 82)
+
+    def test_au_ra_muscle_and_bust_follow_model_gender(self):
+        male = self.cast(sex="male", race="Au Ra", clan="Xaela", bust_or_tone_1=90)
+        female = self.cast(sex="female", race="Au Ra", clan="Raen", bust_or_tone_1=90)
+        self.assertEqual(male["facts"]["muscle_tone"], 90)
+        self.assertIsNone(male["facts"]["bust"])
+        self.assertIsNone(female["facts"]["muscle_tone"])
+        self.assertEqual(female["facts"]["bust"], 90)
+
+    def test_other_races_do_not_gain_unmapped_muscle(self):
+        for race, sex in (("Miqo'te", "male"), ("Elezen", "male"), ("Viera", "male")):
+            with self.subTest(race=race, sex=sex):
+                decisions = self.cast(sex=sex, race=race, bust_or_tone_1=100)
+                self.assertIsNone(decisions["facts"]["muscle_tone"])
+                self.assertIsNone(decisions["facts"]["bust"])
+        female_miqote = self.cast(sex="female", race="Miqo'te", bust_or_tone_1=60)
+        self.assertEqual(female_miqote["facts"]["bust"], 60)
+        self.assertIsNone(female_miqote["facts"]["muscle_tone"])
+
+    def test_highlander_adds_a_small_morphology_modifier(self):
+        midlander = self.cast(sex="male", race="Hyur", clan="Midlander")
+        highlander = self.cast(sex="male", race="Hyur", clan="Highlander")
+        self.assertEqual(highlander["pitch"]["value"], midlander["pitch"]["value"])
+        self.assertGreater(
+            highlander["perceived_vocal_size"]["prior_score"],
+            midlander["perceived_vocal_size"]["prior_score"],
+        )
+        self.assertGreater(
+            highlander["vocal_weight"]["prior_score"],
+            midlander["vocal_weight"]["prior_score"],
+        )
+
+    def test_roegadyn_gets_strongest_prior_without_forced_stereotypes(self):
+        roegadyn = self.cast(sex="male", race="Roegadyn", clan="Sea Wolf")
+        lalafell = self.cast(sex="male", race="Lalafell", clan="Plainsfolk")
+        self.assertGreater(
+            roegadyn["perceived_vocal_size"]["prior_score"],
+            lalafell["perceived_vocal_size"]["prior_score"],
+        )
+        self.assertEqual(roegadyn["pitch"]["value"], "low_mid")
+        self.assertIsNone(roegadyn["resonance"]["value"])
+        self.assertNotIn(roegadyn["timbre_primary"]["value"], {"booming", "raspy"})
+
+    def test_viera_and_miqote_clans_have_no_acoustic_difference(self):
+        for race, clans in (
+            ("Viera", ("Rava", "Veena")),
+            ("Miqo'te", ("Seeker of the Sun", "Keeper of the Moon")),
+        ):
+            first, second = (
+                self.cast(sex="female", race=race, clan=clan) for clan in clans
+            )
+            for field in (
+                "presentation", "perceived_vocal_size", "vocal_weight", "pitch",
+                "pitch_range", "timbre_primary", "timbre_secondary", "resonance",
+            ):
+                with self.subTest(race=race, field=field):
+                    self.assertEqual(first[field]["value"], second[field]["value"])
+
+    def test_hrothgar_social_labels_do_not_change_morphology(self):
+        helion = self.cast(sex="male", race="Hrothgar", clan="Helions")
+        lost = self.cast(sex="male", race="Hrothgar", clan="The Lost")
+        self.assertEqual(helion["facts"]["clan_semantics"], "social_status")
+        self.assertEqual(lost["facts"]["clan_semantics"], "social_status")
+        for field in ("perceived_vocal_size", "vocal_weight", "pitch"):
+            self.assertEqual(helion[field]["value"], lost[field]["value"])
+
+    def test_unknown_race_clan_and_body_type_warn_and_keep_raw_values(self):
+        decisions = self.cast(
+            sex="male", race="Newrace", clan="Newclan", body_type=9,
+        )
+        self.assertIsNone(decisions["race"]["value"])
+        self.assertIsNone(decisions["clan"]["value"])
+        self.assertIsNone(decisions["facts"]["body_type"])
+        self.assertEqual(decisions["facts"]["race_reported"], "Newrace")
+        self.assertEqual(decisions["facts"]["clan_reported"], "Newclan")
+        self.assertEqual(decisions["facts"]["body_type_reported"], 9)
+        warned = {row["field"] for row in decisions["warnings"]}
+        self.assertEqual(warned, {"race", "clan", "body_type"})
+        self.assertIsNone(decisions["perceived_age"]["value"])
+        self.assertIsNone(decisions["pitch"]["value"])
+
+    def test_zero_height_and_muscle_are_values_not_missing(self):
+        decisions = self.cast(
+            sex="male", race="Hyur", body_type=1, height=0, bust_or_tone_1=0,
+        )
+        self.assertEqual(decisions["facts"]["height"], 0)
+        self.assertEqual(decisions["facts"]["muscle_tone"], 0)
+        self.assertIsNotNone(decisions["vocal_weight"]["value"])
+        factor = next(
+            factor for factor in decisions["vocal_weight"]["factors"]
+            if factor["name"] == "muscle_tone_prior"
+        )
+        self.assertEqual(factor["value"], 0)
+        self.assertLess(factor["weight_delta"], 0)
+
+    def test_height_never_changes_pitch(self):
+        short = self.cast(sex="male", race="Hyur", body_type=1, height=0)
+        tall = self.cast(sex="male", race="Hyur", body_type=1, height=100)
+        self.assertEqual(short["pitch"]["value"], tall["pitch"]["value"])
+
+    def test_no_race_sets_pitch_range(self):
+        for race in ("Hyur", "Elezen", "Lalafell", "Miqo'te", "Roegadyn", "Au Ra", "Viera", "Hrothgar"):
+            with self.subTest(race=race):
+                self.assertIsNone(self.cast(sex="male", race=race)["pitch_range"]["value"])
+
+    def test_morphology_fields_carry_prior_score_strength_and_sources(self):
+        decisions = self.cast(sex="male", race="Roegadyn", clan="Sea Wolf", bust_or_tone_1=82)
+        for field in ("perceived_vocal_size", "vocal_weight"):
+            record = decisions[field]
+            self.assertEqual(record["evidence_type"], "creative_selection")
+            self.assertEqual(record["rule_version"], "2.0")
+            self.assertIn("prior_score", record)
+            self.assertIn("casting_strength", record)
+            self.assertTrue(record["sources"])
+            self.assertNotIn("confidence", record)
+        self.assertEqual(decisions["vocal_weight"]["value"], "full")
+        self.assertEqual(decisions["perceived_vocal_size"]["value"], "large")
+        self.assertIn("muscle_tone", decisions["vocal_weight"]["facts"])
+
+    def test_unverified_container_reference_does_not_route_to_audio(self):
+        decisions = self.cast(
+            sex="female", race="Hyur", body_type=1, has_se_voice_reference=True,
+        )
+        self.assertFalse(decisions["facts"]["has_recorded_voice"])
+        self.assertEqual(decisions["pitch"]["value"], "mid_high")
+
+    def test_voiced_npc_keeps_game_facts_while_acoustics_route_to_audio(self):
+        decisions = self.cast(
+            sex="female", race="Hyur", clan="Midlander", body_type=3,
+            has_se_voice_reference=True,
+            voice_evidence={"verified": True, "source": "audio:test", "pitch": "high"},
+        )
+        self.assertTrue(decisions["facts"]["has_recorded_voice"])
+        self.assertEqual(decisions["facts"]["race"], "Hyur")
+        self.assertEqual(decisions["facts"]["clan"], "Midlander")
+        self.assertEqual(decisions["facts"]["body_type"], 3)
+        self.assertEqual(decisions["pitch"]["value"], "high")
+        self.assertEqual(decisions["pitch"]["evidence_type"], "explicit_audio")
+        self.assertIsNone(decisions["perceived_age"]["value"])
+
+    def test_style_change_does_not_change_identity_hash(self):
+        profile = self._profile()
+        before = blueprint.prompt_hashes(profile, self.vocab)
+        profile["speech_style"] = {
+            "register": "formal",
+            "vocabulary_complexity": "specialized",
+            "sentence_complexity": "complex",
+            "colloquialism": "low",
+            "rhetorical_style": "measured",
+        }
+        after = blueprint.prompt_hashes(profile, self.vocab)
+        self.assertEqual(before["identity_prompt"], after["identity_prompt"])
+        self.assertNotEqual(before["style_prompt"], after["style_prompt"])
+        self.assertNotEqual(before["combined_instruct_hash"], after["combined_instruct_hash"])
+
+    def test_casting_rule_version_changes_identity_hash_and_seed(self):
+        profile = self._profile()
+        before = blueprint.build_plan(profile, self.vocab)
+        profile["casting"]["rules_version"] = "2.1-test"
+        after = blueprint.build_plan(profile, self.vocab)
+        self.assertNotEqual(before["identity_prompt_hash"], after["identity_prompt_hash"])
+        self.assertNotEqual(before["seed"], after["seed"])
+        self.assertNotEqual(before["combined_instruct_hash"], after["combined_instruct_hash"])
+
+    def test_reference_audio_hash_changes_when_wav_changes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first = root / "a.wav"
+            second = root / "b.wav"
+            self._write_wav(first, 220.0)
+            self._write_wav(second, 440.0)
+            profile = self._profile()
+            pin_a = mark_auditioned(
+                profile, reference_file=first, design_seed=7, by="tester",
+                reference_transcript="same words",
+            )["reference_pin"]
+            pin_b = mark_auditioned(
+                profile, reference_file=second, design_seed=7, by="tester",
+                reference_transcript="same words",
+            )["reference_pin"]
+            self.assertEqual(pin_a["design_seed"], pin_b["design_seed"])
+            self.assertNotEqual(pin_a["reference_sha256"], pin_b["reference_sha256"])
+
+    def test_partial_style_still_renders_available_dimensions(self):
+        profile = self._profile()
+        profile["speech_style"] = {"register": "formal"}
+        style = blueprint.render_style(profile, self.vocab)
+        self.assertIn("formal in register", style)
+
+    def _profile(self):
+        classification = {
+            "provider": "rules",
+            "model_id": "rules-1.0",
+            "dossier_hash": "d",
+            "configuration_hash": "c",
+            "timestamp": "t",
+            "answers": {},
+            "speech_style": {"register": {"value": "conversational", "confidence": 0.9}},
+        }
+        dossier = {"identity": {
+            "canonical_id": "npc_1", "npc_id": 1, "name": "Test",
+            "sex": "male", "race": "Roegadyn", "clan": "Sea Wolf",
+            "body_type": 1, "bust_or_tone_1": 82, "speaker_ids": [],
+        }}
+        casting = cast_identity(dossier["identity"])
+        return build_individual_profile(dossier, classification, casting, self.vocab)
+
+    @staticmethod
+    def _write_wav(path: Path, frequency: float) -> None:
+        import math
+        frames = bytearray()
+        for index in range(16000 * 9):
+            sample = int(16000 * math.sin(2 * math.pi * frequency * index / 16000))
+            frames += sample.to_bytes(2, "little", signed=True)
+        with wave.open(str(path), "wb") as handle:
+            handle.setnchannels(1)
+            handle.setsampwidth(2)
+            handle.setframerate(16000)
+            handle.writeframes(bytes(frames))

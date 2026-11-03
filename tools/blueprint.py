@@ -29,28 +29,35 @@ DEFAULT_ARCHETYPES = ROOT / "blueprints" / "archetypes"
 DEFAULT_GENERATED = ROOT / "data" / "blueprints" / "profiles"
 LEGACY_VOCABULARY = ROOT / "blueprints" / "migrations" / "vocabulary-1.0.json"
 
-REQUIRED_IDENTITY = (
-    "presentation",
-    "pitch",
-    "timbre_primary",
-    "articulation",
-    "speaking_pace",
-    "intonation",
-)
+REQUIRED_IDENTITY = ()
+
+RENDERER_VERSION = "2.0"
+DEFAULT_CASTING_RULES_VERSION = "2.0"
 
 FIELD_TO_VOCAB = {
     "presentation": "presentation",
     "perceived_age": "perceived_age",
+    "perceived_vocal_size": "perceived_vocal_size",
+    "vocal_weight": "vocal_weight",
     "pitch": "pitch",
     "pitch_range": "pitch_range",
     "timbre_primary": "timbre_primary",
     "timbre_secondary": "timbre_secondary",
+    "timbre_preferences": "timbre_preferences",
     "resonance": "resonance",
     "articulation": "articulation",
     "speaking_pace": "speaking_pace",
     "intonation": "intonation",
     "distinctive_traits": "distinctive_traits",
 }
+
+STYLE_FIELDS = (
+    "register",
+    "vocabulary_complexity",
+    "sentence_complexity",
+    "colloquialism",
+    "rhetorical_style",
+)
 
 EVIDENCE_RULES = {
     "explicit": "states the value directly",
@@ -98,7 +105,7 @@ def vocabulary_for_profile(profile: dict, fallback: dict | None = None) -> dict:
 def _values(vocab: dict, field: str) -> dict:
     """The allowed-value map for a vocabulary field, whatever its shape."""
     spec = vocab["identity"][FIELD_TO_VOCAB[field]]
-    if field == "timbre_secondary":
+    if field in {"timbre_secondary", "timbre_preferences"}:
         return vocab["identity"][spec["ref"]]["values"]
     return spec["values"]
 
@@ -121,7 +128,19 @@ def article(phrase: str) -> str:
 # --------------------------------------------------------------------------
 
 
-def render_identity(profile: dict, vocab: dict) -> str:
+def _join(parts: list[str]) -> str:
+    parts = [part for part in parts if part]
+    if not parts:
+        return ""
+    if len(parts) == 1:
+        return parts[0]
+    if len(parts) == 2:
+        return parts[0] + " and " + parts[1]
+    return ", ".join(parts[:-1]) + ", and " + parts[-1]
+
+
+def _render_identity_legacy(profile: dict, vocab: dict) -> str:
+    """Schema 1.0/1.1 renderer, kept pinned to the legacy vocabulary."""
     identity = profile["identity"]
     parts = {
         "age": "",
@@ -176,8 +195,98 @@ def render_identity(profile: dict, vocab: dict) -> str:
     ).strip()
 
 
+def render_identity(profile: dict, vocab: dict) -> str:
+    """Render every available identity descriptor; omit null optional fields."""
+    if "identity_v2" not in vocab.get("render", {}):
+        return _render_identity_legacy(profile, vocab)
+
+    identity = profile.get("identity") or {}
+    spec = vocab["render"]["identity_v2"]
+    age = identity.get("perceived_age")
+    age_phrase = f"{_render(vocab, 'perceived_age', age)} " if age else ""
+    presentation = identity.get("presentation")
+    presentation_phrase = _render(vocab, "presentation", presentation) if presentation else ""
+    head = (age_phrase + presentation_phrase).strip()
+    sentence = (
+        spec["head"].format(article=article(head), head=head)
+        if head else spec["empty_head"]
+    )
+
+    has_pitch = bool(identity.get("pitch"))
+    if has_pitch:
+        sentence += spec["pitch"].format(pitch=_render(vocab, "pitch", identity["pitch"]))
+    if identity.get("pitch_range"):
+        sentence += spec["pitch_range"].format(
+            pitch_range=_render(vocab, "pitch_range", identity["pitch_range"])
+        )
+    size = identity.get("perceived_vocal_size")
+    weight = identity.get("vocal_weight")
+    if size or weight:
+        descriptors = []
+        if size:
+            descriptors.append(_render(vocab, "perceived_vocal_size", size))
+        if weight:
+            descriptors.append(_render(vocab, "vocal_weight", weight))
+        part = "size_weight_and" if has_pitch else "size_weight"
+        size_weight = ", ".join(descriptors)
+        sentence += spec[part].format(
+            article=article(size_weight).lower(), size_weight=size_weight,
+        )
+    sentence += "."
+
+    timbre_bits = []
+    if identity.get("timbre_primary"):
+        timbre_value = _render(vocab, "timbre_primary", identity["timbre_primary"])
+        timbre_bits.append(
+            spec["timbre"].format(article=article(timbre_value).lower(), timbre=timbre_value)
+        )
+    if identity.get("timbre_secondary"):
+        timbre_bits.append(
+            spec["timbre_secondary"].format(
+                timbre_secondary=_render(vocab, "timbre_secondary", identity["timbre_secondary"])
+            )
+        )
+    if identity.get("resonance"):
+        timbre_bits.append(_render(vocab, "resonance", identity["resonance"]))
+    if timbre_bits:
+        sentence += " " + spec["timbre_sentence"].format(descriptors=_join(timbre_bits))
+
+    speech_bits = []
+    if identity.get("articulation"):
+        speech_bits.append(
+            spec["articulation"].format(
+                articulation=_render(vocab, "articulation", identity["articulation"])
+            )
+        )
+    if identity.get("intonation"):
+        speech_bits.append(
+            spec["intonation"].format(
+                intonation=_render(vocab, "intonation", identity["intonation"])
+            )
+        )
+    if identity.get("speaking_pace"):
+        speech_bits.append(
+            spec["pace"].format(pace=_render(vocab, "speaking_pace", identity["speaking_pace"]))
+        )
+    if speech_bits:
+        sentence += " " + spec["speech_sentence"].format(descriptors=_join(speech_bits))
+
+    accent = identity.get("accent")
+    if accent:
+        sentence += " " + spec["accent_sentence"].format(
+            strength=vocab["identity"]["accent"]["strengths"][accent["strength"]]["render"],
+            accent=vocab["identity"]["accent"]["profiles"][accent["profile"]]["render"],
+        )
+    traits = identity.get("distinctive_traits") or []
+    if traits:
+        rendered = [_render(vocab, "distinctive_traits", trait) for trait in traits]
+        sentence += " " + spec["traits_sentence"].format(traits=_join(rendered))
+    sentence += " " + spec["tail"]
+    return sentence.strip()
+
+
 def render_style(profile: dict, vocab: dict) -> str:
-    """Render the speech-style clause, or "" when the profile carries no style.
+    """Render every supported style dimension; one missing field never suppresses it.
 
     Listening on 2026-11-03 preferred styled takes over identity-only ones for
     every sampled voice, so the clause is part of the default render. It is
@@ -185,14 +294,28 @@ def render_style(profile: dict, vocab: dict) -> str:
     """
     style = profile.get("speech_style") or {}
     dimensions = vocab.get("speech_style", {}).get("dimensions") or {}
-    values = {}
-    for field in ("register", "vocabulary_complexity", "sentence_complexity", "colloquialism", "rhetorical_style"):
+    spec = vocab.get("render", {}).get("style_v2")
+    if not spec:
+        values = {}
+        for field in STYLE_FIELDS:
+            label = style.get(field)
+            if not label:
+                return ""
+            entry = (dimensions.get(field, {}).get("values") or {}).get(label) or {}
+            values[field] = entry.get("render") or str(label).replace("_", " ")
+        return vocab["render"]["style_template"].format(**values)
+
+    parts = []
+    for field in STYLE_FIELDS:
         label = style.get(field)
         if not label:
-            return ""
+            continue
         entry = (dimensions.get(field, {}).get("values") or {}).get(label) or {}
-        values[field] = entry.get("render") or str(label).replace("_", " ")
-    return vocab["render"]["style_template"].format(**values)
+        phrase = entry.get("render") or str(label).replace("_", " ")
+        parts.append(spec["parts"][field].format(value=phrase))
+    if len(parts) < int(spec.get("min_dimensions", 1)):
+        return ""
+    return spec["template"].format(dimensions=_join(parts))
 
 
 def render_instruct(profile: dict, vocab: dict) -> str:
@@ -259,11 +382,15 @@ def validate_profile(profile: dict, vocab: dict, name: str = "<profile>") -> lis
         if field not in FIELD_TO_VOCAB and field != "accent":
             err(f"identity.{field} = {identity[field]!r} is not in the vocabulary")
 
-    # closed vocabulary + cardinality
+    # closed vocabulary + cardinality. Legacy vocabularies predate some fields;
+    # a pinned schema-1.0/1.1 profile cannot carry fields its vocabulary lacks.
     for field, vocab_field in FIELD_TO_VOCAB.items():
+        vocab_spec = vocab["identity"].get(vocab_field)
+        if vocab_spec is None:
+            continue
         value = identity.get(field)
         if value in (None, [], {}):
-            if vocab["identity"][vocab_field].get("required") and field in REQUIRED_IDENTITY:
+            if vocab_spec.get("required"):
                 err(f"identity.{field} may not be empty")
             continue
         allowed = _values(vocab, field)
@@ -280,6 +407,12 @@ def validate_profile(profile: dict, vocab: dict, name: str = "<profile>") -> lis
                 err(f"identity.distinctive_traits allows at most {spec['max']} values")
             if len(set(values)) != len(values):
                 err("identity.distinctive_traits contains duplicates")
+        if field == "timbre_preferences":
+            spec = vocab["identity"]["timbre_preferences"]
+            if len(values) > spec["max"]:
+                err(f"identity.timbre_preferences allows at most {spec['max']} values")
+            if len(set(values)) != len(values):
+                err("identity.timbre_preferences contains duplicates")
 
     accent = identity.get("accent")
     if accent is not None:
@@ -433,6 +566,8 @@ def profile_key(profile: dict) -> tuple:
     return (
         identity.get("presentation"),
         identity.get("perceived_age"),
+        identity.get("perceived_vocal_size"),
+        identity.get("vocal_weight"),
         identity.get("pitch"),
         identity.get("pitch_range"),
         identity.get("timbre_primary"),
@@ -459,14 +594,83 @@ def find_collisions(profiles: list[dict], vocab: dict) -> list[tuple[tuple, list
 # --------------------------------------------------------------------------
 
 
-def seed_for(voice_id: str, base: int = 20261101) -> int:
-    digest = hashlib.sha256(voice_id.encode()).hexdigest()
+def _canonical_json(value) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _sha256_json(value) -> str:
+    return hashlib.sha256(_canonical_json(value).encode("utf-8")).hexdigest()
+
+
+def _sha256_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def seed_for(
+    voice_id: str,
+    base: int = 20261101,
+    *,
+    instruct: str | None = None,
+    rules_version: str | None = None,
+) -> int:
+    """Stable seed. A reference design binds the seed to its full instruct."""
+    payload = voice_id
+    if instruct is not None:
+        payload += "\n" + instruct
+    if rules_version:
+        payload += "\n" + rules_version
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
     return base + int(digest[:8], 16) % 1_000_000
+
+
+def prompt_hashes(profile: dict, vocab: dict) -> dict:
+    """Separate identity, style and combined reference-design hashes."""
+    identity_prompt = render_identity(profile, vocab)
+    style_prompt = render_style(profile, vocab)
+    casting = profile.get("casting") or {}
+    casting_rules_version = str(
+        casting.get("rules_version") or DEFAULT_CASTING_RULES_VERSION
+    )
+    identity_hash = _sha256_json({
+        "identity": profile.get("identity") or {},
+        "identity_provenance": profile.get("identity_provenance") or {},
+        "renderer_version": RENDERER_VERSION,
+        "casting_rules_version": casting_rules_version,
+    })
+    style_hash = _sha256_json({
+        "speech_style": profile.get("speech_style") or {},
+        "speech_style_analysis": profile.get("speech_style_analysis"),
+        "classification": profile.get("classification"),
+        "style_vocabulary": vocab.get("speech_style"),
+    })
+    reference = vocab["reference"]
+    combined_hash = _sha256_json({
+        "identity_prompt": identity_prompt,
+        "style_prompt": style_prompt,
+        "reference_script": {
+            "script_id": reference["script_id"],
+            "language": reference["language"],
+            "text": reference["text"],
+        },
+        "design_model": vocab["models"]["design"],
+        "renderer_version": RENDERER_VERSION,
+        "casting_rules_version": casting_rules_version,
+    })
+    return {
+        "identity_prompt": identity_prompt,
+        "style_prompt": style_prompt,
+        "identity_prompt_hash": identity_hash,
+        "style_profile_hash": style_hash,
+        "combined_instruct_hash": combined_hash,
+        "casting_rules_version": casting_rules_version,
+        "renderer_version": RENDERER_VERSION,
+    }
 
 
 def build_plan(profile: dict, vocab: dict) -> dict:
     voice_id = profile["character"]["id"]
-    instruct = render_instruct(profile, vocab)
+    hashes = prompt_hashes(profile, vocab)
+    instruct = hashes["identity_prompt"] + hashes["style_prompt"]
     reference = vocab["reference"]
     return {
         "profile_id": voice_id,
@@ -475,12 +679,25 @@ def build_plan(profile: dict, vocab: dict) -> dict:
             "script_id": reference["script_id"],
             "language": reference["language"],
             "text": reference["text"],
+            "text_sha256": _sha256_text(reference["text"]),
             "target_seconds": reference["target_seconds"],
         },
         "design_model": vocab["models"]["design"],
         "clone_model": vocab["models"]["clone"],
+        "identity_prompt": hashes["identity_prompt"],
+        "style_prompt": hashes["style_prompt"],
         "instruct": instruct,
-        "seed": seed_for(voice_id),
+        "seed": seed_for(
+            voice_id,
+            instruct=instruct,
+            rules_version=hashes["casting_rules_version"],
+        ),
+        "identity_prompt_hash": hashes["identity_prompt_hash"],
+        "style_profile_hash": hashes["style_profile_hash"],
+        "combined_instruct_hash": hashes["combined_instruct_hash"],
+        "cache_key": hashes["combined_instruct_hash"],
+        "casting_rules_version": hashes["casting_rules_version"],
+        "renderer_version": hashes["renderer_version"],
     }
 
 
