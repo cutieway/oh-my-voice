@@ -20,14 +20,28 @@ internal static class NpcIndexCommand
         string? TribeName,
         string Sex,
         uint? BodyType,
-        uint? Height);
+        uint? Height,
+        float? Scale,
+        byte? BustOrTone1,
+        byte? ExtraFeature2OrBust,
+        byte? Jaw,
+        byte? Mouth,
+        byte? Face,
+        byte? Nose,
+        byte? EyeShape,
+        byte? Eyebrows,
+        byte? HairStyle,
+        byte? SkinColor,
+        uint? ModelChara,
+        uint? ModelBody,
+        bool? NotRewriteHeight);
 
     public static int Run(string[] args)
     {
         if (args.Any(arg => arg is "-h" or "--help"))
         {
             Console.WriteLine("xivdata npc-index [--sqpack DIR] [--lang en|de|fr|ja] > npc-index.json");
-            Console.WriteLine("Exports localized ENpcResident names and ENpcBase race, tribe, and sex metadata as JSON; does not write dialogue.db.");
+            Console.WriteLine("Exports localized ENpcResident names plus ENpcBase identity and appearance metadata as JSON; does not write dialogue.db.");
             return 0;
         }
         Options options;
@@ -66,6 +80,20 @@ internal static class NpcIndexCommand
                 string? tribeName = null;
                 uint? bodyType = null;
                 uint? height = null;
+                float? scale = null;
+                byte? bustOrTone1 = null;
+                byte? extraFeature2OrBust = null;
+                byte? jaw = null;
+                byte? mouth = null;
+                byte? face = null;
+                byte? nose = null;
+                byte? eyeShape = null;
+                byte? eyebrows = null;
+                byte? hairStyle = null;
+                byte? skinColor = null;
+                uint? modelChara = null;
+                uint? modelBody = null;
+                bool? notRewriteHeight = null;
                 if (bases.TryGetRow(resident.RowId, out var npcBase))
                 {
                     raceId = npcBase.Race.RowId is > 0 ? npcBase.Race.RowId : null;
@@ -77,6 +105,20 @@ internal static class NpcIndexCommand
                         tribeName = GenderedName(tribe, gender.Value);
                     bodyType = npcBase.BodyType;
                     height = npcBase.Height;
+                    scale = npcBase.Scale;
+                    bustOrTone1 = npcBase.BustOrTone1;
+                    extraFeature2OrBust = npcBase.ExtraFeature2OrBust;
+                    jaw = npcBase.Jaw;
+                    mouth = npcBase.Mouth;
+                    face = npcBase.Face;
+                    nose = npcBase.Nose;
+                    eyeShape = npcBase.EyeShape;
+                    eyebrows = npcBase.Eyebrows;
+                    hairStyle = npcBase.HairStyle;
+                    skinColor = npcBase.SkinColor;
+                    modelChara = npcBase.ModelChara.RowId;
+                    modelBody = npcBase.ModelBody;
+                    notRewriteHeight = npcBase.NotRewriteHeight;
                 }
 
                 records.Add(new NpcRecord(
@@ -88,7 +130,21 @@ internal static class NpcIndexCommand
                     EmptyToNull(tribeName),
                     gender switch { 0 => "male", 1 => "female", _ => "unknown" },
                     bodyType,
-                    height));
+                    height,
+                    scale,
+                    bustOrTone1,
+                    extraFeature2OrBust,
+                    jaw,
+                    mouth,
+                    face,
+                    nose,
+                    eyeShape,
+                    eyebrows,
+                    hairStyle,
+                    skinColor,
+                    modelChara,
+                    modelBody,
+                    notRewriteHeight));
             }
 
             Console.WriteLine(JsonSerializer.Serialize(new
@@ -107,6 +163,20 @@ internal static class NpcIndexCommand
                     sex = row.Sex,
                     body_type = row.BodyType,
                     height = row.Height,
+                    scale = row.Scale,
+                    bust_or_tone_1 = row.BustOrTone1,
+                    extra_feature_2_or_bust = row.ExtraFeature2OrBust,
+                    jaw = row.Jaw,
+                    mouth = row.Mouth,
+                    face = row.Face,
+                    nose = row.Nose,
+                    eye_shape = row.EyeShape,
+                    eyebrows = row.Eyebrows,
+                    hair_style = row.HairStyle,
+                    skin_color = row.SkinColor,
+                    model_chara = row.ModelChara,
+                    model_body = row.ModelBody,
+                    not_rewrite_height = row.NotRewriteHeight,
                 }),
             }, new JsonSerializerOptions { WriteIndented = true }));
             return 0;

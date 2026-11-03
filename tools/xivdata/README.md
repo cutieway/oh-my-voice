@@ -54,9 +54,15 @@ Defaults: `--sqpack ~/Public/xlcore/ffxiv/game/sqpack`,
 
 `npc-index` reads `ENpcResident`, `ENpcBase`, `Race`, and `Tribe` through
 Lumina and prints a JSON `npcs` array with row ID, localized name, race ID/name,
-tribe ID/name, and game gender. Missing sheet links remain null/unknown. The
-export is optional; the blueprint pipeline can run without it and does not
-infer race or clan names from numeric IDs.
+tribe ID/name, game gender, body type, height, scale, `BustOrTone1`,
+`ExtraFeature2OrBust`, and the raw appearance indices (`Jaw`, `Mouth`, `Face`,
+`Nose`, `EyeShape`, `Eyebrows`, `HairStyle`, `SkinColor`, model IDs). Missing
+sheet links remain null/unknown. The export is optional; the blueprint pipeline
+can run without it and does not infer race or clan names from numeric IDs.
+
+`BustOrTone1` is model-dependent: it is bust size on female models and muscle
+tone on male models of some races. Do not treat it as a universal muscle value;
+see `docs/game-voice-factors-audit.md`.
 
 ## Sources
 

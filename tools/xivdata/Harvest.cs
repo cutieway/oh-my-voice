@@ -11,7 +11,7 @@ using OhMyVoice.Common;
 
 namespace XivData;
 
-public sealed record NpcInfo(uint Id, string Name, uint RaceId, byte Gender);
+public sealed record NpcInfo(uint Id, string Name, uint RaceId, byte? Gender);
 
 internal sealed record TokenMatch(NpcInfo? Primary, int Candidates);
 
@@ -24,7 +24,7 @@ public sealed record CutsceneLine(
     uint? NpcId,
     string NpcName,
     uint RaceId,
-    byte Gender,
+    byte? Gender,
     string ScdPath,
     int ScdBytes,
     string Text);
@@ -272,7 +272,7 @@ public static class Harvester
             writer.Write(r.NpcId?.ToString(CultureInfo.InvariantCulture) ?? ""); writer.Write(',');
             writer.Write(Csv(r.NpcName)); writer.Write(',');
             writer.Write(r.RaceId.ToString(CultureInfo.InvariantCulture)); writer.Write(',');
-            writer.Write(r.Gender.ToString(CultureInfo.InvariantCulture)); writer.Write(',');
+            writer.Write(r.Gender?.ToString(CultureInfo.InvariantCulture) ?? ""); writer.Write(',');
             writer.Write(Csv(r.ScdPath)); writer.Write(',');
             writer.Write(r.ScdBytes.ToString(CultureInfo.InvariantCulture)); writer.Write(',');
             writer.Write(Csv(r.Text));
@@ -457,7 +457,7 @@ public static class Harvester
                 var line = new CutsceneLine(
                     sheetName, row.RowId, textKey, audioBase, token.ToLowerInvariant(),
                     primarySpeaker?.NpcId, speakerName,
-                    primarySpeaker?.RaceId ?? 0, primarySpeaker?.Gender ?? 0,
+                    primarySpeaker?.RaceId ?? 0, primarySpeaker?.Gender,
                     resolved.Path, resolved.Bytes, raw);
                 result.CutsceneRows.Add(line);
                 if (options.ExtractAudio)
@@ -1121,7 +1121,7 @@ public static class Harvester
                 if (name.Length == 0) continue;
 
                 uint raceId = 0;
-                byte gender = 0;
+                byte? gender = null;
                 if (baseSheet.TryGetRow(row.RowId, out var npcBase))
                 {
                     raceId = npcBase.Race.RowId;
@@ -1180,7 +1180,7 @@ public static class Harvester
             {
                 if (!Infos.TryGetValue(id, out var info)) continue;
                 fallback ??= info;
-                if (info.RaceId > 0 && info.Gender <= 1) return info;
+                if (info.RaceId > 0 && info.Gender is 0 or 1) return info;
             }
             return fallback;
         }

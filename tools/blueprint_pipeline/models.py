@@ -34,6 +34,22 @@ class Candidate:
     tribe_id: int | None = None
     clan: str | None = None
     sex: str = "unknown"
+    body_type: int | None = None
+    height: int | None = None
+    scale: float | None = None
+    bust_or_tone_1: int | None = None
+    extra_feature_2_or_bust: int | None = None
+    jaw: int | None = None
+    mouth: int | None = None
+    face: int | None = None
+    nose: int | None = None
+    eye_shape: int | None = None
+    eyebrows: int | None = None
+    hair_style: int | None = None
+    skin_color: int | None = None
+    model_chara: int | None = None
+    model_body: int | None = None
+    not_rewrite_height: bool | None = None
     review_reasons: list[str] = field(default_factory=list)
 
 

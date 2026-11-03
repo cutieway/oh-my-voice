@@ -174,9 +174,17 @@ def build_dossiers(
             metadata = {
                 "race": None, "clan": None, "sex": "unknown",
                 "race_id": None, "tribe_id": None, "body_type": None, "height": None,
+                "scale": None, "bust_or_tone_1": None, "extra_feature_2_or_bust": None,
+                "jaw": None, "mouth": None, "face": None, "nose": None,
+                "eye_shape": None, "eyebrows": None, "hair_style": None,
+                "skin_color": None, "model_chara": None, "model_body": None,
+                "not_rewrite_height": None,
             }
         else:
             metadata = game_metadata(candidate["npc_id"], game_index or {})
+        def pick(key: str):
+            value = candidate.get(key)
+            return value if value is not None else metadata.get(key)
         identity = {
             "canonical_id": key,
             "npc_id": candidate.get("npc_id"),
@@ -184,13 +192,27 @@ def build_dossiers(
             "aliases": candidate.get("aliases", []),
             "speaker_ids": candidate.get("speaker_ids", []),
             "normalized_names": candidate.get("normalized_names", []),
-            "race_id": candidate.get("race_id") or metadata.get("race_id"),
-            "race": candidate.get("race") or metadata.get("race"),
-            "tribe_id": candidate.get("tribe_id") or metadata.get("tribe_id"),
-            "clan": candidate.get("clan") or metadata.get("clan"),
-            "sex": candidate.get("sex") or metadata.get("sex", "unknown"),
-            "body_type": candidate.get("body_type") or metadata.get("body_type"),
-            "height": candidate.get("height") or metadata.get("height"),
+            "race_id": pick("race_id"),
+            "race": pick("race"),
+            "tribe_id": pick("tribe_id"),
+            "clan": pick("clan"),
+            "sex": pick("sex") or "unknown",
+            "body_type": pick("body_type"),
+            "height": pick("height"),
+            "scale": pick("scale"),
+            "bust_or_tone_1": pick("bust_or_tone_1"),
+            "extra_feature_2_or_bust": pick("extra_feature_2_or_bust"),
+            "jaw": pick("jaw"),
+            "mouth": pick("mouth"),
+            "face": pick("face"),
+            "nose": pick("nose"),
+            "eye_shape": pick("eye_shape"),
+            "eyebrows": pick("eyebrows"),
+            "hair_style": pick("hair_style"),
+            "skin_color": pick("skin_color"),
+            "model_chara": pick("model_chara"),
+            "model_body": pick("model_body"),
+            "not_rewrite_height": pick("not_rewrite_height"),
             "resolution_status": candidate["identity_status"],
             "has_se_voice_reference": candidate["has_se_reference"],
             "identity_ambiguous": candidate["identity_ambiguous"],

@@ -29,6 +29,7 @@ __pycache__/
 # Local scratch notes.
 /todo.md
 /prompt.md
+/temp.md
 
 # Example blueprints are local audition material, not shipped data. The
 # pipeline that will fill blueprints/characters/ does not exist yet.

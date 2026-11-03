@@ -177,13 +177,32 @@ def build_inventory(
                 "race": meta.get("race"),
                 "tribe_id": meta.get("tribe_id"),
                 "clan": meta.get("clan"),
-                "sex": meta.get("sex") if meta.get("sex") != "unknown" else (
-                    "male" if any(row.get("gender") == 0 for row in label_rows)
-                    else "female" if any(row.get("gender") == 1 for row in label_rows)
-                    else "unknown"
+                "sex": (
+                    meta.get("sex")
+                    if meta.get("race") and meta.get("sex") != "unknown"
+                    else (
+                        # Byte 0 is ambiguous: ENpcBase zero default or male.
+                        # Only 1 is positive evidence of female.
+                        "female" if any(row.get("gender") == 1 for row in label_rows)
+                        else "unknown"
+                    )
                 ),
                 "body_type": meta.get("body_type"),
                 "height": meta.get("height"),
+                "scale": meta.get("scale"),
+                "bust_or_tone_1": meta.get("bust_or_tone_1"),
+                "extra_feature_2_or_bust": meta.get("extra_feature_2_or_bust"),
+                "jaw": meta.get("jaw"),
+                "mouth": meta.get("mouth"),
+                "face": meta.get("face"),
+                "nose": meta.get("nose"),
+                "eye_shape": meta.get("eye_shape"),
+                "eyebrows": meta.get("eyebrows"),
+                "hair_style": meta.get("hair_style"),
+                "skin_color": meta.get("skin_color"),
+                "model_chara": meta.get("model_chara"),
+                "model_body": meta.get("model_body"),
+                "not_rewrite_height": meta.get("not_rewrite_height"),
                 "lore_data_available": False,
                 "race_clan_metadata_available": bool(meta.get("race") or meta.get("clan")),
                 "review_reasons": sorted(set(reasons)),
@@ -217,8 +236,22 @@ def build_inventory(
                 "tribe_id": None,
                 "clan": None,
                 "sex": "unknown",
-                "body_type": meta.get("body_type"),
-                "height": meta.get("height"),
+                "body_type": None,
+                "height": None,
+                "scale": None,
+                "bust_or_tone_1": None,
+                "extra_feature_2_or_bust": None,
+                "jaw": None,
+                "mouth": None,
+                "face": None,
+                "nose": None,
+                "eye_shape": None,
+                "eyebrows": None,
+                "hair_style": None,
+                "skin_color": None,
+                "model_chara": None,
+                "model_body": None,
+                "not_rewrite_height": None,
                 "lore_data_available": False,
                 "race_clan_metadata_available": False,
                 "review_reasons": ["speaker label has no canonical NPC ID; do not create a named character profile"],
