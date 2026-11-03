@@ -58,6 +58,8 @@ llama-server --model data/models/qwen3.5-9b/Bespoke-Nimble-9B-v3-Q4_K_M.gguf \
   --port 18081 --n-gpu-layers 999 --ctx-size 8192 --jinja
 python3 -m tools.blueprint_pipeline.evaluation nimble \
   --endpoint http://127.0.0.1:18081/v1/systemone --condition text_only --limit 2
+python3 -m tools.blueprint_pipeline.evaluation jev \
+  --endpoint http://127.0.0.1:8081/v1/systemone --model jev-1.14.0 --limit 2
 ```
 
 Request shape the server accepts: `state` is chat messages, `choice` criteria
@@ -98,12 +100,14 @@ blueprints. It is infrastructure, not a prerequisite for trying the classifier.
 
 | Piece | State |
 |---|---|
-| Frozen benchmark v2 (80 items, 20 development / 60 test, 5 fields) | done, immutable |
-| Blind forms + share packets for annotators | done |
+| Frozen benchmark v2 (80 items, 20 development / 60 test, 5 fields) | done, immutable; split is by NPC, not line |
+| Blind forms + share packets for annotators | done; both annotation files are present but blank |
 | Rules baseline (`RulesProvider`) | runs |
 | Qwen3.5-9B-Base baseline (text only / assisted) | runs |
-| Human gold labels | **missing** |
-| Metrics: accuracy, macro-F1, weighted kappa, mixed/insufficient as classes, precision-at-coverage, per-stratum, leakage audit | implemented |
+| Human gold labels | **missing**; `adjudicated/gold.json` has empty labels |
+| Metrics: accuracy, macro-F1, Cohen's kappa (weighted for ordinal fields), confusion, mixed/insufficient detection, abstention coverage, selective accuracy, precision-at-coverage, per-stratum, leakage audit, citation validity, repeat/order/sample stability | implemented; reported only where predictions and labels exist. Sample-size/order/repeat runner currently covers the local Nimble baseline; JEV stability stays staged until a JEV endpoint and predictions exist. |
+| Evidence-citation validation | implemented in production and the JEV benchmark runner; a cited line absent from the request rejects the field. Per-field citation rate and validity rate are reported from stored predictions even before gold labels. |
+| Production status | staged: benchmark has not cleared, so classifier output is not treated as calibrated |
 
 ## 5. Roadblocks
 
@@ -113,11 +117,15 @@ blueprints. It is infrastructure, not a prerequisite for trying the classifier.
    exactly the five validated style fields; `diction_style` and
    `contraction_frequency` were removed, and `generator.VALIDATED_STYLE_FIELDS`
    keeps them out of profiles even if a dossier analysis produces them.
-3. **`mixed` and `insufficient_evidence` have no blueprint values.** The model
-   returns them, the vocabulary cannot store them. They need a mapping rule
-   (e.g. pick the majority label, or fall back to an archetype).
-4. **Probabilities are raw scores, not calibrated.** Confidence thresholds are
-   usable only after a calibration check on labelled data.
+3. **`mixed` is now storable; `insufficient_evidence` is not a label.** The
+   production dimensions accept `mixed` as a real outcome. An insufficient
+   evidence result is stored as `value: null` with
+   `status: insufficient_evidence`, and the renderer omits it. A `mixed` result
+   requires at least one counterexample line.
+4. **Probabilities are raw scores, not calibrated.** Model self-reported
+   confidence and probability distributions are diagnostic only. Acceptance
+   depends on valid labels, cited line IDs, the evidence floor, stability, and
+   held-out benchmark metrics.
 
 ## 6. Decisions
 
@@ -137,8 +145,10 @@ about 90 minutes of one local model run. Cost is not the constraint.
 
 Recommendation:
 
-- **8+ lines: own blueprint.** The classifier has real text, the fields are
-  measurable, and the reference audio follows the NPC's own lines.
+- **8+ lines: eligible for classification.** The classifier has real text and
+  the fields are measurable, but the current allocation policy still requires
+  at least 50 unique lines and two supported Style fields for an individual
+  design; otherwise the NPC uses a shared archetype.
 - **< 8 lines: shared blueprint.** There is not enough text to classify. Group
   these by speaker role in the game data and name the group after a
   representative NPC (e.g. `gridanian_sentry`), not after an abstract
@@ -164,11 +174,13 @@ two-annotator protocol only pays off once the field set has stopped moving.
 
 ## 7. Order of work
 
-1. Align the pipeline questions with the validated field set (drop or keep
-   `diction_style` and `contraction_frequency` deliberately).
-2. Decide the `mixed` / `insufficient_evidence` -> blueprint mapping.
+1. ~~Align the pipeline questions with the validated field set~~ done: five
+   Style fields only; `diction_style` and `contraction_frequency` stay out.
+2. ~~Decide the `mixed` / `insufficient_evidence` mapping~~ done: `mixed` is a
+   real label; insufficient evidence is `value: null` plus status.
 3. Run the classifier over all 8+ line NPCs, write `speech_style` into blueprints,
-   and keep the confidence per field.
-4. Label ~30 items by hand, measure per-field agreement, then decide whether the
-   full protocol is needed.
-5. Only then let the pipeline write profiles without review.
+   and keep per-field status and citations.
+4. Complete the two blind annotation forms and adjudication; measure per-field
+   agreement and citation validity before calling any field validated.
+5. Only then let the pipeline write profiles without review. Until then,
+   benchmark status is **staged**, not validated.

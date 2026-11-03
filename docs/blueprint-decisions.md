@@ -7,8 +7,13 @@ no value is a mystery.
 |---|---|---|
 | **Game data** | read from the game files (`ENpcResident`, `ENpcBase`, `Race`, `Tribe`) | `tools/xivdata`, `data/xivdata/npc-index.json` |
 | **Casting rules** | deterministic acoustic choices computed from game facts | `tools/blueprint_pipeline/casting.py` |
-| **Model** | the local decision model answers a typed question | `jev.build_questions`, `cli.py classify` |
-| **Default** | explicit project fallback, never evidence | `vocabulary.json` `classification.defaults` |
+| **JEV model** | the local model answers five typed Style questions and must cite supplied line IDs | `jev.build_questions`, `cli.py classify` |
+| **Rules baseline** | an explicitly selected offline baseline, never a fallback | `classifier.RulesProvider` |
+| **Abstention** | the classifier or evidence floor refuses a label; the field is null | `classifier.classify_dossier` |
+
+No source inserts a hidden default. A field with insufficient or rejected
+evidence is stored as `value: null` with an explicit status, and the renderer
+omits it.
 
 ## Why acoustics are not asked of the model
 
@@ -74,75 +79,125 @@ never removed from the record.
 
 ## What the model is asked
 
-Seven questions, from `blueprints/vocabulary.json` `classification.questions`:
+Five questions, from `blueprints/vocabulary.json` `classification.questions`:
 
 | Question | Type | Feeds |
 |---|---|---|
-| `identity_resolved` | yes/no | eligibility gate |
-| `voice_evidence_present` | yes/no | individual-design score |
-| `individual_design` | score 0–4 | whether an individual profile is justified |
 | `speech_style.register` | choice | `speech_style.register` |
 | `speech_style.vocabulary_complexity` | choice | `speech_style.vocabulary_complexity` |
 | `speech_style.sentence_complexity` | choice | `speech_style.sentence_complexity` |
 | `speech_style.colloquialism` | choice | `speech_style.colloquialism` |
 | `speech_style.rhetorical_style` | choice | `speech_style.rhetorical_style` |
 
-(`identity_resolved` and the design score are gates; the five style choices are
-the only free classifications.)
+Identity, voice evidence, and individual-design decisions are deterministic
+policy, not model questions. The model is text-only: it must not measure pitch,
+timbre, resonance, speech rate, breathiness, or accent.
 
-The model sees `compact_state` (`jev.py`): game identity, `dialogue_measurements`
-(aggregates only), `dialogue_coverage`, sampled lines with their signal tags,
-`voice_evidence`, and six guardrails. No wiki text, lore quotes, or fact-conflict
-records exist any more. The model answers with a probability distribution over
-that question's closed value list; `classifier` accepts a choice only above the
-threshold and records the distribution in the classification.
+The model sees an identity-blind `compact_state` (`jev.py`): stable sample IDs,
+the sampled text, coverage counts, evidence-sufficiency metadata, version tags,
+and guardrails. It never sees NPC names, race, clan, sex, appearance, voice
+evidence, wiki text, lore quotes, or rules-derived interpretation. Optional
+assisted measurements are excluded from the production Style request.
 
-`dialogue_measurements` deliberately excludes the rules-derived interpretation
-(`register: formal`, …). Showing the model its own baseline's labels turned the
-answer into an echo of the rules; the measurements stay, the conclusion does not.
+Each answer carries `choice`, `status`, `supporting_line_ids`,
+`counterexample_line_ids`, and optional `rationale`. A supported field requires
+at least two cited lines that exist in the request. A `mixed` result requires at
+least one counterexample line. Model self-reported confidence and probability
+distributions are diagnostic only; acceptance depends on valid labels, valid
+citations, and the evidence floor.
 
 `dialogue_coverage` reports how much of the corpus the samples represent
 (`sampled_lines / unique_lines`) and sets a `warning` below 25%. Gerolt is 24 of
 1,552 lines (1.5%), and the state says so, so a confident answer cannot pretend
-to have read the whole character.
+to have read the whole character. If the request exceeds the byte limit,
+`compact_state` drops samples in stable ID order, then recomputes coverage and
+`sample_manifest_hash`; it never drops the evidence metadata first.
 
-## Volume gates
+### Style provenance
 
-| Gate | Value | Effect |
-|---|---|---|
-| `min_dialogue_lines_for_style` | 40 unique lines | below it every style field is recorded with `value: null`, `method: insufficient_dialogue_volume`, and the deterministic estimate kept only for audit; the profile carries `speech_style: null` and renders from identity alone |
+Each field decision carries `method`, `provider`, `model_id`, `evidence_tier`,
+`evidence`, `status`, `value`, `supporting_line_ids`,
+`counterexample_line_ids`, `support_ratio`, `rationale`,
+`model_self_reported_confidence`, and `probabilities`. The enclosing
+`speech_style_analysis` carries `taxonomy_version`, `classifier_version`,
+`prompt_version`, `sampler_version`, `corpus_hash`, `sample_manifest_hash`,
+raw/unique/sampled line and word counts, source/context coverage, and per-field
+tiers. `profile.classification` copies the version tags and source audit hash.
 
-Sparse characters stay simple by construction, not by luck: six of the sixteen
-test NPCs (5–8 lines) produced zero style fields.
+The canonical reference hash (`blueprint.prompt_hashes`) includes the rendered
+Identity, rendered Style, reference script, design model, renderer version, and
+casting-rules version. The Style hash covers `speech_style` and the per-field
+analysis, not the classification timestamp, so re-running the same classifier
+does not churn the reference key. `identity_prompt_hash` never includes Style.
+
+## Evidence tiers
+
+`dialogue.evidence_sufficiency` measures the lines the classifier actually sees,
+not the whole corpus. Floors live in `vocabulary.json`
+`speech_style.sufficiency`:
+
+| Tier | Lines | Words | Sources | Effect |
+|---|---:|---:|---:|---|
+| `strong` | 40 | 600 | 3 | eligible for supported fields |
+| `supported` | 20 | 300 | 2 | eligible for supported fields |
+| `provisional` | 8 | 100 | 1 | label stored, marked `provisional`, not rendered |
+| `insufficient` | below minimum | below minimum | below minimum | `value: null`, `status: insufficient_evidence` |
+
+`rhetorical_style` carries a 1.25 multiplier because its pattern needs more
+evidence. A field below the floor gets no first-option, neutral, or majority
+default. `mixed` is a real outcome and is preserved; unresolved evidence yields
+`null` with `status: unresolved`.
+
+Profile allocation is deterministic: verified recorded voice routes to the
+official audio path; fewer than 50 unique dialogue lines routes to a shared
+archetype; otherwise at least two supported Style fields are required for an
+individual design. Allocation does not compare Style distance against
+archetypes: the current six archetypes carry no Style labels, so such a
+comparison would be invented rather than measured. A provisional field is
+retained in the audit record but is not written into
+`profile.speech_style`.
+
+Sparse characters stay simple by construction, not by luck. Earlier runs used a
+single 40-line gate; the tiered floors now separate "no label" from "provisional
+label" instead of collapsing both to null.
 
 Removed from the question set on 2026-11-01:
 
 - `speech_style.diction_style` and `speech_style.contraction_frequency` — no
   validation exists; they failed the benchmark and never reach a profile.
 - every `identity.*` question — replaced by casting rules.
+- `identity_resolved`, `voice_evidence_present`, `individual_design` — replaced
+  by deterministic gates and `profile_allocation`.
 
 ## Speech-style fields
 
-| Field | Asked? | Validated by the benchmark | In profile | In instruct |
+| Field | Asked? | Benchmark | In profile | In instruct |
 |---|---|---|---|---|
-| `register` | yes | yes | yes | yes (default clause) |
-| `vocabulary_complexity` | yes | yes | yes | yes (default clause) |
-| `sentence_complexity` | yes | yes | yes | yes (default clause) |
-| `colloquialism` | yes | yes | yes | yes (default clause) |
-| `rhetorical_style` | yes | yes | yes | yes (default clause) |
+| `register` | yes | staged; gold pending | supported/mixed only | yes |
+| `vocabulary_complexity` | yes | staged; gold pending | supported/mixed only | yes |
+| `sentence_complexity` | yes | staged; gold pending | supported/mixed only | yes |
+| `colloquialism` | yes | staged; gold pending | supported/mixed only | yes |
+| `rhetorical_style` | yes | staged; gold pending | supported/mixed only | yes |
 | `diction_style` | no | dropped from benchmark v2 | never | no |
 | `contraction_frequency` | no | never validated | never | no |
 | `speech_habits` | no | no | no | no |
 
-`generator.VALIDATED_STYLE_FIELDS` is the allow-list a profile is built from, so
-an unvalidated field cannot reach a profile even if a dossier analysis produces
-one.
+`mixed` is a real label in every production dimension. `insufficient_evidence`
+is not a label: it maps to `value: null` plus `status: insufficient_evidence`.
+The old `educated` vocabulary value is now `advanced`; the rules baseline aliases
+the old name so cached measurements still load.
 
-When all five validated fields are present, `render_style()` appends one clause
-after the identity sentence. That is the default render, not a flag: listening on
-2026-11-03 preferred styled takes over identity-only takes for every sampled
-voice. The identity text stays byte-identical, so the clause cannot rewrite an
-acoustic field.
+`generator.VALIDATED_STYLE_FIELDS` is the allow-list a profile is built from, and
+`generator.build_individual_profile` additionally requires `status` in
+`{supported, mixed}`. A provisional, unresolved, rejected, or insufficient field
+cannot reach `profile.speech_style`, even though it remains in
+`profile.speech_style_analysis` for audit.
+
+When at least one validated field is supported, `render_style()` appends one
+clause after the identity sentence and omits missing dimensions. That is the
+default render, not a flag: listening on 2026-11-03 preferred styled takes over
+identity-only takes for every sampled voice. The identity text stays
+byte-identical, so the clause cannot rewrite an acoustic field.
 
 The earlier mood layer is gone with schema 1.2. Its block sat between identity and
 style, and the measured composition was not additive (style +1.7 Hz alone,
@@ -159,26 +214,67 @@ refuses to guess; archived 1.0 profiles still validate against
 
 Auditioning now pins one take: `mark_auditioned` writes
 `profile.reference_pin` (`design_seed`, `reference_sha256`, `ref_seconds`,
-`pinned_on`), and approval must quote the same hash.
+`pinned_on`), and approval must quote the same hash. When available it also
+stores the exact combined `instruct`, `taxonomy_version`, `classifier_version`,
+`prompt_version`, `sampler_version`, `corpus_hash`, and
+`sample_manifest_hash`, so the pinned WAV remains traceable to the request and
+style evidence that produced it.
+
+### Migration note: cached classifications and profiles
+
+Old cached classifications and generated profiles used a different
+`speech_style_analysis` shape:
+
+| Old | New |
+|---|---|
+| `fields.<field>.confidence` | `fields.<field>.model_self_reported_confidence` (diagnostic only) |
+| `fields.<field>.value` with no status | `fields.<field>.value` + `status` in `supported`, `mixed`, `provisional`, `insufficient_evidence`, `unresolved`, `rejected` |
+| `method` only | `method` (`jev` or `rules_baseline`) + `provider` + `model_id` |
+| no citations | `supporting_line_ids`, `counterexample_line_ids`, `support_ratio` |
+| no versions | `taxonomy_version`, `classifier_version`, `prompt_version`, `sampler_version` |
+| `classification` object without versions | versions copied into `profile.classification` |
+| no sample manifest or budget metadata | `sample_manifest_hash`, `budget_reduction` |
+| `profile_allocation.style_distinctiveness` | ignored; no replacement until archetypes carry Style labels |
+
+Old cached classifications may still contain identity questions
+(`identity.*`, `presentation`, `pitch`, and related acoustic fields) and the
+dropped `diction_style` / `contraction_frequency` dimensions; they are ignored.
+Old `educated` values read as `advanced`. Rendered Identity no longer appends
+an unconditional neutral delivery tail; re-render it rather than preserving a
+stale prompt. Old profiles remain valid; missing statuses are read as
+`supported` only when a value exists, so existing `speech_style` labels still
+render. They are not retroactively treated as benchmark-validated. Re-run
+`classify --force` to write the evidence-backed shape. Cached classifications
+are reused only when the request key matches; `--force` discards reuse and
+writes a new content-addressed snapshot.
+
+`profile.reference_pin.combined_instruct_hash` changes when Style changes, while
+`identity_prompt_hash` stays fixed. A pin made before this refactor may not have
+`style_profile_hash` or `combined_instruct_hash`; re-audition after regenerating
+the reference rather than inventing them.
 
 ## Sample selection
 
-`dialogue.select_representative_samples` picks 24 lines (≤6,000 chars) per
-dossier:
+`dialogue.build_dialogue_sample_pools` produces two independent pools:
+
+- **Representative** — 24 lines (≤6,000 chars) for the production Style
+  request. This pool carries no regex signal tags, so the classifier cannot be
+  nudged by the rules baseline's own vocabulary.
+- **Targeted** — up to 24 lines (≤4,000 chars) for rare-habit verification.
+  Its signal counts are recorded in `sample_manifest.targeted_signal_counts` and
+  it is never merged into the primary distribution.
+
+Representative selection:
 
 1. Deduplicate by `voice_line_id`, then drop near-duplicates: trigram Jaccard
    ≥ 0.82 **or** word-set containment ≥ 0.80 with length ratio ≥ 0.5. SE reuses
    quest templates and swaps one noun ("…the contours jus' right" / "…the texture
    jus' right"), which scores 0.70 Jaccard and is now caught.
-2. Score every line by closed-vocabulary signals: `colloquial:`/`formal:` term
-   3, `dialect:` term 3, ALL-CAPS 2, honorific 2, question/exclamation/ellipsis/
-   contraction 1. Each sample carries its `signals`, so an answer can be traced
-   to the line that supported it.
-3. Split the 24 slots across the short/medium/long buckets **by corpus
+2. Split the 24 slots across the short/medium/long buckets **by corpus
    share**, giving every present bucket at least one slot, then round-robin over
-   `(source, sheet)` inside each bucket, strongest signal first, then a stable
-   `sha256(canonical_id:line_id)` order. Leftover slots come from the strongest
-   lines overall.
+   `(source, sheet)` inside each bucket, then a stable
+   `sha256(canonical_id:line_id)` order. Leftover slots come from the remaining
+   stable order.
 
    Bucket balance used to be an accident of iteration order: taking one line per
    `(source, sheet)` group inside a bucket filled the whole quota from the first
@@ -187,10 +283,15 @@ dossier:
    words), the quota loop produces 2/12/10 (617 words), so `sentence_complexity`
    is judged on sentences rather than quips.
 
-`dialect_terms` (aye, ye, yer, fer, nae, 'tis, thou, mayhap, …) weight sampling
-and are counted in `signal_line_rates.dialect_lines`, but they are deliberately
-**not** part of the formal/colloquial rate: "ye" and "pray" are archaic, not
-informal, and folding them in would corrupt the register measurement.
+Every pool has a stable `sample_manifest_hash` over the IDs, texts, and corpus
+hash. `analyze_dialogue` records exact duplicate rows and groups separately, so a
+deduplicated sample cannot hide a repeated template in the corpus.
+
+`dialect_terms` (aye, ye, yer, fer, nae, 'tis, thou, mayhap, …) weight the
+targeted pool and are counted in `signal_line_rates.dialect_lines`, but they are
+deliberately **not** part of the formal/colloquial rate: "ye" and "pray" are
+archaic, not informal, and folding them in would corrupt the register
+measurement.
 
 `(-Label-)` prefixes are stage directions, not dialogue. 8,149 English lines
 carry one (`(-Zombibrand-)Urrrgggh…`, `(-???-)…`). `split_speaker_label` removes
@@ -239,27 +340,28 @@ python3 -m tools.blueprint_pipeline.cli compose --game-index data/xivdata/npc-in
 python3 tools/blueprint.py check
 ```
 
-| NPC | unique lines | style fields |
-|---|---:|---:|
-| Pimoh Nelhah | 5 | 0 |
-| Colina | 5 | 0 |
-| Diggin | 6 | 0 |
-| Colden | 7 | 0 |
-| Hathenbet | 8 | 0 |
-| Waldew | 8 | 0 |
-| Knem Cheleim-In | 47 | 5 |
-| Linu Vanu | 49 | 5 |
-| Motte | 51 | 5 |
-| Hachisuba | 51 | 5 |
-| Erik | 405 | 5 |
-| Widargelt | 459 | 5 |
-| Haermaga | 466 | 5 |
-| wandering minstrel | 1,062 | 5 |
-| Hildibrand | 1,133 | 5 |
-| Gerolt | 1,552 | 5 |
+| NPC | unique lines |
+|---|---:|
+| Pimoh Nelhah | 5 |
+| Colina | 5 |
+| Diggin | 6 |
+| Colden | 7 |
+| Hathenbet | 8 |
+| Waldew | 8 |
+| Knem Cheleim-In | 47 |
+| Linu Vanu | 49 |
+| Motte | 51 |
+| Hachisuba | 51 |
+| Erik | 405 |
+| Widargelt | 459 |
+| Haermaga | 466 |
+| wandering minstrel | 1,062 |
+| Hildibrand | 1,133 |
+| Gerolt | 1,552 |
 
-The rules provider is offline and deterministic; it answers the style questions
-from the measured signal rates. Jev is the opt-in model path.
+Each field's status is recorded per dossier from the evidence tiers above; the
+count alone does not decide whether a field is supported, provisional, or null.
+The rules provider is offline and deterministic; Jev is the opt-in model path.
 
 ```bash
 python3 -m unittest discover -s tools -p "test_*.py"

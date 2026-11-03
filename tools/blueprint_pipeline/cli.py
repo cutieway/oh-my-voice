@@ -196,10 +196,9 @@ def cmd_dossiers(args) -> int:
 
 
 def _classification_request_key(dossier: dict, provider: str, model: str, vocabulary: dict, min_confidence: float | None) -> str:
+    del min_confidence  # acceptance no longer depends on model self-reported confidence
     policy = dict(DEFAULT_THRESHOLDS)
     policy.update(vocabulary.get("classification", {}).get("thresholds", {}))
-    if min_confidence is not None:
-        policy["choice_confidence"] = min_confidence
     config = {
         "provider": provider,
         "model_requested": model,
@@ -287,7 +286,7 @@ def _route_classification(dossier: dict, classification: dict, vocabulary: dict,
             assignment = build_assignment(
                 candidate, classification,
                 profile_id=profile["character"]["id"],
-                reason="individual design supported by distinctiveness score and sufficient evidence",
+                reason=(classification.get("profile_allocation") or {}).get("reason") or "individual design supported by dialogue evidence",
                 confidence=_confidence(classification),
                 status="draft",
             )
@@ -298,7 +297,7 @@ def _route_classification(dossier: dict, classification: dict, vocabulary: dict,
         candidate,
         classification,
         profile_id=archetype_assignment["profile_id"],
-        reason=("shared archetype preferred by distinctiveness and evidence thresholds"),
+        reason=(classification.get("profile_allocation") or {}).get("reason") or "shared archetype preferred by evidence thresholds",
         confidence=_confidence(classification),
         status="needs_review" if classification.get("status") == "needs_review" else "draft",
     )
@@ -351,7 +350,7 @@ def cmd_classify(args) -> int:
             return 0, 0
         return 1, len(json.dumps({
             "model": args.model,
-            "state": compact_state(dossier),
+            "state": compact_state(dossier, vocabulary=vocabulary),
             "questions": questions,
         }, ensure_ascii=False).encode())
 
@@ -383,7 +382,10 @@ def cmd_classify(args) -> int:
     print(f"inventory snapshot: {inventory_path}")
 
     provider = (
-        JevProvider(endpoint=args.endpoint, model=args.model, api_key_env=args.api_key_env)
+        JevProvider(
+            endpoint=args.endpoint, model=args.model, api_key_env=args.api_key_env,
+            vocabulary=vocabulary,
+        )
         if args.provider == "jev" else RulesProvider(vocabulary)
     )
     assignments = _load_assignments(args.out)
@@ -399,8 +401,7 @@ def cmd_classify(args) -> int:
                 dossier,
                 provider,
                 vocabulary,
-                model_id=args.model if args.provider == "jev" else provider.model_id,
-                min_confidence=args.min_confidence,
+                model_id=args.model if args.provider == "jev" else None,
             )
             classification["cache_key"] = cache_key
             path = write_content_addressed(cache_root, safe_component(classification.get("canonical_id") or "unknown"), classification)
@@ -480,6 +481,9 @@ def cmd_compose(args) -> int:
         errors = validate_generated_profile(profile, vocabulary)
         if errors:
             print(f"invalid {canonical_id}: {errors[0]}", flush=True)
+            continue
+        if args.dry_run:
+            print(f"would compose {canonical_id} ({archetype_id})", flush=True)
             continue
         effective, path = _save_profile(profile, args.out, args.force)
         print(f"composed {canonical_id} -> {path} ({archetype_id})", flush=True)
@@ -593,6 +597,13 @@ def cmd_review(args) -> int:
             combined_instruct_hash=plan["combined_instruct_hash"],
             casting_rules_version=plan["casting_rules_version"],
             renderer_version=plan["renderer_version"],
+            instruct=plan["instruct"],
+            taxonomy_version=plan["taxonomy_version"],
+            classifier_version=plan["classifier_version"],
+            prompt_version=plan["prompt_version"],
+            sampler_version=plan["sampler_version"],
+            corpus_hash=plan["corpus_hash"],
+            sample_manifest_hash=plan["sample_manifest_hash"],
         )
     elif args.action == "approve":
         profile = approve_profile(profile, by=args.by)

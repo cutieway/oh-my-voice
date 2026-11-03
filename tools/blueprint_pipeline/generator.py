@@ -125,7 +125,9 @@ def build_individual_profile(
     structured provenance record. Null fields are omitted from the prompt, never
     replaced with arbitrary defaults.
     """
-    identity_context = dossier.get("identity") or {}
+    identity_context = dict(dossier.get("identity") or {})
+    if dossier.get("voice_evidence"):
+        identity_context["voice_evidence"] = dossier.get("voice_evidence")
     identity: dict[str, Any] = {}
     evidence: dict[str, dict] = {}
     provenance: dict[str, dict] = {}
@@ -161,33 +163,43 @@ def build_individual_profile(
             )
         provenance[field] = _provenance(decision)
 
+    # Cached pre-2.0 classifications predate statuses; their labels are kept
+    # readable for migration. A current record that omits status is unresolved.
+    legacy_classification = not classification.get("schema_version")
     speech_style = {}
     for field, decision in (classification.get("speech_style") or {}).items():
         if field not in VALIDATED_STYLE_FIELDS:
             continue
         value = decision.get("value")
-        if value is not None:
+        status = decision.get("status") or ("supported" if legacy_classification else "unresolved")
+        if value is not None and status in {"supported", "mixed"}:
             speech_style[field] = value
-    style_analysis = {}
-    for field, decision in (classification.get("speech_style") or {}).items():
-        if field not in VALIDATED_STYLE_FIELDS or decision.get("value") is None:
-            continue
-        style_analysis[field] = {
-            "value": decision.get("value"),
-            "confidence": decision.get("confidence"),
-            "probabilities": decision.get("probabilities"),
-            "method": decision.get("method") or classification.get("provider"),
+    full_analysis = classification.get("speech_style_analysis") or {}
+    dimensions = {
+        field: decision
+        for field, decision in (full_analysis.get("dimensions") or {}).items()
+        if field in VALIDATED_STYLE_FIELDS
+    }
+    if not dimensions:
+        dimensions = {
+            field: decision
+            for field, decision in (classification.get("speech_style") or {}).items()
+            if field in VALIDATED_STYLE_FIELDS
+            and (
+                decision.get("status")
+                or ("supported" if legacy_classification else "unresolved")
+            ) in {"supported", "mixed"}
+            and decision.get("value") is not None
         }
     analysis = (
         {
+            **{key: value for key, value in full_analysis.items() if key != "dimensions"},
             "source": "blueprint_pipeline.classify",
-            "provider": classification.get("provider"),
-            "model_id": classification.get("model_id"),
             "classification": classification.get("canonical_id"),
             "dossier_hash": classification.get("dossier_hash"),
-            "fields": style_analysis,
+            "fields": dimensions,
         }
-        if style_analysis
+        if dimensions
         else None
     )
     confidence_values = [
@@ -227,6 +239,10 @@ def build_individual_profile(
             "configuration_hash": classification.get("configuration_hash") or "",
             "source_audit_hash": object_hash(classification),
             "timestamp": classification.get("timestamp", ""),
+            "taxonomy_version": (classification.get("configuration") or {}).get("taxonomy_version"),
+            "classifier_version": (classification.get("configuration") or {}).get("classifier_version"),
+            "prompt_version": (classification.get("configuration") or {}).get("prompt_version"),
+            "sampler_version": (classification.get("configuration") or {}).get("sampler_version"),
         },
         "lifecycle": {
             "status": "draft",

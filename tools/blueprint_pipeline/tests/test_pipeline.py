@@ -32,7 +32,11 @@ from blueprint_pipeline.dossier import build_dossiers
 from blueprint_pipeline.dialogue import (
     _length_bucket as length_bucket,
     analyze_dialogue,
+    build_dialogue_sample_pools,
+    evidence_sufficiency,
+    sample_manifest_hash,
     select_representative_samples,
+    select_targeted_samples,
     split_speaker_label,
 )
 from blueprint_pipeline.casting import cast_identity, normalize_sex
@@ -101,8 +105,9 @@ def make_database(path: Path) -> None:
     connection.close()
 
 
-def response_for(questions: dict) -> dict:
+def response_for(questions: dict, sample_ids: list[str] | None = None) -> dict:
     answers = {}
+    evidence = list(sample_ids or ["L1", "L2", "L3"])
     for question_id, question in questions.items():
         if question["type"] == "choice":
             options = list(question["criteria"])
@@ -110,7 +115,12 @@ def response_for(questions: dict) -> dict:
             answers[question_id] = {
                 "type": "choice",
                 "choice": choice,
+                "status": "supported",
                 "confidence": 0.99,
+                "model_self_reported_confidence": 0.99,
+                "supporting_line_ids": evidence[:2],
+                "counterexample_line_ids": [],
+                "rationale": "The pattern recurs across the cited lines.",
                 "probabilities": {key: float(key == choice) for key in options},
             }
         elif question["type"] == "score":
@@ -211,19 +221,41 @@ class JevTests(unittest.TestCase):
     def test_choice_score_noul_distributions_and_request_shape(self):
         payload = response_for(self.questions)
         normalized = validate_response(payload, self.questions)
-        self.assertEqual(normalized["answers"]["individual_design"]["probabilities"]["3"], 1.0)
-        self.assertEqual(normalized["answers"]["identity_resolved"]["noul"], 0.99)
+        self.assertNotIn("individual_design", normalized["answers"])
+        self.assertNotIn("identity_resolved", normalized["answers"])
+        self.assertEqual(normalized["answers"]["speech_style.register"]["choice"], "formal")
+        self.assertEqual(normalized["answers"]["speech_style.register"]["supporting_line_ids"], ["L1", "L2"])
         captured = []
         def opener(request, timeout):
             captured.append(request)
             return FakeResponse(payload)
         with patch.dict(os.environ, {"UNIT_TYPESAFE_KEY": "secret-test-key"}):
             provider = JevProvider(endpoint="https://jev.test/v1/systemone", api_key_env="UNIT_TYPESAFE_KEY", opener=opener, sleeper=lambda _: None)
-            result = provider.classify({"identity": {"name": "Test"}}, self.questions)
+            result = provider.classify({
+                "identity": {"name": "Test"},
+                "statistics": {"dialogue_count": 1, "unique_line_count": 1},
+                "dialogue_samples": [{"id": "L1", "text": "The gate opens at dawn."}],
+            }, self.questions)
         self.assertEqual(captured[0].method, "POST")
         self.assertEqual(captured[0].get_header("Authorization"), "Bearer secret-test-key")
         request_body = json.loads(captured[0].data)
         self.assertEqual(set(request_body), {"model", "state", "questions"})
+        state = request_body["state"]
+        self.assertNotIn("identity", state)
+        self.assertNotIn("appearance", state)
+        self.assertNotIn("voice_evidence", state)
+        self.assertTrue(all("signals" not in sample for sample in state["dialogue_samples"]))
+        self.assertEqual([sample["id"] for sample in state["dialogue_samples"]], ["L1"])
+        self.assertNotIn("identity_resolved", request_body["questions"])
+        self.assertNotIn("voice_evidence_present", request_body["questions"])
+        self.assertNotIn("individual_design", request_body["questions"])
+        self.assertEqual(
+            set(request_body["questions"]),
+            {f"speech_style.{field}" for field in (
+                "register", "vocabulary_complexity", "sentence_complexity",
+                "colloquialism", "rhetorical_style",
+            )},
+        )
         self.assertEqual(result["model"], "jev-1.14.0")
         self.assertEqual(result["usage"]["input_tokens"], 1234)
         self.assertNotIn("secret-test-key", json.dumps(result))
@@ -273,13 +305,29 @@ class JevTests(unittest.TestCase):
         self.assertNotIn("acoustic_casting", result)
         self.assertFalse([key for key in result["questions"] if key.startswith("identity.")])
 
-    def test_voiced_identity_is_rejected_before_provider_call(self):
+    def test_verified_voice_is_rejected_before_provider_call(self):
         class NeverCall(RulesProvider):
             def classify(self, dossier, questions):
-                raise AssertionError("provider must not see a voiced identity")
-        dossier = {"identity": {"canonical_id": "npc_20", "npc_id": 20, "resolution_status": "eligible", "has_se_voice_reference": True}}
+                raise AssertionError("provider must not see a verified voiced identity")
+        dossier = {"identity": {"canonical_id": "npc_20", "npc_id": 20, "resolution_status": "eligible", "has_recorded_voice": True}}
         result = classify_dossier(dossier, NeverCall(self.vocab), self.vocab)
         self.assertEqual(result["status"], "needs_review")
+
+    def test_raw_scd_reference_is_not_proof_of_recorded_voice(self):
+        dossier = {
+            "input_hash": "input",
+            "identity": {
+                "canonical_id": "npc_21", "npc_id": 21, "resolution_status": "eligible",
+                "has_se_voice_reference": True, "has_recorded_voice": False,
+                "identity_ambiguous": False,
+            },
+            "statistics": {"dialogue_count": 100},
+            "dialogue_analysis": {"interpretation": {"register": "formal"}},
+        }
+        result = classify_dossier(dossier, RulesProvider(self.vocab), self.vocab)
+        self.assertEqual(result["status"], "needs_review")
+        self.assertIn("unverified SE voice reference", " ".join(result["review_reasons"]))
+        self.assertNotEqual(result["profile_allocation"]["decision"], "official_audio")
 
 
 class BlueprintAndReviewTests(unittest.TestCase):
@@ -340,6 +388,58 @@ class BlueprintAndReviewTests(unittest.TestCase):
             self.assertEqual(blueprint.validate_profile(changed, self.vocab), [])
             self.assertEqual(preserve_manual_profile(changed, original), changed)
 
+    def test_audition_pin_stores_reference_design_provenance(self):
+        profile = copy.deepcopy(self.archetypes[0])
+        profile["speech_style"] = {"register": "formal"}
+        profile["speech_style_analysis"] = {
+            "taxonomy_version": "taxonomy-test",
+            "classifier_version": "classifier-test",
+            "prompt_version": "prompt-test",
+            "sampler_version": "sampler-test",
+            "corpus_hash": "corpus-test",
+            "sample_manifest_hash": "manifest-test",
+            "fields": {"register": {"value": "formal", "status": "supported"}},
+        }
+        plan = blueprint.build_plan(profile, self.vocab)
+        self.assertEqual(plan["taxonomy_version"], "taxonomy-test")
+        self.assertEqual(plan["corpus_hash"], "corpus-test")
+        with tempfile.TemporaryDirectory() as tmp:
+            wav = Path(tmp) / "reference.wav"
+            with wave.open(str(wav), "wb") as audio:
+                audio.setnchannels(1)
+                audio.setsampwidth(2)
+                audio.setframerate(8000)
+                audio.writeframes(b"\0\0" * 8000 * 10)
+            pinned = mark_auditioned(
+                profile,
+                reference_file=wav,
+                design_seed=plan["seed"],
+                by="reviewer",
+                reference_transcript=plan["reference"]["text"],
+                design_model=plan["design_model"],
+                identity_prompt_hash=plan["identity_prompt_hash"],
+                style_profile_hash=plan["style_profile_hash"],
+                combined_instruct_hash=plan["combined_instruct_hash"],
+                casting_rules_version=plan["casting_rules_version"],
+                renderer_version=plan["renderer_version"],
+                instruct=plan["instruct"],
+                taxonomy_version=plan["taxonomy_version"],
+                classifier_version=plan["classifier_version"],
+                prompt_version=plan["prompt_version"],
+                sampler_version=plan["sampler_version"],
+                corpus_hash=plan["corpus_hash"],
+                sample_manifest_hash=plan["sample_manifest_hash"],
+            )
+            pin = pinned["reference_pin"]
+            self.assertEqual(pin["instruct"], plan["instruct"])
+            self.assertEqual(pin["taxonomy_version"], "taxonomy-test")
+            self.assertEqual(pin["classifier_version"], "classifier-test")
+            self.assertEqual(pin["prompt_version"], "prompt-test")
+            self.assertEqual(pin["sampler_version"], "sampler-test")
+            self.assertEqual(pin["corpus_hash"], "corpus-test")
+            self.assertEqual(pin["sample_manifest_hash"], "manifest-test")
+            self.assertEqual(blueprint.validate_profile(pinned, self.vocab), [])
+
 
 class SpeechStyleBenchmarkProtocolTests(unittest.TestCase):
     def _items(self, sample_count: int = 12) -> dict:
@@ -373,6 +473,82 @@ class SpeechStyleBenchmarkProtocolTests(unittest.TestCase):
             "instructions": "test",
             "items": payload_items,
         }
+
+    def test_jev_benchmark_runner_uses_identity_blind_state(self):
+        root = Path(tempfile.mkdtemp())
+        samples = [
+            {"id": f"L{index:02d}", "text": "The gate opens at dawn and the road stays clear today.",
+             "source": "quest", "sheet": "s"}
+            for index in range(10)
+        ]
+        dossier = {
+            "identity": {"canonical_id": "npc_1", "race": "Hyur", "sex": "female"},
+            "statistics": {"dialogue_count": 10, "unique_line_count": 10},
+            "dialogue_samples": samples,
+        }
+        dossier_path = root / "dossiers" / "B1.json"
+        dossier_path.parent.mkdir(parents=True)
+        dossier_path.write_text(json.dumps(dossier))
+        (root / "manifest.json").write_text(json.dumps({
+            "public_dossiers": [{
+                "benchmark_id": "B1",
+                "dossier_path": str(dossier_path),
+                "input_hash": "h",
+                "sample_line_ids": ["L00", "L01"],
+            }],
+            "model": {},
+        }))
+        captured = {}
+
+        class FakeProvider:
+            def __init__(self, **kwargs):
+                pass
+
+            def classify_state(self, state, questions):
+                captured["state"] = state
+                return response_for(questions, ["L00", "L01"])
+
+        with patch.object(evaluation, "JevProvider", FakeProvider), patch(
+            "sys.stdout", new=io.StringIO()
+        ):
+            report = evaluation.run_jev(root=root, limit=1)
+        self.assertEqual(report["failure_count"], 0)
+        self.assertNotIn("identity", captured["state"])
+        self.assertNotIn("appearance", captured["state"])
+        prediction = json.loads((root / "predictions" / "jev" / "B1.json").read_text())
+        self.assertEqual(prediction["answers"]["speech_style.register"]["choice"], "formal")
+        self.assertEqual(len(prediction["sample_line_ids"]), 10)
+
+    def test_benchmark_rejects_citations_absent_from_the_request(self):
+        answers = {
+            "speech_style.register": {
+                "type": "choice",
+                "choice": "formal",
+                "status": "supported",
+                "supporting_line_ids": ["L00", "missing"],
+                "counterexample_line_ids": [],
+            },
+            "speech_style.colloquialism": {
+                "type": "choice",
+                "choice": "mixed",
+                "status": "mixed",
+                "supporting_line_ids": ["L00", "L01"],
+                "counterexample_line_ids": [],
+            },
+        }
+        evaluation._reject_invalid_jev_citations(
+            answers, {"L00", "L01", "L02"},
+        )
+        self.assertIsNone(answers["speech_style.register"]["choice"])
+        self.assertEqual(answers["speech_style.register"]["status"], "rejected")
+        self.assertIsNone(answers["speech_style.colloquialism"]["choice"])
+        self.assertEqual(answers["speech_style.colloquialism"]["status"], "rejected")
+        self.assertEqual(
+            evaluation._prediction_label({
+                "choice": None, "status": "insufficient_evidence",
+            }),
+            "insufficient_evidence",
+        )
 
     def test_text_only_state_withholds_measurements(self):
         dossier = {"benchmark_id": "B1", "dialogue_samples": [
@@ -686,6 +862,73 @@ class SpeechStyleBenchmarkProtocolTests(unittest.TestCase):
             result = evaluation.import_adjudication(root=root, source=submission, annotation_run="run-1")
             self.assertEqual(result["adjudicated_field_count"], len(evaluation.FIELDS))
 
+    def test_completed_adjudication_scores_new_metrics(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            items = {
+                "B1": {
+                    "sample_count": 2,
+                    "dialogue_samples": [
+                        {"id": "B1-L01", "text": "The gate opens at dawn."},
+                        {"id": "B1-L02", "text": "We will be ready."},
+                    ],
+                },
+                "B2": {
+                    "sample_count": 2,
+                    "dialogue_samples": [
+                        {"id": "B2-L01", "text": "The road is long."},
+                        {"id": "B2-L02", "text": "Keep moving."},
+                    ],
+                },
+            }
+            (root / "dossiers").mkdir()
+            public, selection = [], []
+            for benchmark_id, item in items.items():
+                path = root / "dossiers" / f"{benchmark_id}.json"
+                path.write_text(json.dumps({"benchmark_id": benchmark_id, "dialogue_samples": item["dialogue_samples"]}))
+                public.append({"benchmark_id": benchmark_id, "dossier_path": str(path)})
+                selection.append({
+                    "benchmark_id": benchmark_id,
+                    "split": "locked_test" if benchmark_id == "B1" else "development",
+                    "stratum": "5-20",
+                    "source_dossier_path": str(path),
+                })
+            (root / "manifest.json").write_text(json.dumps({
+                "public_dossiers": public,
+                "private_selection": selection,
+                "annotation_scopes": {"full": {"item_ids": ["B1", "B2"]}},
+            }))
+            (root / "annotations").mkdir()
+            for name in ("annotator_a", "annotator_b"):
+                (root / "annotations" / f"{name}.json").write_text(json.dumps(self._form(items)))
+            (root / "adjudicated").mkdir()
+            (root / "adjudicated" / "gold.json").write_text(json.dumps({
+                "items": [
+                    {
+                        "benchmark_id": benchmark_id,
+                        "adjudicated_labels": {
+                            field: next(iter(options)) for field, options in evaluation.FIELDS.items()
+                        },
+                    }
+                    for benchmark_id in items
+                ],
+            }))
+            prediction_dir = root / "predictions" / "rules_full"
+            prediction_dir.mkdir(parents=True)
+            (prediction_dir / "B1.json").write_text(json.dumps({
+                "answers": {
+                    field: {"choice": next(iter(options))}
+                    for field, options in evaluation.FIELDS.items()
+                },
+            }))
+            report = evaluation.evaluate_benchmark(root=root, scope="full")
+            self.assertEqual(report["annotation_status"], "complete_and_adjudicated")
+            metrics = report["gold_metrics"]["rules_full"]["fields"]["register"]
+            self.assertIn("selective_accuracy", metrics)
+            self.assertIn("cohen_kappa", metrics)
+            self.assertIn("mixed_detection", metrics)
+            self.assertEqual(metrics["selective_accuracy"]["n"], 1)
+
     def test_expected_items_follow_manifest_scope(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -724,16 +967,20 @@ class CompactStateAndSampleTests(unittest.TestCase):
             "dialogue_samples": [{"text": "Hello.", "source": "quest", "sheet": "s", "signals": ["question"]}],
         }
         state = compact_state(dossier)
-        self.assertIn("dialogue_measurements", state)
+        self.assertNotIn("dialogue_measurements", state)
         self.assertNotIn("interpretation", json.dumps(state))
-        self.assertEqual(state["dialogue_measurements"]["signal_line_rates"]["dialect_lines"], 0.4)
+        self.assertNotIn("identity", state)
+        self.assertNotIn("voice_evidence", state)
         self.assertEqual(state["dialogue_coverage"]["sampled_lines"], 1)
         self.assertEqual(round(state["dialogue_coverage"]["coverage_of_unique_lines"], 3), 0.001)
-        self.assertIn("signal-weighted subset", state["dialogue_coverage"]["warning"])
-        self.assertEqual(state["dialogue_samples"][0]["signals"], ["question"])
-        self.assertEqual(state["voice_evidence"], [])
+        self.assertIn("deterministic subset", state["dialogue_coverage"]["warning"])
+        self.assertNotIn("signals", state["dialogue_samples"][0])
+        self.assertRegex(state["dialogue_samples"][0]["id"], r"^L[0-9A-F]{16}$")
+        self.assertEqual(state["dialogue_samples"], compact_state(dossier)["dialogue_samples"])
         self.assertNotIn("lore_quotes", state)
         self.assertNotIn("mood", " ".join(state["guardrails"]).lower())
+        assisted = compact_state(dossier, include_measurements=True)
+        self.assertEqual(assisted["dialogue_measurements"]["signal_line_rates"]["dialect_lines"], 0.4)
 
     def test_state_drops_samples_before_it_drops_evidence(self):
         dossier = {
@@ -745,6 +992,20 @@ class CompactStateAndSampleTests(unittest.TestCase):
         state = compact_state(dossier, max_bytes=4000)
         self.assertLess(len(state["dialogue_samples"]), 20)
         self.assertEqual(state["dialogue_coverage"]["sampled_lines"], len(state["dialogue_samples"]))
+        self.assertTrue(state["budget_reduction"]["applied"])
+        self.assertEqual(state["budget_reduction"]["original_samples"], 20)
+        self.assertEqual(state["budget_reduction"]["final_samples"], len(state["dialogue_samples"]))
+        self.assertEqual(
+            state["sample_manifest_hash"],
+            sample_manifest_hash("npc_2", state["dialogue_samples"]),
+        )
+        self.assertEqual(
+            state["dialogue_coverage"]["sampled_words"],
+            sum(len(sample["text"].split()) for sample in state["dialogue_samples"]),
+        )
+        self.assertEqual(
+            state["dialogue_coverage"]["sampled_lines"], len(state["dialogue_samples"])
+        )
 
     def test_speaker_labels_are_stage_directions_not_dialogue(self):
         self.assertEqual(
@@ -763,16 +1024,18 @@ class CompactStateAndSampleTests(unittest.TestCase):
         self.assertEqual(sample["text"], "Calm yourself, friend.")
         self.assertEqual(sample["speaker_label"], "Fuath")
 
-    def test_sample_selection_prefers_stylistically_distinctive_lines(self):
+    def test_targeted_pool_finds_habits_without_biasing_representative_pool(self):
         lines = [
             {"voice_line_id": f"g{i}", "text": f"The road is long and the sky is grey number {i}.", "source": "quest", "sheet": "s"}
             for i in range(12)
         ] + [
             {"voice_line_id": "d1", "text": "Aye, I've not seen yer like here before, an' that's the truth of it.", "source": "quest", "sheet": "s"},
         ]
-        samples = select_representative_samples("npc_4", lines, max_count=3, vocabulary=self.vocab)
-        self.assertEqual(samples[0]["voice_line_id"], "d1")
-        self.assertTrue(any(signal.startswith("dialect:") for signal in samples[0]["signals"]))
+        representative = select_representative_samples("npc_4", lines, max_count=3, vocabulary=self.vocab)
+        targeted = select_targeted_samples("npc_4", lines, max_count=3, vocabulary=self.vocab)
+        self.assertEqual(targeted[0]["voice_line_id"], "d1")
+        self.assertTrue(any(signal.startswith("dialect:") for signal in targeted[0]["signals"]))
+        self.assertTrue(all("signals" not in sample for sample in representative))
 
     def test_many_sheets_do_not_starve_medium_and_long_buckets(self):
         # Gerolt's shape: 200+ quest sheets, 181 short / 953 medium / 947 long
@@ -1086,3 +1349,312 @@ class VoiceCastingSpecTests(unittest.TestCase):
             handle.setsampwidth(2)
             handle.setframerate(16000)
             handle.writeframes(bytes(frames))
+
+
+class StyleDecisionContractTests(unittest.TestCase):
+    def setUp(self):
+        self.vocab = blueprint.load_vocabulary()
+
+    def _dossier(self, count: int = 30) -> dict:
+        samples = [
+            {
+                "id": f"L{index:03d}",
+                "text": "The gate opens at dawn and the road stays clear today.",
+                "source": "quest" if index % 2 else "custom",
+                "sheet": f"sheet-{index % 3}",
+            }
+            for index in range(count)
+        ]
+        return {
+            "input_hash": "dossier-hash",
+            "identity": {
+                "canonical_id": "npc_30", "npc_id": 30, "name": "Test",
+                "resolution_status": "eligible", "identity_ambiguous": False,
+                "has_recorded_voice": False, "has_se_voice_reference": False,
+            },
+            "statistics": {"dialogue_count": 100, "unique_line_count": 100},
+            "dialogue_analysis": {
+                "measurements": {"word_count": count * 12, "raw_line_count": count},
+                "interpretation": {
+                    "register": "formal",
+                    "vocabulary_complexity": "advanced",
+                    "sentence_complexity": "complex",
+                    "colloquialism": "low",
+                    "rhetorical_style": "measured",
+                },
+            },
+            "dialogue_samples": samples,
+        }
+
+    class CitedRules(RulesProvider):
+        def classify(self, dossier, questions):
+            result = super().classify(dossier, questions)
+            ids = [sample["id"] for sample in dossier["dialogue_samples"]]
+            for answer in result["answers"].values():
+                answer["supporting_line_ids"] = ids[:2]
+                answer["status"] = "supported"
+            return result
+
+    class CitedJev(CitedRules):
+        name = "jev"
+        model_id = "jev-test"
+
+    def test_supported_and_provisional_fields_are_separated_without_defaults(self):
+        dossier = self._dossier()
+        result = classify_dossier(dossier, self.CitedRules(self.vocab), self.vocab)
+        self.assertEqual(result["status"], "ready_for_audition")
+        self.assertEqual(result["profile_allocation"]["decision"], "individual_design")
+        self.assertEqual(result["speech_style"]["register"]["status"], "supported")
+        self.assertEqual(result["speech_style"]["rhetorical_style"]["status"], "provisional")
+        self.assertEqual(result["speech_style"]["rhetorical_style"]["value"], "measured")
+        self.assertIn("rhetorical_style", result["profile_allocation"]["provisional_style_fields"])
+
+        casting = cast_identity(dossier["identity"])
+        profile = build_individual_profile(dossier, result, casting, self.vocab)
+        self.assertEqual(
+            set(profile["speech_style"]),
+            {"register", "vocabulary_complexity", "sentence_complexity", "colloquialism"},
+        )
+        self.assertNotIn("rhetorical_style", profile["speech_style"])
+        self.assertEqual(
+            profile["speech_style_analysis"]["fields"]["rhetorical_style"]["status"],
+            "provisional",
+        )
+        style = blueprint.render_style(profile, self.vocab)
+        self.assertIn("formal in register", style)
+        self.assertNotIn("rhetorical", style)
+
+    def test_rules_provider_without_rule_result_returns_null(self):
+        dossier = {
+            "input_hash": "dossier-hash",
+            "identity": {
+                "canonical_id": "npc_31", "npc_id": 31, "name": "Test",
+                "resolution_status": "eligible", "identity_ambiguous": False,
+                "has_recorded_voice": False, "has_se_voice_reference": False,
+            },
+            "statistics": {"dialogue_count": 30, "unique_line_count": 30},
+            "dialogue_analysis": {"interpretation": {}},
+            "dialogue_samples": self._dossier()["dialogue_samples"],
+        }
+        result = classify_dossier(dossier, RulesProvider(self.vocab), self.vocab)
+        for field, decision in result["speech_style"].items():
+            self.assertIsNone(decision["value"], field)
+            self.assertIn(decision["status"], {"insufficient_evidence", "rejected"}, field)
+            self.assertEqual(decision["method"], "rules_baseline")
+
+    def test_mixed_survives_aggregation_and_rendering(self):
+        class MixedJev(self.CitedJev):
+            def classify(self, dossier, questions):
+                result = super().classify(dossier, questions)
+                ids = [sample["id"] for sample in dossier["dialogue_samples"]]
+                result["answers"]["speech_style.register"].update(
+                    choice="mixed", status="mixed",
+                    supporting_line_ids=ids[:2],
+                    counterexample_line_ids=ids[2:3],
+                )
+                return result
+
+        dossier = self._dossier()
+        result = classify_dossier(dossier, MixedJev(self.vocab), self.vocab)
+        self.assertEqual(result["speech_style"]["register"]["status"], "mixed")
+        self.assertEqual(result["speech_style"]["register"]["value"], "mixed")
+        casting = cast_identity(dossier["identity"])
+        profile = build_individual_profile(dossier, result, casting, self.vocab)
+        self.assertEqual(profile["speech_style"]["register"], "mixed")
+        self.assertIn("mixed in register", blueprint.render_style(profile, self.vocab))
+
+    def test_jev_citations_are_checked_against_budget_trimmed_request(self):
+        samples = [
+            {
+                "id": f"L{index:03d}",
+                "text": "word " * 100,
+                "source": "quest" if index % 2 else "custom",
+                "sheet": f"sheet-{index % 3}",
+            }
+            for index in range(300)
+        ]
+        dossier = self._dossier(count=300)
+        dossier["dialogue_samples"] = samples
+        dossier["statistics"] = {"dialogue_count": 300, "unique_line_count": 300}
+
+        class DroppedCitation(self.CitedJev):
+            def classify(self, dossier, questions):
+                result = super().classify(dossier, questions)
+                result["answers"]["speech_style.register"].update(
+                    supporting_line_ids=["L299", "L298"],
+                )
+                return result
+
+        result = classify_dossier(dossier, DroppedCitation(self.vocab), self.vocab)
+        decision = result["speech_style"]["register"]
+        self.assertEqual(decision["status"], "rejected")
+        self.assertIn("absent from the request", decision["rationale"])
+        sent_ids = {
+            sample["id"] for sample in compact_state(dossier, vocabulary=self.vocab)["dialogue_samples"]
+        }
+        kept = [sample for sample in samples if sample["id"] in sent_ids]
+        self.assertLess(len(kept), len(samples))
+        self.assertEqual(
+            result["speech_style_analysis"]["evidence"]["sampled_lines"], len(kept),
+        )
+        self.assertEqual(
+            result["speech_style_analysis"]["sample_manifest_hash"],
+            sample_manifest_hash("npc_30", kept),
+        )
+        reduction = result["speech_style_analysis"]["budget_reduction"]
+        self.assertTrue(reduction["applied"])
+        self.assertEqual(reduction["final_samples"], len(kept))
+
+    def test_current_classification_without_status_is_not_promoted(self):
+        dossier = self._dossier()
+        result = classify_dossier(dossier, self.CitedRules(self.vocab), self.vocab)
+        del result["speech_style"]["register"]["status"]
+        casting = cast_identity(dossier["identity"])
+        profile = build_individual_profile(dossier, result, casting, self.vocab)
+        self.assertNotIn("register", profile["speech_style"])
+
+    def test_insufficient_sample_yields_null_fields_not_first_options(self):
+        dossier = self._dossier(count=3)
+        result = classify_dossier(dossier, self.CitedRules(self.vocab), self.vocab)
+        self.assertEqual(result["status"], "needs_review")
+        self.assertEqual(result["profile_allocation"]["decision"], "shared_archetype")
+        for field, decision in result["speech_style"].items():
+            self.assertIsNone(decision["value"], field)
+            self.assertEqual(decision["status"], "insufficient_evidence", field)
+        casting = cast_identity(dossier["identity"])
+        profile = build_individual_profile(dossier, result, casting, self.vocab)
+        self.assertIsNone(profile["speech_style"])
+        self.assertEqual(blueprint.render_style(profile, self.vocab), "")
+        plan = blueprint.build_plan(profile, self.vocab)
+        self.assertNotIn("The wording is", plan["instruct"])
+
+    def test_invalid_citation_and_mixed_without_counterexample_are_rejected(self):
+        class BadCitation(self.CitedJev):
+            def classify(self, dossier, questions):
+                result = super().classify(dossier, questions)
+                result["answers"]["speech_style.register"]["supporting_line_ids"] = ["not-in-request"]
+                return result
+
+        dossier = self._dossier()
+        result = classify_dossier(dossier, BadCitation(self.vocab), self.vocab)
+        self.assertEqual(result["speech_style"]["register"]["status"], "rejected")
+        self.assertIsNone(result["speech_style"]["register"]["value"])
+        self.assertNotIn("rules_baseline_estimate", result["speech_style"]["register"])
+
+        class MixedWithoutCounter(self.CitedJev):
+            def classify(self, dossier, questions):
+                result = super().classify(dossier, questions)
+                result["answers"]["speech_style.register"].update(
+                    choice="mixed", status="mixed", counterexample_line_ids=[],
+                )
+                return result
+
+        result = classify_dossier(dossier, MixedWithoutCounter(self.vocab), self.vocab)
+        self.assertEqual(result["speech_style"]["register"]["status"], "rejected")
+        self.assertIsNone(result["speech_style"]["register"]["value"])
+
+        class BadCounterexample(MixedWithoutCounter):
+            def classify(self, dossier, questions):
+                result = super().classify(dossier, questions)
+                result["answers"]["speech_style.register"].update(
+                    choice="mixed", status="mixed",
+                    counterexample_line_ids=["not-in-request"],
+                )
+                return result
+
+        result = classify_dossier(dossier, BadCounterexample(self.vocab), self.vocab)
+        self.assertEqual(result["speech_style"]["register"]["status"], "rejected")
+
+    def test_jev_abstention_is_preserved_and_invalid_status_is_rejected(self):
+        questions = build_questions(self.vocab)
+        payload = response_for(questions)
+        payload["answers"]["speech_style.register"] = {
+            "type": "choice",
+            "choice": None,
+            "status": "insufficient_evidence",
+            "probabilities": {},
+        }
+        normalized = validate_response(payload, questions)
+        self.assertIsNone(normalized["answers"]["speech_style.register"]["choice"])
+        self.assertEqual(normalized["answers"]["speech_style.register"]["status"], "insufficient_evidence")
+
+        payload["answers"]["speech_style.register"]["status"] = "guessed"
+        with self.assertRaisesRegex(JevResponseError, "invalid status"):
+            validate_response(payload, questions)
+
+        payload["answers"]["speech_style.register"] = {
+            "type": "choice",
+            "choice": "formal",
+            "probabilities": {key: float(key == "formal") for key in questions["speech_style.register"]["criteria"]},
+            "supporting_line_ids": ["L1", "L2"],
+        }
+        normalized = validate_response(payload, questions)
+        self.assertEqual(normalized["answers"]["speech_style.register"]["status"], "unresolved")
+        self.assertEqual(normalized["answers"]["speech_style.register"]["choice"], "formal")
+
+        payload["answers"]["speech_style.register"] = {
+            "type": "choice",
+            "choice": "formal",
+            "status": "supported",
+            "probabilities": {key: float(key == "formal") for key in questions["speech_style.register"]["criteria"]},
+            "supporting_line_ids": ["L1", "L1"],
+        }
+        with self.assertRaisesRegex(JevResponseError, "duplicate"):
+            validate_response(payload, questions)
+
+    def test_style_hash_is_stable_across_audit_timestamps_but_tracks_style(self):
+        dossier = self._dossier()
+        result = classify_dossier(dossier, self.CitedRules(self.vocab), self.vocab)
+        casting = cast_identity(dossier["identity"])
+        profile = build_individual_profile(dossier, result, casting, self.vocab)
+        before = blueprint.prompt_hashes(profile, self.vocab)
+        profile["classification"]["timestamp"] = "different-audit-time"
+        after_timestamp = blueprint.prompt_hashes(profile, self.vocab)
+        self.assertEqual(before["style_profile_hash"], after_timestamp["style_profile_hash"])
+        profile["speech_style"]["register"] = "conversational"
+        after_style = blueprint.prompt_hashes(profile, self.vocab)
+        self.assertEqual(before["identity_prompt"], after_style["identity_prompt"])
+        self.assertEqual(before["identity_prompt_hash"], after_style["identity_prompt_hash"])
+        self.assertNotEqual(before["style_profile_hash"], after_style["style_profile_hash"])
+        self.assertNotEqual(before["combined_instruct_hash"], after_style["combined_instruct_hash"])
+
+    def test_identity_renderer_has_no_unconditional_neutral_tail(self):
+        profile = json.loads(
+            (ROOT / "blueprints" / "archetypes" / "archetype_masculine_clear_mid.json").read_text()
+        )
+        rendered = blueprint.render_identity(profile, self.vocab)
+        self.assertNotIn("Neutral conversational delivery", rendered)
+
+    def test_sample_pools_and_duplicate_accounting_are_explicit(self):
+        lines = [
+            {"dialog_id": "a", "voice_line_id": "a", "text": "Aye, I've not seen yer like here before.", "source": "quest", "sheet": "A"},
+            {"dialog_id": "a", "voice_line_id": "a", "text": "Aye, I've not seen yer like here before.", "source": "quest", "sheet": "A"},
+            {"dialog_id": "b", "voice_line_id": "b", "text": "The road is long and the sky is grey.", "source": "quest", "sheet": "A"},
+        ]
+        pools = build_dialogue_sample_pools("npc_40", lines, vocabulary=self.vocab)
+        self.assertEqual(pools["representative"]["count"], len(pools["representative_samples"]))
+        self.assertEqual(pools["targeted"]["count"], len(pools["targeted_samples"]))
+        self.assertIn("targeted_signal_counts", pools)
+        self.assertIn("targeted evidence never enters", pools["note"])
+        analysis = analyze_dialogue(lines)
+        self.assertGreaterEqual(analysis["measurements"]["duplicate"]["exact_duplicate_rows"], 1)
+
+    def test_representative_sample_is_stable_under_input_reordering(self):
+        lines = [
+            {"voice_line_id": f"v{index}", "text": text, "source": source, "sheet": sheet}
+            for index, (text, source, sheet) in enumerate([
+                ("Aye, the road is long.", "quest", "A"),
+                ("The gate opens at dawn.", "quest", "B"),
+                ("We will be ready before the bells.", "custom", "C"),
+                ("Hm. Another traveller.", "quest", "A"),
+            ])
+        ]
+        first = select_representative_samples("npc_41", lines, max_count=4)
+        repeated = select_representative_samples("npc_41", lines, max_count=4)
+        reversed_input = select_representative_samples("npc_41", list(reversed(lines)), max_count=4)
+        with_vocabulary = select_representative_samples(
+            "npc_41", lines, max_count=4, vocabulary=self.vocab,
+        )
+        self.assertEqual([s["id"] for s in first], [s["id"] for s in repeated])
+        self.assertEqual([s["id"] for s in first], [s["id"] for s in reversed_input])
+        self.assertEqual(first, with_vocabulary)

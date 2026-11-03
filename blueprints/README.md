@@ -357,13 +357,15 @@ the clip and its hash, and record the seed only for reproducibility:
   "design_seed": 20652794,
   "reference_sha256": "<sha256 of refs/take.0.wav>",
   "ref_seconds": 10.48,
-  "ref_f0": 92.0,
   "pinned_on": "2026-11-01"
 }
 ```
 
 A hash mismatch on rebuild means the voice changed and must be re-approved,
-rather than silently re-casting the character.
+rather than silently re-casting the character. When available, the pin also
+records the exact combined `instruct`, the Style taxonomy/classifier/prompt/
+sampler versions, the corpus hash, and the sample-manifest hash, so the WAV can
+be traced to the evidence that produced it.
 
 ## Known limits
 

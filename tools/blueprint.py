@@ -281,7 +281,6 @@ def render_identity(profile: dict, vocab: dict) -> str:
     if traits:
         rendered = [_render(vocab, "distinctive_traits", trait) for trait in traits]
         sentence += " " + spec["traits_sentence"].format(traits=_join(rendered))
-    sentence += " " + spec["tail"]
     return sentence.strip()
 
 
@@ -572,6 +571,7 @@ def profile_key(profile: dict) -> tuple:
         identity.get("pitch_range"),
         identity.get("timbre_primary"),
         identity.get("timbre_secondary"),
+        tuple(identity.get("timbre_preferences") or []),
         identity.get("resonance"),
         identity.get("articulation"),
         identity.get("speaking_pace"),
@@ -637,11 +637,15 @@ def prompt_hashes(profile: dict, vocab: dict) -> dict:
         "renderer_version": RENDERER_VERSION,
         "casting_rules_version": casting_rules_version,
     })
+    style_analysis = profile.get("speech_style_analysis") or {}
     style_hash = _sha256_json({
         "speech_style": profile.get("speech_style") or {},
-        "speech_style_analysis": profile.get("speech_style_analysis"),
-        "classification": profile.get("classification"),
+        "style_fields": style_analysis.get("fields") or {},
         "style_vocabulary": vocab.get("speech_style"),
+        "taxonomy_version": style_analysis.get("taxonomy_version"),
+        "classifier_version": style_analysis.get("classifier_version"),
+        "prompt_version": style_analysis.get("prompt_version"),
+        "sampler_version": style_analysis.get("sampler_version"),
     })
     reference = vocab["reference"]
     combined_hash = _sha256_json({
@@ -672,6 +676,8 @@ def build_plan(profile: dict, vocab: dict) -> dict:
     hashes = prompt_hashes(profile, vocab)
     instruct = hashes["identity_prompt"] + hashes["style_prompt"]
     reference = vocab["reference"]
+    style_analysis = profile.get("speech_style_analysis") or {}
+    classification = profile.get("classification") or {}
     return {
         "profile_id": voice_id,
         "profile_version": profile["profile_version"],
@@ -698,6 +704,27 @@ def build_plan(profile: dict, vocab: dict) -> dict:
         "cache_key": hashes["combined_instruct_hash"],
         "casting_rules_version": hashes["casting_rules_version"],
         "renderer_version": hashes["renderer_version"],
+        "taxonomy_version": (
+            style_analysis.get("taxonomy_version")
+            or classification.get("taxonomy_version")
+        ),
+        "classifier_version": (
+            style_analysis.get("classifier_version")
+            or classification.get("classifier_version")
+        ),
+        "prompt_version": (
+            style_analysis.get("prompt_version")
+            or classification.get("prompt_version")
+        ),
+        "sampler_version": (
+            style_analysis.get("sampler_version")
+            or classification.get("sampler_version")
+        ),
+        "corpus_hash": (
+            style_analysis.get("corpus_hash")
+            or classification.get("dossier_hash")
+        ),
+        "sample_manifest_hash": style_analysis.get("sample_manifest_hash"),
     }
 
 

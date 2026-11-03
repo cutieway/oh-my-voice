@@ -34,3 +34,7 @@ __pycache__/
 # Example blueprints are local audition material, not shipped data. The
 # pipeline that will fill blueprints/characters/ does not exist yet.
 /blueprints/archive/
+
+
+/ffxiv_voice_casting_implementation_spec.md
+/oh_my_voice_commit_4468848_review_and_jev_style_refactor_spec.md

@@ -8,6 +8,7 @@ model outputs, deterministic labels, or train/test split information.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import hashlib
 import io
 import json
@@ -21,10 +22,16 @@ from typing import Any
 from urllib.request import Request, urlopen
 
 from .cache import object_hash, read_json, write_immutable_json
-from .config import DEFAULT_DB
+from .config import (
+    DEFAULT_DB,
+    STYLE_PROMPT_VERSION,
+    DIALOGUE_SAMPLER_VERSION,
+    STYLE_TAXONOMY_VERSION,
+)
 from .dossier import build_dossiers
 from .inventory import build_inventory
-from .dialogue import analyze_dialogue, words
+from .dialogue import analyze_dialogue, evidence_sufficiency, words
+from .jev import JevError, JevProvider, build_questions as build_style_questions
 
 try:
     import blueprint as blueprint_renderer
@@ -287,6 +294,13 @@ def build_speech_style_state(benchmark_dossier: dict, *, condition: str = "assis
             {"id": sample["id"], "text": sample["text"]}
             for sample in samples
         ],
+        "taxonomy_version": STYLE_TAXONOMY_VERSION,
+        "prompt_version": STYLE_PROMPT_VERSION,
+        "sampler_version": DIALOGUE_SAMPLER_VERSION,
+        "evidence_sufficiency": evidence_sufficiency(
+            {"unique_line_count": len(samples)}, samples,
+            vocabulary=blueprint_renderer.load_vocabulary(),
+        ),
     }
     if condition == "assisted":
         sample_analysis = analyze_dialogue(samples, blueprint_renderer.load_vocabulary())
@@ -752,7 +766,9 @@ def prepare_benchmark(
     return report
 
 
-def _validate_choice_response(payload: dict, questions: dict) -> dict:
+def _validate_choice_response(
+    payload: dict, questions: dict, sample_ids: list[str] | None = None,
+) -> dict:
     if not isinstance(payload.get("model"), str) or not isinstance(payload.get("answers"), dict):
         raise ValueError("native response missing model or answers")
     if set(payload["answers"]) != set(questions):
@@ -775,7 +791,29 @@ def _validate_choice_response(payload: dict, questions: dict) -> dict:
         confidence = float(answer.get("confidence"))
         if not math.isfinite(confidence) or not 0 <= confidence <= 1:
             raise ValueError(f"invalid confidence for {field}")
-        parsed[field] = {"label": choice, "probabilities": probabilities, "confidence": confidence}
+        supporting = answer.get("supporting_line_ids") or []
+        counterexamples = answer.get("counterexample_line_ids") or []
+        for label, ids in (("supporting", supporting), ("counterexample", counterexamples)):
+            if not isinstance(ids, list) or any(not isinstance(item, str) for item in ids):
+                raise ValueError(f"invalid {label} line IDs for {field}")
+            if len(ids) != len(set(ids)):
+                raise ValueError(f"duplicate {label} line IDs for {field}")
+            if sample_ids is not None:
+                unknown = [item for item in ids if item not in sample_ids]
+                if unknown:
+                    raise ValueError(f"{label} line IDs not in request for {field}: {unknown}")
+        parsed[field] = {
+            "label": choice,
+            "probabilities": probabilities,
+            "confidence": confidence,
+            "status": answer.get("status") or (
+                "insufficient_evidence" if choice == "insufficient_evidence" else "unresolved"
+            ),
+            "supporting_line_ids": supporting,
+            "counterexample_line_ids": counterexamples,
+            "rationale": answer.get("rationale"),
+            "model_self_reported_confidence": answer.get("model_self_reported_confidence"),
+        }
     return parsed
 
 
@@ -839,7 +877,10 @@ def run_nimble(
                 status = response.status
             elapsed_ms = round((time.perf_counter() - started) * 1000, 3)
             payload = json.loads(raw.decode("utf-8"))
-            answers = _validate_choice_response(payload, questions)
+            answers = _validate_choice_response(
+                payload, questions,
+                [sample["id"] for sample in state["dialogue_samples"]],
+            )
             record = {
                 "benchmark_id": entry["benchmark_id"],
                 "system": "nimble_native_systemone",
@@ -854,7 +895,9 @@ def run_nimble(
                 "latency_ms": elapsed_ms,
                 "request_sha256": request_sha,
                 "input_hash": entry["input_hash"],
-                "sample_line_ids": entry["sample_line_ids"],
+                "sample_line_ids": [
+                    sample["id"] for sample in state.get("dialogue_samples") or []
+                ],
                 "request_bytes": request_bytes,
                 "state_bytes": state_bytes,
                 "usage": payload.get("usage") or {},
@@ -878,7 +921,9 @@ def run_nimble(
                 "latency_ms": round((time.perf_counter() - started) * 1000, 3),
                 "request_sha256": hashlib.sha256(body).hexdigest(),
                 "input_hash": entry["input_hash"],
-                "sample_line_ids": entry["sample_line_ids"],
+                "sample_line_ids": [
+                    sample["id"] for sample in state.get("dialogue_samples") or []
+                ],
                 "request_bytes": request_bytes,
                 "state_bytes": state_bytes,
             }
@@ -920,6 +965,177 @@ def run_nimble(
         "note": "Probabilities are model scores and are not assumed calibrated for this benchmark.",
     }
     report_path = write_immutable_json(root / "reports" / f"nimble_{condition}_run.json", report)
+    return {**report, "report_path": str(report_path)}
+
+
+def _reject_invalid_jev_citations(answers: dict, sample_ids: set[str]) -> dict:
+    """Apply the production citation rules to frozen benchmark answers."""
+    for question_id, answer in answers.items():
+        if not isinstance(answer, dict) or answer.get("type") != "choice":
+            continue
+        if answer.get("status") not in {"supported", "mixed", "provisional"}:
+            continue
+        supporting = list(answer.get("supporting_line_ids") or [])
+        counterexamples = list(answer.get("counterexample_line_ids") or [])
+        invalid = [
+            line_id for line_id in supporting + counterexamples
+            if line_id not in sample_ids
+        ]
+        reason = None
+        if invalid:
+            reason = f"Cited line IDs absent from the request: {invalid[:3]}."
+        elif len(supporting) < 2:
+            reason = "Supported Style fields require at least two cited lines."
+        elif answer.get("status") == "mixed" and not counterexamples:
+            reason = "A mixed result requires at least one counterexample line."
+        if reason:
+            answer["choice"] = None
+            if "label" in answer:
+                answer["label"] = None
+            answer["status"] = "rejected"
+            answer["rationale"] = reason
+    return answers
+
+
+def run_jev(
+    *,
+    root: Path | str = DEFAULT_ROOT,
+    endpoint: str = "http://127.0.0.1:8081/v1/systemone",
+    model: str = "jev-1.14.0",
+    api_key_env: str = "TYPESAFE_API_KEY",
+    limit: int | None = None,
+    only: set[str] | None = None,
+    timeout: float = 600,
+    force: bool = False,
+) -> dict:
+    """Run the production identity-blind JEV classifier over frozen benchmark dossiers."""
+    root = Path(root)
+    prediction_dir = root / "predictions" / SYSTEM_PREDICTION_DIRS["jev"]
+    manifest = read_json(root / "manifest.json")
+    dossiers = manifest.get("public_dossiers") or []
+    if only:
+        dossiers = [entry for entry in dossiers if entry["benchmark_id"] in only]
+    if limit is not None:
+        dossiers = dossiers[:limit]
+    questions = build_style_questions(blueprint_renderer.load_vocabulary())
+    provider = JevProvider(
+        endpoint=endpoint,
+        model=model,
+        api_key_env=api_key_env,
+        timeout=timeout,
+        vocabulary=blueprint_renderer.load_vocabulary(),
+    )
+    results = []
+    failures = []
+    reused_count = 0
+    request_sizes = []
+    state_sizes = []
+    run_started = time.perf_counter()
+    for entry in dossiers:
+        dossier = read_json(Path(entry["dossier_path"]))
+        state = build_speech_style_state(dossier, condition="text_only")
+        state_bytes = len(json.dumps(state, ensure_ascii=False).encode("utf-8"))
+        body = json.dumps(
+            {"model": model, "state": state, "questions": questions},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        request_bytes = len(body)
+        request_sizes.append(request_bytes)
+        state_sizes.append(state_bytes)
+        request_sha = hashlib.sha256(body).hexdigest()
+        target_path = prediction_dir / f"{entry['benchmark_id']}.json"
+        if target_path.is_file() and not force:
+            prior = read_json(target_path)
+            if prior.get("request_sha256") == request_sha:
+                reused_count += 1
+                results.append({
+                    "benchmark_id": entry["benchmark_id"],
+                    "latency_ms": prior.get("latency_ms"),
+                    "request_bytes": request_bytes,
+                    "state_bytes": state_bytes,
+                    "usage": prior.get("usage") or {},
+                    "prediction_path": str(target_path),
+                    "reused": True,
+                })
+                print(json.dumps(results[-1], ensure_ascii=False), flush=True)
+                continue
+        started = time.perf_counter()
+        try:
+            payload = provider.classify_state(state, questions)
+            state_ids = {
+                str(sample.get("id"))
+                for sample in state.get("dialogue_samples") or []
+                if sample.get("id")
+            }
+            _reject_invalid_jev_citations(payload.get("answers") or {}, state_ids)
+            elapsed_ms = round((time.perf_counter() - started) * 1000, 3)
+            record = {
+                "benchmark_id": entry["benchmark_id"],
+                "system": "jev",
+                "model": payload.get("model") or model,
+                "condition": "text_only",
+                "endpoint": endpoint,
+                "latency_ms": elapsed_ms,
+                "request_sha256": request_sha,
+                "input_hash": entry["input_hash"],
+                "sample_line_ids": [
+                    sample["id"] for sample in state.get("dialogue_samples") or []
+                ],
+                "request_bytes": request_bytes,
+                "state_bytes": state_bytes,
+                "usage": payload.get("usage") or {},
+                "answers": payload["answers"],
+            }
+            path = write_immutable_json(target_path, record)
+            results.append({
+                "benchmark_id": entry["benchmark_id"],
+                "latency_ms": elapsed_ms,
+                "request_bytes": request_bytes,
+                "state_bytes": state_bytes,
+                "usage": record["usage"],
+                "prediction_path": str(path),
+                "reused": False,
+            })
+            print(json.dumps(results[-1], ensure_ascii=False), flush=True)
+        except (JevError, ValueError, OSError) as exc:
+            elapsed_ms = round((time.perf_counter() - started) * 1000, 3)
+            failure = {
+                "benchmark_id": entry["benchmark_id"],
+                "system": "jev",
+                "condition": "text_only",
+                "endpoint": endpoint,
+                "error": f"{type(exc).__name__}: {exc}",
+                "request_sha256": request_sha,
+                "input_hash": entry["input_hash"],
+                "latency_ms": elapsed_ms,
+            }
+            path = write_immutable_json(
+                target_path.with_name(f"{entry['benchmark_id']}.failure.json"), failure,
+            )
+            failures.append({**failure, "failure_path": str(path)})
+            print(json.dumps(failures[-1], ensure_ascii=False), flush=True)
+    report = {
+        "system": "jev",
+        "condition": "text_only",
+        "benchmark": BENCHMARK_VERSION,
+        "model_requested": model,
+        "endpoint": endpoint,
+        "run_started": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "wall_elapsed_seconds": round(time.perf_counter() - run_started, 3),
+        "request_count": len(results) + len(failures),
+        "reused_count": reused_count,
+        "failure_count": len(failures),
+        "failures": failures,
+        "request_bytes_median": _upper_median(request_sizes),
+        "request_bytes_p95": _nearest_rank_percentile(request_sizes, 0.95),
+        "state_bytes_median": _upper_median(state_sizes),
+        "state_bytes_p95": _nearest_rank_percentile(state_sizes, 0.95),
+        "usage_totals": _usage_totals(results),
+        "prediction_files": results,
+        "latency_note": "Reused identical predictions contribute their original measured item latency; wall_elapsed_seconds records this invocation's elapsed time.",
+    }
+    report_path = write_immutable_json(root / "reports" / "jev_run.json", report)
     return {**report, "report_path": str(report_path)}
 
 
@@ -1014,7 +1230,10 @@ def run_nimble_stability(
                     status = response.status
                 elapsed_ms = round((time.perf_counter() - started) * 1000, 3)
                 payload = json.loads(raw.decode("utf-8"))
-                answers = _validate_choice_response(payload, questions)
+                answers = _validate_choice_response(
+                    payload, questions,
+                    [sample["id"] for sample in anonymous],
+                )
                 record = {
                     "benchmark_id": benchmark_id,
                     "variant": variant,
@@ -1684,6 +1903,15 @@ def _bootstrap_macro_f1_margin(
     }
 
 
+def _prediction_label(answer: dict) -> str | None:
+    """Normalize benchmark answers; an abstention is a label even without a choice."""
+    if not isinstance(answer, dict):
+        return None
+    if answer.get("status") == "insufficient_evidence":
+        return "insufficient_evidence"
+    return answer.get("label") or answer.get("choice")
+
+
 def _validated_probabilities(answer: dict, labels: list[str]) -> dict[str, float] | None:
     probabilities = answer.get("probabilities")
     if not isinstance(probabilities, dict) or set(probabilities) != set(labels):
@@ -1710,7 +1938,7 @@ def _calibration_report(gold: list[str], prediction_records: list[dict], field: 
         probabilities = _validated_probabilities(answer, labels)
         if probabilities is None:
             continue
-        reported_choice = answer.get("label") or answer.get("choice")
+        reported_choice = _prediction_label(answer)
         rows.append((actual, probabilities, reported_choice))
     if not rows:
         return None
@@ -1791,7 +2019,7 @@ def _select_development_threshold(
             continue
         valid_probability_count += 1
         predicted = max(labels, key=lambda label: probabilities[label])
-        reported_choice = answer.get("label") or answer.get("choice")
+        reported_choice = _prediction_label(answer)
         if predicted != reported_choice:
             decision_distribution_mismatch_count += 1
             continue
@@ -2657,6 +2885,62 @@ def audit_annotation_leakage(
     return {**report, "report_path": str(path)}
 
 
+def _prediction_citation_validity(
+    root: Path,
+    manifest: dict,
+    benchmark_ids: list[str],
+    fields: dict[str, dict[str, str]],
+) -> dict[str, dict[str, dict[str, Any]]]:
+    public = {
+        entry["benchmark_id"]: entry for entry in manifest.get("public_dossiers") or []
+    }
+    result: dict[str, dict[str, dict[str, Any]]] = {}
+    for system, prediction_dir in SYSTEM_PREDICTION_DIRS.items():
+        records = {}
+        for benchmark_id in benchmark_ids:
+            path = root / "predictions" / prediction_dir / f"{benchmark_id}.json"
+            if path.is_file():
+                records[benchmark_id] = read_json(path)
+        if not records:
+            result[system] = {"status": "not_run"}
+            continue
+        system_result: dict[str, Any] = {}
+        for field in fields:
+            total = with_citations = valid = 0
+            for benchmark_id, record in records.items():
+                entry = public.get(benchmark_id)
+                if entry is None:
+                    continue
+                labels = record.get("labels") or record.get("answers") or {}
+                answer = labels.get(field)
+                if not isinstance(answer, dict):
+                    continue
+                total += 1
+                supporting = answer.get("supporting_line_ids") or []
+                counterexamples = answer.get("counterexample_line_ids") or []
+                if not supporting and not counterexamples:
+                    continue
+                with_citations += 1
+                sample_ids = set(record.get("sample_line_ids") or [])
+                if not sample_ids:
+                    dossier = read_json(Path(entry["dossier_path"]))
+                    sample_ids = {
+                        sample["id"] for sample in dossier.get("dialogue_samples") or []
+                    }
+                if all(item in sample_ids for item in supporting + counterexamples):
+                    valid += 1
+            system_result[field] = {
+                "predictions": total,
+                "with_citations": with_citations,
+                "valid_citations": valid,
+                "citation_rate": round(with_citations / total, 4) if total else None,
+                "citation_validity_rate": round(valid / with_citations, 4) if with_citations else None,
+                "status": "measured" if with_citations else "not_available",
+            }
+        result[system] = system_result
+    return result
+
+
 def evaluate_benchmark(
     *,
     root: Path | str = DEFAULT_ROOT,
@@ -2708,6 +2992,9 @@ def evaluate_benchmark(
         "stability_not_correctness": "Repeat, reordering, and alternate-sample stability numbers are robustness diagnostics. They are not correctness evidence and never substitute for gold labels.",
         "note": "No gold labels or classifier-accuracy metrics are produced until both independent forms are complete and gold labels are manually adjudicated.",
     }
+    report["evidence_citation_validity"] = _prediction_citation_validity(
+        root, manifest, ids, FIELDS,
+    )
     if scope == "pilot":
         report["annotation_status"] = "pilot_incomplete" if missing else "pilot_raw_annotations_complete"
         if not missing:
@@ -2777,7 +3064,7 @@ def evaluate_benchmark(
                 labels_payload = (record.get("labels") or (record.get("answers") or {})) if record else {}
                 prediction = labels_payload.get(field)
                 if isinstance(prediction, dict):
-                    prediction = prediction.get("label") or prediction.get("choice")
+                    prediction = _prediction_label(prediction)
                 actual = gold_by_id[bid]["adjudicated_labels"][field]
                 if actual not in options:
                     raise ValueError(f"adjudicated label is invalid for {bid} {field}: {actual!r}")
@@ -2799,12 +3086,28 @@ def evaluate_benchmark(
                 "excluded_benchmark_ids": sorted(excluded),
                 "note": "Excluded items are scored separately and never counted as model errors.",
             }
+            field_metrics["cohen_kappa"] = _cohen_kappa(actuals, predictions)
             field_metrics["abstention"] = {
                 "label": "insufficient_evidence",
                 "count": sum(prediction == "insufficient_evidence" for prediction in predictions),
                 "rate_among_valid_predictions": sum(prediction == "insufficient_evidence" for prediction in predictions) / valid_prediction_count if valid_prediction_count else None,
                 "decision_coverage_among_valid_predictions": sum(row[4] and row[2] != "insufficient_evidence" for row in available) / valid_prediction_count if valid_prediction_count else None,
             }
+            selective = [
+                (actual, prediction) for actual, prediction in zip(actuals, predictions)
+                if prediction != "insufficient_evidence"
+            ]
+            field_metrics["selective_accuracy"] = {
+                "n": len(selective),
+                "accuracy": (
+                    sum(actual == prediction for actual, prediction in selective) / len(selective)
+                    if selective else None
+                ),
+                "coverage": len(selective) / len(available) if available else None,
+                "note": "Accuracy over predictions that emitted a label; abstentions are excluded from the numerator and denominator.",
+            }
+            field_metrics["mixed_detection"] = field_metrics["per_class"].get("mixed")
+            field_metrics["insufficient_detection"] = field_metrics["per_class"].get("insufficient_evidence")
             ordinal_order = ORDINAL_FIELD_LABELS.get(field)
             if ordinal_order:
                 field_metrics["ordinal_metrics"] = _ordinal_metrics(actuals, predictions, ordinal_order)
@@ -2861,7 +3164,7 @@ def evaluate_benchmark(
                         acceptance_rows.append((False, False))
                         continue
                     predicted = max(labels, key=lambda label: probabilities[label])
-                    reported_choice = answer.get("label") or answer.get("choice")
+                    reported_choice = _prediction_label(answer)
                     is_accepted = (
                         selected_threshold is not None
                         and probabilities[predicted] >= selected_threshold
@@ -3013,6 +3316,15 @@ def main() -> None:
     nimble.add_argument("--limit", type=int)
     nimble.add_argument("--only", action="append")
     nimble.add_argument("--timeout", type=float, default=600)
+    jev = subparsers.add_parser("jev", help="run the production identity-blind JEV classifier on frozen dossiers")
+    jev.add_argument("--root", default=str(DEFAULT_ROOT))
+    jev.add_argument("--endpoint", default="http://127.0.0.1:8081/v1/systemone")
+    jev.add_argument("--model", default="jev-1.14.0")
+    jev.add_argument("--api-key-env", default="TYPESAFE_API_KEY")
+    jev.add_argument("--limit", type=int)
+    jev.add_argument("--only", action="append")
+    jev.add_argument("--timeout", type=float, default=600)
+    jev.add_argument("--force", action="store_true")
     stability = subparsers.add_parser("nimble-stability", help="run sample-size/order/repeat stability on a selected split")
     stability.add_argument("--root", default=str(DEFAULT_ROOT))
     stability.add_argument("--cache", default="data/blueprints/cache")
@@ -3069,6 +3381,12 @@ def main() -> None:
         result = prepare_benchmark(db=args.db, cache=args.cache, root=args.root, seed=args.seed, model_path=args.model)
     elif args.command == "nimble":
         result = run_nimble(root=args.root, endpoint=args.endpoint, condition=args.condition, limit=args.limit, only=set(args.only or []), timeout=args.timeout)
+    elif args.command == "jev":
+        result = run_jev(
+            root=args.root, endpoint=args.endpoint, model=args.model,
+            api_key_env=args.api_key_env, limit=args.limit,
+            only=set(args.only or []), timeout=args.timeout, force=args.force,
+        )
     elif args.command == "nimble-stability":
         result = run_nimble_stability(root=args.root, cache=args.cache, endpoint=args.endpoint, condition=args.condition, split=args.split, only=set(args.only or []), timeout=args.timeout)
     elif args.command == "analyze-stability":

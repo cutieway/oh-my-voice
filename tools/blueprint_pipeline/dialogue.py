@@ -1,11 +1,18 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import re
 from collections import Counter, defaultdict
 from statistics import mean, median
 from typing import Any
+
+from .config import (
+    DIALOGUE_SAMPLER_VERSION,
+    STYLE_EVIDENCE_TIERS,
+    STYLE_FIELD_EVIDENCE_MULTIPLIERS,
+)
 
 WORD_RE = re.compile(r"[^\W_]+(?:['’][^\W_]+)?", re.UNICODE)
 CONTRACTION_RE = re.compile(r"\b[\w’]+(?:n't|'re|'ve|'ll|'d|'m|'s)\b", re.IGNORECASE)
@@ -98,6 +105,33 @@ def analyze_dialogue(lines: list[dict], vocabulary: dict | None = None) -> dict[
         distinct.setdefault(str(line_id), line)
     texts = [
         split_speaker_label(str(line.get("text") or ""))[0] for line in distinct.values()
+    ]
+    raw_texts = [
+        split_speaker_label(str(line.get("text") or ""))[0]
+        for line in lines
+    ]
+    normalized_raw = [" ".join(words(text)) for text in raw_texts if words(text)]
+    raw_counts = Counter(normalized_raw)
+    duplicate_groups = {
+        text: count for text, count in raw_counts.items() if count > 1
+    }
+    duplicate_rows = sum(count - 1 for count in duplicate_groups.values())
+    duplicate_line_ids: dict[str, list[str]] = defaultdict(list)
+    for line in lines:
+        text = " ".join(words(split_speaker_label(str(line.get("text") or ""))[0]))
+        if text in duplicate_groups:
+            line_id = str(line.get("voice_line_id") or line.get("dialog_id") or "")
+            if line_id:
+                duplicate_line_ids[text].append(line_id)
+    repeated_utterances = [
+        {
+            "text_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            "count": count,
+            "line_ids": sorted(duplicate_line_ids.get(text, []))[:12],
+        }
+        for text, count in sorted(
+            duplicate_groups.items(), key=lambda item: (-item[1], item[0])
+        )[:12]
     ]
     tokenized = [words(text) for text in texts]
     flat = [token for row in tokenized for token in row]
@@ -213,8 +247,16 @@ def analyze_dialogue(lines: list[dict], vocabulary: dict | None = None) -> dict[
         f"{name}_lines": round(count / line_total, 4) for name, count in signal_lines.items()
     }
     measurements = {
+        "raw_line_count": len(lines),
         "line_count": len(texts),
         "word_count": len(flat),
+        "duplicate": {
+            "exact_duplicate_rows": duplicate_rows,
+            "exact_duplicate_groups": len(duplicate_groups),
+            "exact_duplicate_rate": round(duplicate_rows / max(1, len(raw_texts)), 5),
+            "repeated_utterances": repeated_utterances,
+            "note": "Duplicate frequency is retained separately from syntax/style sampling so repeated catchphrases remain measurable habits.",
+        },
         "unique_word_count": unique_tokens,
         "vocabulary_diversity": round(vocabulary_diversity, 4),
         "average_word_length": round(average_word_length, 3),
@@ -281,9 +323,45 @@ def _length_bucket(text: str) -> str:
 length_bucket = _length_bucket
 
 
+def _line_key(line: dict) -> str:
+    return str(line.get("voice_line_id") or line.get("dialog_id") or "")
+
+
 def _rank(canonical_id: str, line: dict) -> str:
-    token = f"{canonical_id}:{line.get('voice_line_id') or line.get('dialog_id')}"
+    token = f"{canonical_id}:{_line_key(line)}"
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def sample_id(canonical_id: str, line: dict) -> str:
+    """Stable opaque ID safe to send to a text-only classifier."""
+    token = f"{canonical_id}:{_line_key(line)}:{DIALOGUE_SAMPLER_VERSION}"
+    return "L" + hashlib.sha256(token.encode("utf-8")).hexdigest()[:16].upper()
+
+
+def sample_manifest_hash(
+    canonical_id: str,
+    samples: list[dict],
+    *,
+    corpus_hash: str | None = None,
+    sampler_version: str = DIALOGUE_SAMPLER_VERSION,
+) -> str:
+    payload = {
+        "canonical_id": canonical_id,
+        "sampler_version": sampler_version,
+        "corpus_hash": corpus_hash,
+        "samples": [
+            {
+                "id": sample.get("id") or sample_id(canonical_id, sample),
+                "text_sha256": hashlib.sha256(
+                    str(sample.get("text") or "").encode("utf-8")
+                ).hexdigest(),
+            }
+            for sample in samples
+        ],
+    }
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
 
 
 NEAR_DUPLICATE_JACCARD = 0.82
@@ -396,17 +474,10 @@ def _signal_weight(hits: list[str]) -> int:
     return sum(weights.get(hit.split(":", 1)[0], 0) for hit in hits)
 
 
-def select_representative_samples(
-    canonical_id: str,
-    lines: list[dict],
-    *,
-    max_count: int = 24,
-    max_chars: int = 6000,
-    vocabulary: dict | None = None,
-) -> list[dict]:
-    by_id = {}
+def _prepare_lines(canonical_id: str, lines: list[dict]) -> list[dict]:
+    by_id: dict[str, dict] = {}
     for line in lines:
-        key = str(line.get("voice_line_id") or line.get("dialog_id") or "")
+        key = _line_key(line)
         if not key:
             continue
         text = str(line.get("text") or "")
@@ -424,15 +495,13 @@ def select_representative_samples(
             provenance = current.setdefault("provenance", [])
             provenance.extend(line.get("provenance", []))
     unique = list(by_id.values())
-    signals = ((vocabulary or {}).get("speech_style") or {}).get("signals") or {}
     for line in unique:
         text = str(line.get("text") or "")
         line["_bucket"] = _length_bucket(text)
         line["_rank"] = _rank(canonical_id, line)
-        line["signals"] = _signal_hits(text, signals)
-        line["_weight"] = _signal_weight(line["signals"])
         line["_signature"] = _duplicate_signature(text)
         line["_duplicate_keys"] = _duplicate_keys(line["_signature"])
+        line["id"] = sample_id(canonical_id, line)
         line.setdefault("provenance", [{
             "dialog_id": line.get("dialog_id"),
             "source": line.get("source"),
@@ -440,37 +509,72 @@ def select_representative_samples(
             "row_id": line.get("row_id"),
             "voice_line_id": line.get("voice_line_id"),
         }])
-    groups: dict[tuple[str, str], list[dict]] = defaultdict(list)
-    for line in unique:
-        groups[(str(line.get("source") or "unknown"), str(line.get("sheet") or "unknown"))].append(line)
-    for rows in groups.values():
-        # Strongest stylistic evidence first, then a stable per-NPC order, so the
-        # same dossier always yields the same sample set.
-        rows.sort(key=lambda line: (-line["_weight"], line["_rank"]))
+    return unique
 
-    selected = []
-    consumed = set()
+
+def _public_sample(line: dict, *, signals: bool = False) -> dict:
+    sample = {
+        key: value for key, value in line.items()
+        if not key.startswith("_") and key not in {"signals", "signal_weight"}
+        and value not in (None, "", [])
+    }
+    sample["length_bucket"] = line.get("_bucket")
+    if signals:
+        sample["signals"] = list(line.get("signals") or [])
+        sample["signal_weight"] = int(line.get("_weight") or 0)
+    return sample
+
+
+def _group_key(line: dict) -> tuple[str, str]:
+    return (str(line.get("source") or "unknown"), str(line.get("sheet") or "unknown"))
+
+
+def _group_rank(canonical_id: str, group: tuple[str, str]) -> str:
+    return hashlib.sha256(
+        f"{canonical_id}:{group[0]}:{group[1]}".encode("utf-8")
+    ).hexdigest()
+
+
+def select_representative_samples(
+    canonical_id: str,
+    lines: list[dict],
+    *,
+    max_count: int = 24,
+    max_chars: int = 6000,
+    vocabulary: dict | None = None,
+) -> list[dict]:
+    """Select a deterministic, signal-free sample for primary Style classification.
+
+    Selection is stratified by utterance length and round-robins across
+    (source, sheet) groups. Regex signal scores never influence this pool; a
+    separate targeted pool exists for rare-habit verification.
+    """
+    del vocabulary  # kept for API compatibility; the primary pool is signal-free
+    unique = _prepare_lines(canonical_id, lines)
+    selected: list[dict] = []
+    consumed: set[str] = set()
     consumed_chars = 0
-    selected_signatures = []
+    selected_signatures: list[tuple] = []
     duplicate_index: dict[Any, list[int]] = defaultdict(list)
+    near_duplicate_rejections = 0
 
     def consider(line: dict) -> bool:
-        nonlocal consumed_chars
-        key = str(line.get("voice_line_id") or line.get("dialog_id"))
+        nonlocal consumed_chars, near_duplicate_rejections
+        key = _line_key(line)
         text = str(line.get("text") or "")
         if key in consumed or not text or consumed_chars + len(text) > max_chars:
             return False
         signature = line["_signature"]
-        candidates = set()
+        candidates: set[int] = set()
         for duplicate_key in line["_duplicate_keys"]:
             candidates.update(duplicate_index.get(duplicate_key, ()))
         if any(
             _near_duplicate_signature(signature, selected_signatures[index])
             for index in candidates
         ):
+            near_duplicate_rejections += 1
             return False
-        cleaned = {k: v for k, v in line.items() if not k.startswith("_")}
-        selected.append(cleaned)
+        selected.append(_public_sample(line))
         selected_signatures.append(signature)
         for duplicate_key in line["_duplicate_keys"]:
             duplicate_index[duplicate_key].append(len(selected) - 1)
@@ -478,27 +582,27 @@ def select_representative_samples(
         consumed_chars += len(text)
         return True
 
-    # Bucket coverage is allocated by corpus share, not by iteration order.
-    # Taking one line per (source, sheet) group inside a bucket saturates the
-    # quota from the first bucket whenever an NPC has many sheets: Gerolt has
-    # 200+ sheets and 181 short / 953 medium / 947 long lines, and the old loop
-    # filled all 24 slots with short lines before reaching `medium`.
-    by_bucket = {bucket: [] for bucket in BUCKETS}
+    by_bucket: dict[str, list[dict]] = {bucket: [] for bucket in BUCKETS}
     for line in unique:
         by_bucket[line["_bucket"]].append(line)
     for rows in by_bucket.values():
-        rows.sort(key=lambda line: (-line["_weight"], line["_rank"]))
-    quotas = _bucket_quotas({bucket: len(rows) for bucket, rows in by_bucket.items()}, max_count)
+        rows.sort(key=lambda line: line["_rank"])
+    quotas = _bucket_quotas(
+        {bucket: len(rows) for bucket, rows in by_bucket.items()}, max_count
+    )
 
     for bucket, quota in quotas.items():
-        grouped = defaultdict(list)
+        grouped: dict[tuple[str, str], list[dict]] = defaultdict(list)
         for line in by_bucket[bucket]:
-            grouped[(str(line.get("source") or "unknown"), str(line.get("sheet") or "unknown"))].append(line)
-        cursors = {group: 0 for group in sorted(grouped)}
+            grouped[_group_key(line)].append(line)
+        groups = sorted(grouped, key=lambda group: _group_rank(canonical_id, group))
+        for rows in grouped.values():
+            rows.sort(key=lambda line: line["_rank"])
+        cursors = {group: 0 for group in groups}
         taken = 0
         while taken < quota and len(selected) < max_count:
             progressed = False
-            for group in sorted(grouped):
+            for group in groups:
                 rows = grouped[group]
                 while cursors[group] < len(rows):
                     line = rows[cursors[group]]
@@ -512,10 +616,169 @@ def select_representative_samples(
             if not progressed:
                 break
 
-    # Leftover slots (dedupe blocked, or a bucket ran dry) come from the
-    # strongest lines overall, so the sample still fills up on rich characters.
-    for line in sorted(unique, key=lambda item: (-item["_weight"], item["_rank"])):
+    for line in sorted(unique, key=lambda item: item["_rank"]):
         if len(selected) >= max_count:
             break
         consider(line)
+    for sample in selected:
+        sample["near_duplicate_rejections"] = near_duplicate_rejections
     return selected
+
+
+def select_targeted_samples(
+    canonical_id: str,
+    lines: list[dict],
+    *,
+    max_count: int = 24,
+    max_chars: int = 4000,
+    vocabulary: dict | None = None,
+) -> list[dict]:
+    """Select signal-focused examples for habit verification only.
+
+    This pool is never merged into the representative distribution or used to
+    estimate the character's typical Style.
+    """
+    unique = _prepare_lines(canonical_id, lines)
+    signals = ((vocabulary or {}).get("speech_style") or {}).get("signals") or {}
+    for line in unique:
+        line["signals"] = _signal_hits(str(line.get("text") or ""), signals)
+        line["_weight"] = _signal_weight(line["signals"])
+    candidates = [line for line in unique if line["signals"]]
+    candidates.sort(key=lambda line: (-line["_weight"], line["_rank"]))
+
+    selected: list[dict] = []
+    selected_signatures: list[tuple] = []
+    duplicate_index: dict[Any, list[int]] = defaultdict(list)
+    consumed_chars = 0
+    for line in candidates:
+        if len(selected) >= max_count:
+            break
+        text = str(line.get("text") or "")
+        if not text or consumed_chars + len(text) > max_chars:
+            continue
+        signature = line["_signature"]
+        candidates_index: set[int] = set()
+        for duplicate_key in line["_duplicate_keys"]:
+            candidates_index.update(duplicate_index.get(duplicate_key, ()))
+        if any(
+            _near_duplicate_signature(signature, selected_signatures[index])
+            for index in candidates_index
+        ):
+            continue
+        selected.append(_public_sample(line, signals=True))
+        selected_signatures.append(signature)
+        for duplicate_key in line["_duplicate_keys"]:
+            duplicate_index[duplicate_key].append(len(selected) - 1)
+        consumed_chars += len(text)
+    return selected
+
+
+def build_dialogue_sample_pools(
+    canonical_id: str,
+    lines: list[dict],
+    *,
+    vocabulary: dict | None = None,
+    max_count: int = 24,
+    max_chars: int = 6000,
+    targeted_count: int = 24,
+    targeted_chars: int = 4000,
+    corpus_hash: str | None = None,
+) -> dict[str, Any]:
+    representative = select_representative_samples(
+        canonical_id, lines, max_count=max_count, max_chars=max_chars,
+        vocabulary=vocabulary,
+    )
+    targeted = select_targeted_samples(
+        canonical_id, lines, max_count=targeted_count, max_chars=targeted_chars,
+        vocabulary=vocabulary,
+    )
+    def summary(samples: list[dict]) -> dict[str, Any]:
+        return {
+            "count": len(samples),
+            "hash": sample_manifest_hash(
+                canonical_id, samples, corpus_hash=corpus_hash,
+            ),
+            "ids": [sample["id"] for sample in samples],
+            "buckets": dict(sorted(Counter(
+                sample.get("length_bucket") for sample in samples
+            ).items())),
+            "sources": dict(sorted(Counter(
+                str(sample.get("source") or "unknown") for sample in samples
+            ).items())),
+            "sheets": len({
+                (str(sample.get("source") or "unknown"), str(sample.get("sheet") or "unknown"))
+                for sample in samples
+            }),
+        }
+    return {
+        "sampler_version": DIALOGUE_SAMPLER_VERSION,
+        "corpus_hash": corpus_hash,
+        "representative": summary(representative),
+        "targeted": summary(targeted),
+        "targeted_signal_counts": dict(sorted(Counter(
+            signal.split(":", 1)[0]
+            for sample in targeted for signal in sample.get("signals") or []
+        ).items())),
+        "note": "Representative and targeted pools are independent; targeted evidence never enters the primary distribution.",
+        "representative_samples": representative,
+        "targeted_samples": targeted,
+    }
+
+
+def evidence_sufficiency(
+    statistics: dict,
+    samples: list[dict],
+    *,
+    vocabulary: dict | None = None,
+    field: str | None = None,
+) -> dict[str, Any]:
+    """Return the evidence tier for the lines the classifier actually sees."""
+    sampled_lines = len(samples)
+    sampled_words = sum(len(words(str(sample.get("text") or ""))) for sample in samples)
+    sources = {
+        str(sample.get("source") or "unknown") for sample in samples
+    }
+    contexts = {
+        (str(sample.get("source") or "unknown"), str(sample.get("sheet") or "unknown"))
+        for sample in samples
+    }
+    unique_corpus_lines = int(
+        statistics.get("unique_line_count") or statistics.get("dialogue_count") or 0
+    )
+    configured = ((vocabulary or {}).get("speech_style") or {}).get("sufficiency") or {}
+    tiers = {
+        name: {**STYLE_EVIDENCE_TIERS[name], **configured.get(name, {})}
+        for name in STYLE_EVIDENCE_TIERS
+    }
+    multiplier = float(
+        configured.get("field_multipliers", {}).get(
+            field, STYLE_FIELD_EVIDENCE_MULTIPLIERS.get(field, 1.0)
+        )
+    ) if field else 1.0
+    def met(level: str) -> bool:
+        rule = tiers[level]
+        return (
+            sampled_lines >= math.ceil(int(rule["lines"]) * multiplier)
+            and sampled_words >= math.ceil(int(rule["words"]) * multiplier)
+            and len(sources) >= int(rule["sources"])
+        )
+    if met("strong"):
+        tier = "strong"
+    elif met("supported"):
+        tier = "supported"
+    elif met("minimum"):
+        tier = "provisional"
+    else:
+        tier = "insufficient"
+    return {
+        "tier": tier,
+        "field": field,
+        "sampled_lines": sampled_lines,
+        "sampled_words": sampled_words,
+        "sources": sorted(sources),
+        "source_count": len(sources),
+        "context_count": len(contexts),
+        "unique_corpus_lines": unique_corpus_lines,
+        "thresholds": tiers,
+        "field_multiplier": multiplier,
+    }

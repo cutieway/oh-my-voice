@@ -618,8 +618,7 @@
       "intonation": "{intonation} intonation",
       "pace": "a {pace} pace",
       "accent_sentence": "It carries a {strength} {accent} accent.",
-      "traits_sentence": "Notable vocal traits: {traits}.",
-      "tail": "Neutral conversational delivery for game dialogue."
+      "traits_sentence": "Notable vocal traits: {traits}."
     },
     "style_v2": {
       "min_dimensions": 1,
@@ -632,7 +631,7 @@
         "rhetorical_style": "{value} in rhetorical shape"
       }
     },
-    "style_note": "Appended by default when a profile carries speech_style; each supported dimension renders independently, so one missing JEV field does not suppress the clause. It describes performed wording and is never merged into the identity sentence.",
+    "style_note": "Rendered only from supported or mixed Style fields; provisional, insufficient, unresolved, and rejected fields are omitted. The Identity sentence stays byte-identical when Style changes.",
     "article_rule": "Use 'An' when the rendered phrase starts with a vowel sound (adult, ageless, ancient, elderly, androgynous), otherwise 'A'.",
     "banned_identity_words": [
       "happy",
@@ -715,7 +714,7 @@
     ]
   },
   "speech_style": {
-    "purpose": "Closed classification of how text is written and phrased. Speech style is separate from acoustic identity, but its rendered clause is appended to every instruct by default because listeners preferred it.",
+    "purpose": "Closed classification of a character’s recurring written-dialogue style. Style is separate from acoustic Identity and is appended only when supported by dialogue evidence.",
     "dimensions": {
       "register": {
         "question": "What register best describes the dialogue wording?",
@@ -731,6 +730,10 @@
           "conversational": {
             "render": "conversational",
             "classification_description": "Uses casual constructions, colloquial terms, or frequent contractions."
+          },
+          "mixed": {
+            "render": "mixed",
+            "classification_description": "Recurring, meaningful variation between two or more patterns."
           }
         }
       },
@@ -745,10 +748,6 @@
             "render": "ordinary",
             "classification_description": "Everyday vocabulary with a typical range."
           },
-          "educated": {
-            "render": "educated",
-            "classification_description": "Frequent longer or less common vocabulary."
-          },
           "specialized": {
             "render": "specialized",
             "classification_description": "Repeated technical or domain-specific vocabulary."
@@ -756,6 +755,14 @@
           "poetic": {
             "render": "poetic",
             "classification_description": "Unusually figurative, image-rich, or lyrical word choice."
+          },
+          "mixed": {
+            "render": "mixed",
+            "classification_description": "Recurring, meaningful variation between two or more patterns."
+          },
+          "advanced": {
+            "render": "advanced",
+            "classification_description": "Frequent less-common or demanding words; describes wording, not the speaker."
           }
         }
       },
@@ -790,27 +797,10 @@
           "high": {
             "render": "high",
             "classification_description": "Frequent colloquial words, contractions, or informal constructions."
-          }
-        }
-      },
-      "diction_style": {
-        "question": "Which wording style best fits the dialogue?",
-        "values": {
-          "precise": {
-            "render": "precise",
-            "classification_description": "Careful, exact word choice."
           },
-          "relaxed": {
-            "render": "relaxed",
-            "classification_description": "Loose, casual word choice."
-          },
-          "plain": {
-            "render": "plain",
-            "classification_description": "Direct word choice without ornate phrasing."
-          },
-          "ornate": {
-            "render": "ornate",
-            "classification_description": "Frequent elaborate or embellished wording."
+          "mixed": {
+            "render": "mixed",
+            "classification_description": "Recurring, meaningful variation between two or more patterns."
           }
         }
       },
@@ -840,23 +830,10 @@
           "emphatic": {
             "render": "emphatic",
             "classification_description": "Exclamations or marked emphasis recur in the wording."
-          }
-        }
-      },
-      "contraction_frequency": {
-        "question": "How frequently does the dialogue use contractions?",
-        "values": {
-          "low": {
-            "render": "low",
-            "classification_description": "Contractions are rare in the sample."
           },
-          "moderate": {
-            "render": "moderate",
-            "classification_description": "Contractions appear sometimes."
-          },
-          "high": {
-            "render": "high",
-            "classification_description": "Contractions appear frequently."
+          "mixed": {
+            "render": "mixed",
+            "classification_description": "Recurring, meaningful variation between two or more patterns."
           }
         }
       },
@@ -890,9 +867,7 @@
       "vocabulary_complexity": "ordinary",
       "sentence_complexity": "mixed",
       "colloquialism": "low",
-      "diction_style": "plain",
       "rhetorical_style": "measured",
-      "contraction_frequency": "low",
       "speech_habits": [
         "none_observed"
       ]
@@ -954,10 +929,31 @@
       ],
       "dialect_note": "Dialect and archaic address forms. They weight which lines are sampled and are counted for the model, but they are deliberately NOT part of the formal/colloquial rate: 'ye' and 'pray' are archaic, not informal, and folding them into the register measurement would corrupt it."
     },
-    "measurement_rules": "All counters and rates are calculated from distinct voice_line_id samples. The interpretation is a deterministic rule mapping; retain measurements separately from interpretation."
+    "measurement_rules": "dialogue.py calculates measurements and sample pools only. RulesProvider is an explicit baseline; it is never a hidden fallback or ground truth. Production labels come from evidence-backed JEV or an explicitly selected rules baseline.",
+    "sufficiency": {
+      "minimum": {
+        "lines": 8,
+        "words": 100,
+        "sources": 1
+      },
+      "supported": {
+        "lines": 20,
+        "words": 300,
+        "sources": 2
+      },
+      "strong": {
+        "lines": 40,
+        "words": 600,
+        "sources": 3
+      },
+      "field_multipliers": {
+        "rhetorical_style": 1.25
+      },
+      "note": "Initial floors from the v2 annotation protocol; tune only on development data."
+    }
   },
   "classification": {
-    "provider_contract": "RulesProvider works offline. JevProvider sends one structured System One request for independent decisions. Jev output selects from this vocabulary and never provides factual source citations.",
+    "provider_contract": "RulesProvider is an explicitly selected offline baseline and never a fallback. JevProvider sends one identity-blind System One request for the five Style dimensions. JEV output must cite supplied line IDs; model confidence is diagnostic only.",
     "defaults": {
       "presentation": null,
       "perceived_age": null,
@@ -975,56 +971,29 @@
       "distinctive_traits": []
     },
     "questions": {
-      "identity_resolved": {
-        "type": "noul",
-        "instructions": "Is this dossier safely tied to one canonical FFXIV NPC identity with no known SE voice reference?",
-        "criteria": {
-          "true": "One resolved NPC identity and no voiced alias.",
-          "false": "Identity is ambiguous, unresolved, or has an SE voice reference."
-        }
-      },
-      "individual_design": {
-        "type": "score",
-        "instructions": "How strongly does the evidence justify a unique individual synthetic voice design instead of a shared archetype?",
-        "levels": [
-          "Generic or unresolved identity with too little evidence for a unique design.",
-          "Minor identity with sparse or repetitive dialogue and no distinctive source evidence.",
-          "Some distinctiveness, but a shared archetype remains a reasonable fit.",
-          "Distinctive character or rich dialogue supports an individual creative cast.",
-          "Strong, explicit voice description and substantial character-specific evidence justify an individual design."
-        ]
-      },
-      "voice_evidence_present": {
-        "type": "noul",
-        "instructions": "Does the dossier contain a source quote that explicitly describes an audible voice quality?",
-        "criteria": {
-          "true": "At least one attributed source quote describes an audible quality.",
-          "false": "No source quote describes an audible voice quality."
-        }
-      },
       "speech_style.register": {
         "type": "choice",
-        "instructions": "Which register best describes the actual wording in the sampled dialogue?",
+        "instructions": "Which register does the character habitually use across ordinary dialogue? Use mixed for recurring shifts and abstain when the sample is too sparse.",
         "values": "speech_style.register"
       },
       "speech_style.vocabulary_complexity": {
         "type": "choice",
-        "instructions": "How complex is the vocabulary in the sampled dialogue? Judge words, not the character’s intelligence or social class.",
+        "instructions": "What kind of vocabulary does the character habitually choose? Judge wording only, not intelligence, education, or social class; proper names and quest terms are not advanced vocabulary.",
         "values": "speech_style.vocabulary_complexity"
       },
       "speech_style.sentence_complexity": {
         "type": "choice",
-        "instructions": "How structurally complex are the sampled utterances? Judge the text only.",
+        "instructions": "What sentence structures does the character habitually use? Normalize concatenated fragments before judging.",
         "values": "speech_style.sentence_complexity"
       },
       "speech_style.colloquialism": {
         "type": "choice",
-        "instructions": "How often does the sampled dialogue use colloquial wording?",
+        "instructions": "How frequently does the character use informal spoken-language forms across contexts?",
         "values": "speech_style.colloquialism"
       },
       "speech_style.rhetorical_style": {
         "type": "choice",
-        "instructions": "What rhetorical pattern is most representative of the sampled dialogue?",
+        "instructions": "What recurring way of constructing ideas appears in the dialogue? This is written rhetoric, not vocal speed or loudness.",
         "values": "speech_style.rhetorical_style"
       }
     },
@@ -1037,15 +1006,16 @@
       "min_dialogue_lines_for_individual": 50,
       "min_dialogue_lines_for_review": 5,
       "min_dialogue_lines_for_mood": 40,
-      "min_dialogue_lines_for_style": 40
+      "min_dialogue_lines_for_style": 40,
+      "min_style_fields_for_individual": 2
     },
     "confidence_policy": [
-      "Choice confidence and probability are both retained; low confidence routes to review or a shared archetype.",
-      "Noul returns a yes probability, not a separate confidence field; interpret it with the configured yes/no thresholds.",
-      "A Score carries its distribution, expected score, and confidence. A high signal is not proof of correctness.",
-      "Thresholds are initial project settings and must be calibrated against manually reviewed examples.",
-      "A mood preset is decided from dialogue alone: the dossier must clear min_dialogue_lines_for_mood, the dialogue pool is split into chunk windows, and every window is asked the same typed questions. The preset is accepted only when the mean distribution clears mood_probability, the same preset leads at least mood_consistency_ratio of the chunks, the mean distribution stays under mood_dispersion_limit, and the mean none+neutral mass stays under mood_abstention_mass. There is no separate confidence gate: on this model confidence is a linear rescaling of the top probability, so a second threshold would only re-ask the probability question. mood.justified is recorded as advisory evidence and never blocks. Otherwise the pack archon is neutral and mood.blocked_by names every failed gate.",
-      "Speech-style choices below min_dialogue_lines_for_style are recorded as insufficient rather than answered; the profile then carries no style and renders from identity alone."
+      "Model self-reported confidence/probability is diagnostic metadata, never calibrated production confidence.",
+      "Acceptance depends on valid labels, cited line IDs present in the request, sample sufficiency, stability, and held-out benchmark metrics.",
+      "RulesProvider results are recorded as method=rules_baseline and are never merged into JEV fields.",
+      "A field below the minimum evidence floor is null with status=insufficient_evidence; no first-option or neutral default is inserted.",
+      "Mixed is a real outcome and is preserved; unresolved evidence yields null with status=unresolved.",
+      "Thresholds and evidence floors are initial project settings and must be calibrated on development data only."
     ],
     "acoustic_family_compatibility": "Primary and optional secondary timbres must use different acoustic families. Distinctive traits cannot repeat the selected primary family.",
     "speech_style_separation": "Speech-style results stay out of the identity prompt and never become acoustic evidence."

@@ -85,94 +85,94 @@
         }
       }
     },
-  "identity": {
-   "type": "object",
-   "additionalProperties": false,
-   "description": "Acoustic design fields. Every field is optional: unknown facts stay null and the renderer omits them.",
-   "properties": {
-    "presentation": {
-     "type": [
-      "string",
-      "null"
-     ]
-    },
-    "perceived_age": {
-     "type": [
-      "string",
-      "null"
-     ]
-    },
-    "perceived_vocal_size": {
-     "type": [
-      "string",
-      "null"
-     ]
-    },
-    "vocal_weight": {
-     "type": [
-      "string",
-      "null"
-     ]
-    },
-    "pitch": {
-     "type": [
-      "string",
-      "null"
-     ]
-    },
-    "pitch_range": {
-     "type": [
-      "string",
-      "null"
-     ]
-    },
-    "timbre_primary": {
-     "type": [
-      "string",
-      "null"
-     ]
-    },
-    "timbre_secondary": {
-     "type": [
-      "string",
-      "null"
-     ]
-    },
-    "timbre_preferences": {
-     "type": [
-      "array",
-      "null"
-     ],
-     "items": {
-      "type": "string"
-     },
-     "maxItems": 2,
-     "uniqueItems": true
-    },
-    "resonance": {
-     "type": [
-      "string",
-      "null"
-     ]
-    },
-    "articulation": {
-     "type": [
-      "string",
-      "null"
-     ]
-    },
-    "speaking_pace": {
-     "type": [
-      "string",
-      "null"
-     ]
-    },
-    "intonation": {
-     "type": [
-      "string",
-      "null"
-     ]
-    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Acoustic design fields. Every field is optional: unknown facts stay null and the renderer omits them.",
+      "properties": {
+        "presentation": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "perceived_age": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "perceived_vocal_size": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "vocal_weight": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pitch": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pitch_range": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timbre_primary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timbre_secondary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timbre_preferences": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 2,
+          "uniqueItems": true
+        },
+        "resonance": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "articulation": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "speaking_pace": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "intonation": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "accent": {
           "type": [
             "object",
@@ -398,6 +398,30 @@
         },
         "timestamp": {
           "type": "string"
+        },
+        "taxonomy_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "classifier_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "prompt_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sampler_version": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },
@@ -574,6 +598,27 @@
           "type": "string"
         },
         "renderer_version": {
+          "type": "string"
+        },
+        "instruct": {
+          "type": "string"
+        },
+        "taxonomy_version": {
+          "type": "string"
+        },
+        "classifier_version": {
+          "type": "string"
+        },
+        "prompt_version": {
+          "type": "string"
+        },
+        "sampler_version": {
+          "type": "string"
+        },
+        "corpus_hash": {
+          "type": "string"
+        },
+        "sample_manifest_hash": {
           "type": "string"
         }
       }

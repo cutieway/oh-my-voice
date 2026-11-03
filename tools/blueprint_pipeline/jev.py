@@ -11,17 +11,23 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
+from .cache import object_hash
 from .config import (
     DEFAULT_JEV_ENDPOINT,
     DEFAULT_JEV_KEY_ENV,
     DEFAULT_JEV_MODEL,
     DEFAULT_USER_AGENT,
+    DIALOGUE_SAMPLER_VERSION,
     HTTP_TIMEOUT_SECONDS,
     MAX_QUESTION_COUNT,
     MAX_REQUEST_BYTES,
     MAX_RETRIES,
     MAX_STATE_BYTES,
+    STYLE_PROMPT_VERSION,
+    STYLE_STATUSES,
+    STYLE_TAXONOMY_VERSION,
 )
+from .dialogue import evidence_sufficiency, sample_id, sample_manifest_hash
 
 
 class JevError(RuntimeError):
@@ -53,6 +59,11 @@ def build_questions(vocabulary: dict) -> dict[str, dict]:
                 key: _description(key, entry)
                 for key, entry in allowed.items()
             }
+            question["evidence_required"] = True
+            question["max_supporting"] = 4
+            question["max_counterexamples"] = 3
+            question["min_supporting"] = 2
+            question["rationale_required"] = True
         elif qtype == "score":
             question["criteria"] = list(spec["levels"])
         elif qtype == "noul" and spec.get("criteria"):
@@ -78,18 +89,25 @@ def _resolve_values(vocabulary: dict, path: str) -> dict:
 # What the model is told about its own evidence base. A 24-line sample of 1,552
 # lines is 1.5%; saying so is what keeps a confident-sounding answer honest.
 GUARDRAILS = (
-    "This is synthetic casting; there is no original recording to discover.",
-    "Race, clan, sex, body, occupation, and personality are not acoustic evidence.",
-    "Dialogue text supports speech style and is rendered into the voice instruct, but cannot establish pitch or timbre.",
-    "dialogue_coverage says how much of the corpus you actually see; never claim more than it supports.",
-    "Judge the baseline across ordinary, unrelated lines. A dramatic scene is not the default.",
-    "Never invent source facts or citations.",
+    "Classify only the recurring written-dialogue style of one character.",
+    "Do not infer race, gender, age, body, occupation, status, personality, or expected archetype.",
+    "Dialogue text cannot establish pitch, timbre, resonance, accent, loudness, speed, pauses, or intonation.",
+    "Judge recurring patterns across ordinary lines; a dramatic scene is not the default.",
+    "Use mixed when multiple patterns genuinely recur, and abstain when the sample is too sparse.",
+    "Cite only supplied line IDs and give a short rationale tied to those lines. Never invent an ID, quote, or source fact.",
+    "Model self-reported confidence is diagnostic only and is not calibrated.",
 )
 
 
 def _coverage(statistics: dict, samples: list[dict]) -> dict:
     unique = int(statistics.get("unique_line_count") or statistics.get("dialogue_count") or 0)
     sampled = len(samples)
+    source_counts = {}
+    contexts = set()
+    for sample in samples:
+        source = str(sample.get("source") or "unknown")
+        source_counts[source] = source_counts.get(source, 0) + 1
+        contexts.add((source, str(sample.get("sheet") or "unknown")))
     return {
         "rows": statistics.get("dialogue_count"),
         "unique_lines": unique,
@@ -97,53 +115,142 @@ def _coverage(statistics: dict, samples: list[dict]) -> dict:
         "sampled_words": sum(len(str(sample.get("text") or "").split()) for sample in samples),
         "coverage_of_unique_lines": round(sampled / unique, 4) if unique else None,
         "source_distribution": statistics.get("source_distribution") or {},
+        "sampled_sources": dict(sorted(source_counts.items())),
+        "sampled_source_count": len(source_counts),
+        "sampled_context_count": len(contexts),
         "warning": (
-            "The samples are a small, signal-weighted subset. Treat them as examples, "
-            "not as the full range of this character."
+            "The sample is a deterministic subset. Treat it as evidence, not as the full corpus."
             if unique and sampled / unique < 0.25 else None
         ),
     }
 
 
-def compact_state(dossier: dict, *, max_bytes: int = MAX_STATE_BYTES) -> dict:
-    """Build the dialogue-only state the model sees.
-
-    Measurements are supplied; the rules-derived interpretation is deliberately
-    withheld, because showing the model its own baseline's labels turns the
-    answer into an echo and destroys the independence the benchmark needs.
-    """
-    statistics = dossier.get("statistics") or {}
-    analysis = dossier.get("dialogue_analysis") or {}
-    samples = [
-        {
-            "text": sample.get("text", ""),
+def _sample_records(dossier: dict) -> list[dict]:
+    canonical_id = str((dossier.get("identity") or {}).get("canonical_id") or "unknown")
+    records = []
+    for sample in dossier.get("dialogue_samples") or []:
+        text = str(sample.get("text") or "")
+        if not text.strip():
+            continue
+        identifier = sample.get("id") or sample_id(canonical_id, sample)
+        records.append({
+            "id": str(identifier),
+            "text": text,
             "source": sample.get("source"),
             "sheet": sample.get("sheet"),
-            "signals": sample.get("signals") or [],
-        }
-        for sample in dossier.get("dialogue_samples") or []
-    ]
+            "length_bucket": sample.get("length_bucket"),
+        })
+    return records
+
+
+def _state_without_samples(
+    dossier: dict,
+    samples: list[dict],
+    *,
+    include_measurements: bool,
+    budget_reduction: dict | None = None,
+    vocabulary: dict | None = None,
+) -> dict:
+    statistics = dossier.get("statistics") or {}
+    canonical_id = str((dossier.get("identity") or {}).get("canonical_id") or "unknown")
+    manifest = dossier.get("sample_manifest") or {}
     state = {
-        "identity": {
-            key: (dossier.get("identity") or {}).get(key)
-            for key in (
-                "canonical_id", "npc_id", "name", "aliases", "race", "clan",
-                "sex", "occupation", "faction", "location", "resolution_status",
-                "has_se_voice_reference", "identity_ambiguous",
-            )
-        },
-        "dialogue_measurements": analysis.get("measurements") or {},
+        "task": (
+            "Classify the character's stable, recurring written-dialogue style from the supplied "
+            "anonymous lines. Do not infer voice acoustics or identity."
+        ),
+        "dialogue_samples": [
+            {"id": sample["id"], "text": sample["text"]}
+            for sample in samples
+        ],
         "dialogue_coverage": _coverage(statistics, samples),
-        "dialogue_samples": samples,
-        "voice_evidence": dossier.get("voice_evidence") or [],
+        "evidence_sufficiency": evidence_sufficiency(
+            statistics, samples, vocabulary=vocabulary,
+        ),
+        "sample_manifest_hash": sample_manifest_hash(
+            canonical_id, samples, corpus_hash=manifest.get("corpus_hash"),
+        ),
+        "taxonomy_version": STYLE_TAXONOMY_VERSION,
+        "prompt_version": STYLE_PROMPT_VERSION,
+        "sampler_version": DIALOGUE_SAMPLER_VERSION,
         "guardrails": list(GUARDRAILS),
     }
-    while len(json.dumps(state, ensure_ascii=False).encode("utf-8")) > max_bytes:
-        samples = state["dialogue_samples"]
-        if not samples:
+    if include_measurements:
+        state["dialogue_measurements"] = (
+            (dossier.get("dialogue_analysis") or {}).get("measurements") or {}
+        )
+    if budget_reduction is not None:
+        state["budget_reduction"] = budget_reduction
+    return state
+
+
+def _encode_size(state: dict) -> int:
+    return len(json.dumps(state, ensure_ascii=False).encode("utf-8"))
+
+
+def _trim_to_budget(
+    dossier: dict,
+    samples: list[dict],
+    *,
+    max_bytes: int,
+    include_measurements: bool,
+    vocabulary: dict | None = None,
+) -> tuple[list[dict], dict]:
+    original = len(samples)
+    # Stable order makes budget reduction reproducible. The lowest opaque IDs
+    # are kept first; coverage and hashes are recomputed after trimming.
+    ordered = sorted(samples, key=lambda sample: sample["id"])
+    kept = list(ordered)
+    while True:
+        reduction = {
+            "applied": len(kept) != original,
+            "original_samples": original,
+            "final_samples": len(kept),
+            "reason": "max_state_bytes" if len(kept) != original else None,
+        }
+        state = _state_without_samples(
+            dossier, kept, include_measurements=include_measurements,
+            budget_reduction=reduction, vocabulary=vocabulary,
+        )
+        if _encode_size(state) <= max_bytes:
+            return kept, reduction
+        if not kept:
             raise ValueError("dossier state exceeds configured Jev request limit")
-        samples.pop()
-        state["dialogue_coverage"]["sampled_lines"] = len(samples)
+        kept.pop()
+
+
+def compact_state(
+    dossier: dict,
+    *,
+    max_bytes: int = MAX_STATE_BYTES,
+    include_measurements: bool = False,
+    vocabulary: dict | None = None,
+) -> dict:
+    """Build the identity-blind state the model sees.
+
+    The primary request contains only stable opaque IDs, dialogue text, minimal
+    coverage metadata, and version tags. It deliberately omits identity,
+    appearance, voice evidence, rules interpretations, and regex signal labels.
+    """
+    samples = _sample_records(dossier)
+    if not samples:
+        state = _state_without_samples(
+            dossier, [], include_measurements=include_measurements,
+            vocabulary=vocabulary,
+        )
+        if _encode_size(state) > max_bytes:
+            raise ValueError("dossier state exceeds configured Jev request limit")
+        return state
+    kept, reduction = _trim_to_budget(
+        dossier, samples, max_bytes=max_bytes, include_measurements=include_measurements,
+        vocabulary=vocabulary,
+    )
+    state = _state_without_samples(
+        dossier, kept, include_measurements=include_measurements,
+        budget_reduction=reduction, vocabulary=vocabulary,
+    )
+    if _encode_size(state) > max_bytes:
+        raise ValueError("dossier state exceeds configured Jev request limit")
     return state
 
 
@@ -168,6 +275,20 @@ def _check_distribution(probabilities: Any, expected_keys: list[str], label: str
     return cooked
 
 
+def _line_id_list(value: Any, label: str, limit: int) -> list[str]:
+    if value in (None, []):
+        return []
+    if not isinstance(value, list) or any(
+        not isinstance(item, str) or not item for item in value
+    ):
+        raise JevResponseError(f"{label} must be a list of non-empty strings")
+    if len(value) > limit:
+        raise JevResponseError(f"{label} has too many IDs")
+    if len(set(value)) != len(value):
+        raise JevResponseError(f"{label} contains duplicate IDs")
+    return list(value)
+
+
 def validate_response(payload: dict, questions: dict[str, dict]) -> dict:
     if not isinstance(payload, dict) or not isinstance(payload.get("model"), str):
         raise JevResponseError("response is missing the answering model ID")
@@ -187,19 +308,64 @@ def validate_response(payload: dict, questions: dict[str, dict]) -> dict:
         if expected_type == "choice":
             allowed = list(question["criteria"])
             choice = answer.get("choice")
-            if choice not in allowed:
-                raise JevResponseError(f"{question_id} selected an invalid option")
-            probabilities = _check_distribution(
-                answer.get("probabilities"), allowed, question_id
+            # A missing status is not evidence. Keep the model's choice for
+            # audit, but record the answer as unresolved so aggregation cannot
+            # promote it to supported.
+            status = answer.get("status") or "unresolved"
+            if status not in STYLE_STATUSES:
+                raise JevResponseError(f"{question_id} has an invalid status")
+            if status in {"insufficient_evidence", "rejected"}:
+                if choice is not None:
+                    raise JevResponseError(
+                        f"{question_id} must not select a label when status is {status}"
+                    )
+            elif status in {"supported", "mixed", "provisional"}:
+                if choice not in allowed:
+                    raise JevResponseError(f"{question_id} selected an invalid option")
+            probabilities = None
+            if choice is not None:
+                probabilities = _check_distribution(
+                    answer.get("probabilities"), allowed, question_id
+                )
+                if probabilities[choice] + 1e-9 < max(probabilities.values()):
+                    raise JevResponseError(
+                        f"{question_id} choice is not the most probable option"
+                    )
+            confidence = answer.get("confidence")
+            if confidence is not None:
+                confidence = _finite_probability(confidence, f"{question_id}.confidence")
+            diagnostic = answer.get("model_self_reported_confidence")
+            if diagnostic is not None:
+                diagnostic = _finite_probability(
+                    diagnostic, f"{question_id}.model_self_reported_confidence"
+                )
+            supporting = _line_id_list(
+                answer.get("supporting_line_ids"),
+                f"{question_id}.supporting_line_ids",
+                int(question.get("max_supporting", 4)),
             )
-            confidence = _finite_probability(answer.get("confidence"), f"{question_id}.confidence")
-            if probabilities[choice] + 1e-9 < max(probabilities.values()):
-                raise JevResponseError(f"{question_id} choice is not the most probable option")
+            counterexamples = _line_id_list(
+                answer.get("counterexample_line_ids"),
+                f"{question_id}.counterexample_line_ids",
+                int(question.get("max_counterexamples", 3)),
+            )
+            if set(supporting) & set(counterexamples):
+                raise JevResponseError(
+                    f"{question_id} cites the same line as support and counterexample"
+                )
+            rationale = answer.get("rationale")
+            if rationale is not None and not isinstance(rationale, str):
+                raise JevResponseError(f"{question_id}.rationale must be a string")
             answers[question_id] = {
                 "type": expected_type,
                 "choice": choice,
+                "status": status,
                 "probabilities": probabilities,
                 "confidence": confidence,
+                "model_self_reported_confidence": diagnostic,
+                "supporting_line_ids": supporting,
+                "counterexample_line_ids": counterexamples,
+                "rationale": rationale,
             }
         elif expected_type == "score":
             levels = question["criteria"]
@@ -262,7 +428,9 @@ class JevProvider:
         retries: int = MAX_RETRIES,
         opener: Callable[..., Any] | None = None,
         sleeper: Callable[[float], None] = time.sleep,
+        vocabulary: dict | None = None,
     ):
+        self.vocabulary = vocabulary
         self.endpoint = endpoint
         self.model = model
         self.model_id = model
@@ -279,7 +447,9 @@ class JevProvider:
         return host in {"127.0.0.1", "localhost", "::1", "0.0.0.0"}
 
     def classify(self, dossier: dict, questions: dict[str, dict]) -> dict:
-        return self.classify_state(compact_state(dossier), questions)
+        return self.classify_state(
+            compact_state(dossier, vocabulary=self.vocabulary), questions,
+        )
 
     def classify_state(self, state: dict, questions: dict[str, dict]) -> dict:
         api_key = os.environ.get(self.api_key_env)

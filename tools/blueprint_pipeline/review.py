@@ -52,6 +52,13 @@ def mark_auditioned(
     combined_instruct_hash: str | None = None,
     casting_rules_version: str | None = None,
     renderer_version: str | None = None,
+    instruct: str | None = None,
+    taxonomy_version: str | None = None,
+    classifier_version: str | None = None,
+    prompt_version: str | None = None,
+    sampler_version: str | None = None,
+    corpus_hash: str | None = None,
+    sample_manifest_hash: str | None = None,
 ) -> dict:
     if not by.strip():
         raise ReviewError("auditioning reviewer name is required")
@@ -77,6 +84,13 @@ def mark_auditioned(
         ("combined_instruct_hash", combined_instruct_hash),
         ("casting_rules_version", casting_rules_version),
         ("renderer_version", renderer_version),
+        ("instruct", instruct),
+        ("taxonomy_version", taxonomy_version),
+        ("classifier_version", classifier_version),
+        ("prompt_version", prompt_version),
+        ("sampler_version", sampler_version),
+        ("corpus_hash", corpus_hash),
+        ("sample_manifest_hash", sample_manifest_hash),
     ):
         if value is not None:
             new_pin[key] = value

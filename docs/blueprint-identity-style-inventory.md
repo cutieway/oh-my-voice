@@ -45,11 +45,13 @@ Rendered order is fixed by `render.identity_v2`:
 ```text
 {article} {head} voice with a {pitch} pitch and {article} {size_weight} quality.
 It has {timbre descriptors}. Speech has {articulation}, {intonation}, {pace}.
-{accent}{traits}Neutral conversational delivery for game dialogue.
+{accent}{traits}
 ```
 
-Null optional fields are omitted. A missing Style dimension never suppresses
-the other Style dimensions.
+Null optional fields are omitted. There is no unconditional neutral identity
+tail; that sentence was removed because it competed with the Style clause. A
+missing Style dimension never suppresses the other Style dimensions, and only
+`supported` or `mixed` fields enter the profile.
 
 ## 3. Field-by-field
 
@@ -213,16 +215,18 @@ The three possible policies remain:
 | Audio-first | Voiced NPCs get null acoustics and are filled from SCD measurements |
 | Strict fact-only | Null every acoustic field until measured |
 
-### Style is not JEV-only today
+### Style source policy
 
-Two paths currently write profile style without an accepted JEV answer: the
-deterministic heuristic fallback, and the `rules` provider. To make style
-“JEV choice or null”:
+Production style is `JEV choice or null`:
 
-1. Remove the heuristic fallback; a rejected answer becomes null with the reason
-   and confidence recorded.
-2. Treat `RulesProvider` as benchmark-only, not a profile source.
-3. Decide whether the three non-style JEV gates remain.
+1. There is no heuristic fallback. A rejected or insufficient answer becomes
+   null with an explicit status and rationale.
+2. `RulesProvider` is an explicitly selected offline baseline, not a fallback and
+   not a profile source unless the operator asks for it. Its decisions carry
+   `method: rules_baseline`.
+3. The old non-style JEV gates (`identity_resolved`, `voice_evidence_present`,
+   `individual_design`) are gone. Identity, voice routing, and profile allocation
+   are deterministic policy.
 
 ## 7. Verification
 

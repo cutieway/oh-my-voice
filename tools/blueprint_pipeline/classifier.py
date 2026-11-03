@@ -1,14 +1,22 @@
 from __future__ import annotations
 
 import datetime as dt
-import hashlib
 from abc import ABC, abstractmethod
 from typing import Any
 
 from . import CLASSIFIER_CONFIG_VERSION
 from .cache import object_hash
-from .config import DEFAULT_THRESHOLDS
-from .jev import build_questions
+from .config import (
+    DEFAULT_THRESHOLDS,
+    DIALOGUE_SAMPLER_VERSION,
+    SPEECH_STYLE_SCHEMA_VERSION,
+    STYLE_CLASSIFIER_VERSION,
+    STYLE_FIELDS,
+    STYLE_PROMPT_VERSION,
+    STYLE_TAXONOMY_VERSION,
+)
+from .dialogue import evidence_sufficiency, sample_id, sample_manifest_hash
+from .jev import build_questions, compact_state
 
 
 class ClassifierProvider(ABC):
@@ -20,128 +28,250 @@ class ClassifierProvider(ABC):
         raise NotImplementedError
 
 
+RULES_ALIASES = {"educated": "advanced"}
+
+
 class RulesProvider(ClassifierProvider):
+    """Explicitly selected deterministic baseline. It never acts as a fallback."""
+
     name = "rules"
-    model_id = "rules-1.0"
+    model_id = "rules-2.0"
 
     def __init__(self, vocabulary: dict):
         self.vocabulary = vocabulary
 
     def classify(self, dossier: dict, questions: dict[str, dict]) -> dict:
-        identity = dossier.get("identity") or {}
         analysis = (dossier.get("dialogue_analysis") or {}).get("interpretation") or {}
         answers = {}
         for question_id, question in questions.items():
-            kind = question["type"]
-            if kind == "noul":
-                if question_id == "identity_resolved":
-                    yes = (
-                        identity.get("resolution_status") == "eligible"
-                        and identity.get("npc_id") is not None
-                        and not identity.get("identity_ambiguous")
-                        and not identity.get("has_se_voice_reference")
-                    )
-                elif question_id == "voice_evidence_present":
-                    yes = bool(dossier.get("voice_evidence"))
-                else:
-                    yes = False
-                p_yes = 0.99 if yes else 0.01
-                answers[question_id] = {"type": "noul", "noul": p_yes}
-            elif kind == "score":
-                if question_id == "individual_design":
-                    count = int((dossier.get("statistics") or {}).get("dialogue_count", 0))
-                    has_voice_evidence = bool(dossier.get("voice_evidence"))
-                    score = 4 if has_voice_evidence else 2 if count >= 50 else 1
-                else:
-                    score = 0
-                score = max(0, min(len(question["criteria"]) - 1, score))
-                probabilities = {
-                    str(index): 1.0 if index == score else 0.0
-                    for index in range(len(question["criteria"]))
-                }
-                answers[question_id] = {
-                    "type": "score",
-                    "score": float(score),
-                    "legend": {str(index): level for index, level in enumerate(question["criteria"])},
-                    "probabilities": probabilities,
-                    "confidence": 1.0,
-                }
-            elif kind == "choice":
-                preferred = self._preferred(question_id, identity, analysis, question)
-                criteria = question["criteria"]
-                if preferred not in criteria:
-                    preferred = next(iter(criteria))
-                probabilities = {key: 1.0 if key == preferred else 0.0 for key in criteria}
-                answers[question_id] = {
-                    "type": "choice",
-                    "choice": preferred,
-                    "probabilities": probabilities,
-                    "confidence": 1.0,
-                }
-            else:
-                raise ValueError(f"unsupported classification question type: {kind}")
+            if question["type"] != "choice" or not question_id.startswith("speech_style."):
+                raise ValueError(f"rules baseline does not answer {question_id}")
+            field = question_id.split(".", 1)[1]
+            value = analysis.get(field)
+            value = RULES_ALIASES.get(value, value)
+            criteria = question["criteria"]
+            status = "supported" if value in criteria else "insufficient_evidence"
+            if value not in criteria:
+                value = None
+            answers[question_id] = {
+                "type": "choice",
+                "choice": value,
+                "status": status,
+                "probabilities": (
+                    {key: 1.0 if key == value else 0.0 for key in criteria}
+                    if value is not None else {}
+                ),
+                "confidence": 1.0 if value is not None else None,
+                "model_self_reported_confidence": None,
+                "supporting_line_ids": [],
+                "counterexample_line_ids": [],
+                "rationale": (
+                    f"rules baseline selected {value} from deterministic dialogue measurements"
+                    if value is not None
+                    else "rules baseline produced no supported label"
+                ),
+            }
         return {
             "model": self.model_id,
             "answers": answers,
             "usage": {"input_tokens": 0, "output_tokens": 0},
         }
 
-    def _preferred(self, question_id: str, identity: dict, analysis: dict, question: dict) -> str:
-        if question_id.startswith("speech_style."):
-            field = question_id.split(".", 1)[1]
-            value = analysis.get(field)
-            if field == "speech_habits":
-                value = "none_observed"
-            return value
-        field = question_id.removeprefix("identity.")
-        defaults = self.vocabulary.get("classification", {}).get("defaults", {})
-        return defaults.get(field) or next(iter(question["criteria"]))
-
 
 def utc_timestamp() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat()
 
 
-def _answer_for(decisions: dict, question_id: str) -> dict:
-    try:
-        return decisions["answers"][question_id]
-    except KeyError as exc:
-        raise ValueError(f"classification response is missing {question_id}") from exc
+def _has_verified_voice_evidence(dossier: dict) -> bool:
+    evidence = dossier.get("voice_evidence")
+    if isinstance(evidence, dict):
+        return bool(evidence.get("verified"))
+    if isinstance(evidence, list):
+        return any(isinstance(item, dict) and item.get("verified") for item in evidence)
+    return False
 
 
-def _choice(answer: dict, thresholds: dict) -> tuple[str | None, dict]:
-    distribution = answer["probabilities"]
-    selected = answer["choice"]
-    probability = distribution[selected]
-    confidence = float(answer["confidence"])
-    accepted = (
-        confidence >= thresholds["choice_confidence"]
-        and probability >= thresholds["choice_probability"]
+def _identity_gate(dossier: dict) -> str | None:
+    identity = dossier.get("identity") or {}
+    if identity.get("resolution_status") != "eligible":
+        return "identity failed the conservative synthetic-candidate gate"
+    if identity.get("npc_id") is None:
+        return "identity has no canonical game NPC ID"
+    if (
+        identity.get("has_recorded_voice")
+        or identity.get("voice_evidence_verified")
+        or _has_verified_voice_evidence(dossier)
+    ):
+        return "identity has verified recorded voice evidence; use the official audio path"
+    if identity.get("has_se_voice_reference"):
+        return "identity has an unverified SE voice reference; verify the speaker-to-audio relationship before synthetic design"
+    if identity.get("identity_ambiguous"):
+        return "identity is ambiguous"
+    return None
+
+
+def _decision_for_field(
+    *,
+    field: str,
+    answer: dict,
+    question: dict,
+    provider: ClassifierProvider,
+    sample_ids: set[str],
+    tier: dict,
+    analysis: dict,
+    model_id: str,
+) -> dict:
+    value = answer.get("choice")
+    # Missing status is unresolved, not an implicit supported label.
+    status = answer.get("status") or "unresolved"
+    method = "rules_baseline" if provider.name == "rules" else "jev"
+    base = {
+        "method": method,
+        "provider": provider.name,
+        "model_id": model_id,
+        "evidence_tier": tier["tier"],
+        "evidence": tier,
+        "model_self_reported_confidence": answer.get("model_self_reported_confidence"),
+        "probabilities": answer.get("probabilities"),
+    }
+    if tier["tier"] == "insufficient":
+        return {
+            **base,
+            "value": None,
+            "status": "insufficient_evidence",
+            "supporting_line_ids": [],
+            "counterexample_line_ids": [],
+            "support_ratio": None,
+            "rationale": "The sample is below the minimum evidence floor.",
+            "rules_baseline_estimate": (
+                analysis.get(field) if method == "rules_baseline" else None
+            ),
+        }
+    if status in {"insufficient_evidence", "unresolved", "rejected"}:
+        return {
+            **base,
+            "value": None,
+            "status": status,
+            "supporting_line_ids": list(answer.get("supporting_line_ids") or []),
+            "counterexample_line_ids": list(answer.get("counterexample_line_ids") or []),
+            "support_ratio": None,
+            "rationale": answer.get("rationale") or f"Classifier abstained with status {status}.",
+        }
+    if value not in question["criteria"]:
+        return {
+            **base,
+            "value": None,
+            "status": "rejected",
+            "supporting_line_ids": [],
+            "counterexample_line_ids": [],
+            "support_ratio": None,
+            "rationale": f"Classifier returned an unsupported label {value!r}.",
+        }
+    supporting = list(answer.get("supporting_line_ids") or [])
+    counterexamples = list(answer.get("counterexample_line_ids") or [])
+    if method == "jev":
+        invalid = [line_id for line_id in supporting + counterexamples if line_id not in sample_ids]
+        if invalid:
+            return {
+                **base,
+                "value": None,
+                "status": "rejected",
+                "supporting_line_ids": supporting,
+                "counterexample_line_ids": counterexamples,
+                "support_ratio": None,
+                "rationale": f"Classifier cited line IDs absent from the request: {invalid[:3]}.",
+            }
+        if len(supporting) < 2:
+            return {
+                **base,
+                "value": None,
+                "status": "rejected",
+                "supporting_line_ids": supporting,
+                "counterexample_line_ids": counterexamples,
+                "support_ratio": None,
+                "rationale": "Supported Style fields require at least two cited lines.",
+            }
+        if status == "mixed" and not counterexamples:
+            return {
+                **base,
+                "value": None,
+                "status": "rejected",
+                "supporting_line_ids": supporting,
+                "counterexample_line_ids": [],
+                "support_ratio": None,
+                "rationale": "A mixed result requires at least one counterexample line.",
+            }
+    if tier["tier"] == "provisional":
+        status = "provisional"
+    elif status == "supported":
+        status = "supported"
+    total_citations = len(supporting) + len(counterexamples)
+    support_ratio = (
+        round(len(supporting) / total_citations, 4) if total_citations else None
     )
-    return (selected if accepted else None), {
-        "confidence": confidence,
-        "selected_probability": probability,
-        "accepted": accepted,
+    return {
+        **base,
+        "value": value,
+        "status": status,
+        "supporting_line_ids": supporting,
+        "counterexample_line_ids": counterexamples,
+        "support_ratio": support_ratio,
+        "rationale": answer.get("rationale") or "",
     }
 
 
-def _noul(answer: dict, thresholds: dict) -> dict:
-    probability = float(answer["noul"])
-    if probability >= thresholds["noul_yes"]:
-        state = "yes"
-    elif probability <= thresholds["noul_no"]:
-        state = "no"
+def _profile_allocation(
+    dossier: dict,
+    decisions: dict[str, dict],
+    policy: dict,
+) -> dict:
+    identity = dossier.get("identity") or {}
+    statistics = dossier.get("statistics") or {}
+    lines = int(statistics.get("unique_line_count") or statistics.get("dialogue_count") or 0)
+    supported = [
+        field for field, decision in decisions.items()
+        if decision.get("status") in {"supported", "mixed"} and decision.get("value") is not None
+    ]
+    provisional = [
+        field for field, decision in decisions.items()
+        if decision.get("status") == "provisional" and decision.get("value") is not None
+    ]
+    voice_route = (
+        "official_audio"
+        if identity.get("has_recorded_voice")
+        or identity.get("voice_evidence_verified")
+        or _has_verified_voice_evidence(dossier)
+        else "synthetic_candidate"
+    )
+    minimum = int(policy.get("min_dialogue_lines_for_individual", 50))
+    minimum_fields = int(policy.get("min_style_fields_for_individual", 2))
+    if voice_route == "official_audio":
+        decision = "official_audio"
+        reason = "Official voice/audio linkage takes precedence over synthetic design."
+    elif lines < minimum:
+        decision = "shared_archetype"
+        reason = f"Dialogue volume {lines} is below the individual-design floor {minimum}."
+    elif len(supported) < minimum_fields:
+        decision = "shared_archetype"
+        reason = (
+            f"Only {len(supported)} supported Style field(s); at least {minimum_fields} "
+            "are required for an individual design."
+        )
     else:
-        state = "uncertain"
-    return {"yes_probability": probability, "decision": state}
-
-
-def _score(answer: dict, thresholds: dict) -> dict:
-    confidence = float(answer["confidence"])
+        decision = "individual_design"
+        reason = (
+            f"{len(supported)} supported Style fields and {lines} dialogue lines justify "
+            "an individual synthetic design."
+        )
     return {
-        "score": float(answer["score"]),
-        "confidence": confidence,
-        "accepted": confidence >= thresholds["choice_confidence"],
+        "decision": decision,
+        "reason": reason,
+        "voice_route": voice_route,
+        "dialogue_lines": lines,
+        "supported_style_fields": sorted(supported),
+        "provisional_style_fields": sorted(provisional),
+        "minimum_dialogue_lines": minimum,
+        "minimum_style_fields": minimum_fields,
     }
 
 
@@ -158,157 +288,215 @@ def classify_dossier(
     policy.update(vocabulary.get("classification", {}).get("thresholds", {}))
     if thresholds:
         policy.update(thresholds)
-    if min_confidence is not None:
-        policy["choice_confidence"] = float(min_confidence)
+    # Kept as a compatibility input; acceptance no longer depends on model
+    # self-reported confidence, which is diagnostic only.
+    del min_confidence
     identity = dossier.get("identity") or {}
     canonical_id = str(identity.get("canonical_id") or "")
-    if (
-        identity.get("resolution_status") != "eligible"
-        or identity.get("npc_id") is None
-        or identity.get("has_se_voice_reference")
-        or identity.get("identity_ambiguous")
-    ):
+    gate_reason = _identity_gate(dossier)
+    if gate_reason:
         return {
-            "schema_version": "1.0",
-            "canonical_id": canonical_id,
-            "dossier_hash": dossier.get("input_hash"),
-            "provider": provider.name,
-            "model_id": model_id or provider.model_id,
-            "status": "needs_review",
-            "assignment": None,
-            "review_reasons": list(identity.get("review_reasons") or []) + [
-                "identity failed the conservative synthetic-candidate gate"
-            ],
-            "decisions": {},
-        }
-
-    questions = build_questions(vocabulary)
-    statistics = dossier.get("statistics") or {}
-    line_count = int(statistics.get("unique_line_count") or statistics.get("dialogue_count") or 0)
-    response = provider.classify(dossier, questions)
-    answers = dict(response["answers"])
-    decision_checks = {}
-    accepted_choices = {}
-    for question_id, answer in answers.items():
-        if answer["type"] == "choice":
-            selected, check = _choice(answer, policy)
-            decision_checks[question_id] = check
-            if selected is not None:
-                accepted_choices[question_id] = selected
-        elif answer["type"] == "noul":
-            decision_checks[question_id] = _noul(answer, policy)
-        elif answer["type"] == "score":
-            decision_checks[question_id] = _score(answer, policy)
-
-    usage = {
-        "input_tokens": int((response.get("usage") or {}).get("input_tokens") or 0),
-        "output_tokens": int((response.get("usage") or {}).get("output_tokens") or 0),
-    }
-    identity_resolved = decision_checks.get("identity_resolved", {}).get("decision") == "yes"
-    if not identity_resolved:
-        return {
-            "schema_version": "1.0",
+            "schema_version": "2.0",
             "canonical_id": canonical_id,
             "npc_id": identity.get("npc_id"),
             "name": identity.get("name"),
             "dossier_hash": dossier.get("input_hash"),
             "provider": provider.name,
-            "model_id": response.get("model") or model_id or provider.model_id,
-            "usage": usage,
-            "questions": questions,
-            "answers": answers,
-            "decision_checks": decision_checks,
+            "model_id": model_id or provider.model_id,
             "status": "needs_review",
             "assignment": None,
-            "review_reasons": ["Jev/rules provider did not accept canonical identity resolution"],
+            "profile_allocation": {
+                "decision": (
+                    "official_audio"
+                    if (
+                        identity.get("has_recorded_voice")
+                        or identity.get("voice_evidence_verified")
+                        or _has_verified_voice_evidence(dossier)
+                    )
+                    else "shared_archetype"
+                ),
+                "reason": gate_reason,
+                "voice_route": (
+                    "official_audio"
+                    if (
+                        identity.get("has_recorded_voice")
+                        or identity.get("voice_evidence_verified")
+                        or _has_verified_voice_evidence(dossier)
+                    )
+                    else "synthetic_candidate"
+                ),
+            },
+            "speech_style": {},
+            "speech_style_analysis": None,
+            "review_reasons": list(identity.get("review_reasons") or []) + [gate_reason],
+            "decisions": {},
         }
 
-    score = decision_checks.get("individual_design", {})
-    voice_present = decision_checks.get("voice_evidence_present", {}).get("decision") == "yes"
-    distinctive = (
-        score.get("accepted", False)
-        and score.get("score", 0) >= policy["distinctiveness_score"]
-        and (
-            voice_present
-            or int((dossier.get("statistics") or {}).get("dialogue_count", 0))
-            >= policy["min_dialogue_lines_for_individual"]
-        )
-    )
-    speech_fields = (
-        "register", "vocabulary_complexity", "sentence_complexity", "colloquialism",
-        "rhetorical_style",
-    )
-    speech_style = {}
+    questions = build_questions(vocabulary)
+    statistics = dossier.get("statistics") or {}
+    samples = dossier.get("dialogue_samples") or []
+    sent_state = None
+    if provider.name == "jev":
+        # The HTTP provider trims the state to the request budget. Evidence and
+        # citation validity must describe the lines the model actually saw.
+        sent_state = compact_state(dossier, vocabulary=vocabulary)
+        sent_ids = {
+            str(sample.get("id"))
+            for sample in sent_state.get("dialogue_samples") or []
+            if sample.get("id")
+        }
+        samples = [
+            sample for sample in samples
+            if str(sample.get("id") or sample_id(canonical_id, sample)) in sent_ids
+        ]
+    sample_ids = {
+        str(sample.get("id") or sample_id(canonical_id, sample))
+        for sample in samples
+    }
     analysis = (dossier.get("dialogue_analysis") or {}).get("interpretation") or {}
-    style_floor = policy["min_dialogue_lines_for_style"]
-    style_sufficient = line_count >= style_floor
-    for field in speech_fields:
+    response = provider.classify(dossier, questions)
+    answers = dict(response.get("answers") or {})
+    resolved_model_id = response.get("model") or model_id or provider.model_id
+
+    decisions: dict[str, dict] = {}
+    decision_checks: dict[str, dict] = {}
+    field_tiers: dict[str, dict] = {}
+    for field in STYLE_FIELDS:
         question_id = f"speech_style.{field}"
-        if not style_sufficient:
-            # Too few lines to describe a register. The deterministic estimate is
-            # kept for the audit, but it never reaches a profile: a six-line NPC
-            # renders from identity alone rather than a confident guess.
-            speech_style[field] = {
+        question = questions[question_id]
+        tier = evidence_sufficiency(
+            statistics, samples, vocabulary=vocabulary, field=field,
+        )
+        field_tiers[field] = tier
+        answer = answers.get(question_id)
+        if not isinstance(answer, dict):
+            decisions[field] = {
                 "value": None,
-                "method": "insufficient_dialogue_volume",
-                "deterministic_estimate": analysis.get(field),
-                "line_count": line_count,
-                "confidence": None,
+                "status": "rejected",
+                "method": "rules_baseline" if provider.name == "rules" else "jev",
+                "provider": provider.name,
+                "model_id": resolved_model_id,
+                "evidence_tier": tier["tier"],
+                "evidence": tier,
+                "supporting_line_ids": [],
+                "counterexample_line_ids": [],
+                "support_ratio": None,
+                "rationale": "Classifier response omitted this field.",
+                "model_self_reported_confidence": None,
                 "probabilities": None,
             }
-            continue
-        value = accepted_choices.get(question_id)
-        if value is None:
-            value = analysis.get(field)
-        if value is not None:
-            speech_style[field] = {
-                "value": value,
-                "method": (
-                    f"{provider.name}_choice" if question_id in accepted_choices
-                    else "deterministic_dialogue_analysis"
-                ),
-                "confidence": decision_checks.get(question_id, {}).get("confidence"),
-                "probabilities": (answers.get(question_id) or {}).get("probabilities"),
-            }
-    speech_style["speech_habits"] = {
-        "value": analysis.get("speech_habits", ["none_observed"]),
-        "method": "deterministic_dialogue_analysis",
-        "confidence": None,
+        else:
+            decisions[field] = _decision_for_field(
+                field=field,
+                answer=answer,
+                question=question,
+                provider=provider,
+                sample_ids=sample_ids,
+                tier=tier,
+                analysis=analysis,
+                model_id=resolved_model_id,
+            )
+        decision = decisions[field]
+        decision_checks[field] = {
+            "accepted": decision["status"] in {"supported", "mixed"},
+            "status": decision["status"],
+            "confidence": decision.get("model_self_reported_confidence"),
+        }
+
+    usage = {
+        "input_tokens": int((response.get("usage") or {}).get("input_tokens") or 0),
+        "output_tokens": int((response.get("usage") or {}).get("output_tokens") or 0),
     }
+    allocation = _profile_allocation(dossier, decisions, policy)
+    supported_fields = allocation["supported_style_fields"]
+    rejected_fields = [
+        field for field, decision in decisions.items() if decision["status"] == "rejected"
+    ]
+    provisional_fields = allocation["provisional_style_fields"]
 
     review_reasons = []
-    if not style_sufficient:
+    if not supported_fields:
+        review_reasons.append("no Style field met the supported evidence tier")
+    if provisional_fields:
         review_reasons.append(
-            f"dialogue volume {line_count} is below the style floor {style_floor}; no style recorded"
+            "provisional Style fields are stored but not rendered: "
+            + ", ".join(provisional_fields)
         )
-    if not score.get("accepted"):
-        review_reasons.append("distinctiveness score is below the confidence threshold")
-    if score.get("score", 0) < policy["distinctiveness_score"]:
-        review_reasons.append("shared archetype is preferred for the available evidence")
-    if not voice_present:
-        review_reasons.append("no source explicitly describes acoustic voice qualities")
-    if any(not check.get("accepted", True) for key, check in decision_checks.items()
-           if key.startswith("identity.") or key.startswith("speech_style.")):
-        review_reasons.append("one or more closed-vocabulary choices fell below confidence thresholds")
-    lines = int((dossier.get("statistics") or {}).get("dialogue_count", 0))
-    if lines < policy["min_dialogue_lines_for_review"]:
+    if rejected_fields:
+        review_reasons.append(
+            "Style fields rejected for invalid or missing evidence: "
+            + ", ".join(sorted(rejected_fields))
+        )
+    if allocation["decision"] == "shared_archetype":
+        review_reasons.append(allocation["reason"])
+    if allocation["decision"] == "official_audio":
+        review_reasons.append(allocation["reason"])
+    if allocation["dialogue_lines"] < int(policy["min_dialogue_lines_for_review"]):
         review_reasons.append("very little dialogue is available")
 
-    status = "ready_for_audition"
-    if review_reasons and (
-        lines < policy["min_dialogue_lines_for_review"]
-        or any("confidence threshold" in reason for reason in review_reasons)
-    ):
+    if not supported_fields or rejected_fields:
         status = "needs_review"
+    else:
+        status = "ready_for_audition"
+
+    manifest = dossier.get("sample_manifest") or {}
+    measurements = (dossier.get("dialogue_analysis") or {}).get("measurements") or {}
+    analysis_record = {
+        "schema_version": SPEECH_STYLE_SCHEMA_VERSION,
+        "method": provider.name,
+        "provider": provider.name,
+        "model_id": resolved_model_id,
+        "taxonomy_version": STYLE_TAXONOMY_VERSION,
+        "classifier_version": STYLE_CLASSIFIER_VERSION,
+        "prompt_version": STYLE_PROMPT_VERSION,
+        "sampler_version": DIALOGUE_SAMPLER_VERSION,
+        "corpus_hash": dossier.get("input_hash"),
+        "sample_manifest_hash": sample_manifest_hash(
+            canonical_id, samples, corpus_hash=manifest.get("corpus_hash"),
+        ),
+        "budget_reduction": (
+            (sent_state or {}).get("budget_reduction")
+        ),
+        "evidence": {
+            "raw_lines": measurements.get("raw_line_count") or statistics.get("dialogue_count"),
+            "unique_usable_lines": statistics.get("unique_line_count"),
+            "unique_words": measurements.get("word_count"),
+            "sampled_lines": len(samples),
+            "sampled_words": sum(len(str(sample.get("text") or "").split()) for sample in samples),
+            "sources_covered": len({str(sample.get("source") or "unknown") for sample in samples}),
+            "contexts_covered": len({
+                (str(sample.get("source") or "unknown"), str(sample.get("sheet") or "unknown"))
+                for sample in samples
+            }),
+            "evidence_tier": evidence_sufficiency(
+                statistics, samples, vocabulary=vocabulary,
+            )["tier"],
+            "field_tiers": {
+                field: tier["tier"] for field, tier in field_tiers.items()
+            },
+        },
+        "dimensions": decisions,
+        "experimental": {
+            "speech_habits": {
+                "value": analysis.get("speech_habits") or [],
+                "method": "rules_baseline_evidence_collection",
+                "note": "Not a production Style field; retained for habit verification only.",
+            },
+        },
+    }
     configuration = {
         "config_version": CLASSIFIER_CONFIG_VERSION,
         "thresholds": policy,
         "question_count": len(questions),
         "model_requested": model_id or provider.model_id,
         "vocabulary_hash": object_hash(vocabulary),
+        "taxonomy_version": STYLE_TAXONOMY_VERSION,
+        "classifier_version": STYLE_CLASSIFIER_VERSION,
+        "prompt_version": STYLE_PROMPT_VERSION,
+        "sampler_version": DIALOGUE_SAMPLER_VERSION,
     }
     return {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "canonical_id": canonical_id,
         "npc_id": identity.get("npc_id"),
         "name": identity.get("name"),
@@ -318,14 +506,16 @@ def classify_dossier(
         "configuration_hash": object_hash(configuration),
         "configuration": configuration,
         "provider": provider.name,
-        "model_id": response.get("model") or model_id or provider.model_id,
+        "model_id": resolved_model_id,
         "timestamp": utc_timestamp(),
         "usage": usage,
         "questions": questions,
         "answers": answers,
         "decision_checks": decision_checks,
-        "distinctive": distinctive,
-        "speech_style": speech_style,
+        "distinctive": allocation["decision"] == "individual_design",
+        "profile_allocation": allocation,
+        "speech_style": decisions,
+        "speech_style_analysis": analysis_record,
         "voice_claims": [
             {
                 "field": evidence.get("field"),

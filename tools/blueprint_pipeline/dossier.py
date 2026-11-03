@@ -18,7 +18,7 @@ from .config import (
     MAX_DIALOGUE_SAMPLE_COUNT,
 )
 from .database import iter_dialogue_rows, read_db, speaker_rows
-from .dialogue import analyze_dialogue, select_representative_samples, split_speaker_label
+from .dialogue import analyze_dialogue, build_dialogue_sample_pools, split_speaker_label
 from .game_data import game_metadata
 from .identity import unresolved_id
 from .inventory import build_inventory
@@ -162,14 +162,32 @@ def build_dossiers(
             if line.get("voice_line_id"):
                 source_counts[source]["unique_line_ids"].add(line["voice_line_id"])
 
-        samples = select_representative_samples(
-            key, lines, max_count=sample_count, max_chars=sample_chars,
-            vocabulary=vocabulary,
-        )
-        for sample in samples:
-            sample.pop("_rank", None)
-            sample.pop("_bucket", None)
         dialogue_analysis = analyze_dialogue(lines, vocabulary)
+        pools = build_dialogue_sample_pools(
+            key, lines, vocabulary=vocabulary,
+            max_count=sample_count, max_chars=sample_chars,
+            corpus_hash=object_hash({
+                "canonical_id": key,
+                "lines": [
+                    {
+                        "id": line.get("voice_line_id") or line.get("dialog_id"),
+                        "text": line.get("text"),
+                        "source": line.get("source"),
+                        "sheet": line.get("sheet"),
+                    }
+                    for line in lines
+                ],
+            }),
+        )
+        samples = pools["representative_samples"]
+        targeted_samples = pools["targeted_samples"]
+        sample_manifest = {
+            key: value for key, value in pools.items()
+            if key not in {"representative_samples", "targeted_samples"}
+        }
+        sample_manifest["representative"]["near_duplicate_rejections"] = (
+            samples[0].get("near_duplicate_rejections", 0) if samples else 0
+        )
         if candidate.get("npc_id") is None:
             metadata = {
                 "race": None, "clan": None, "sex": "unknown",
@@ -247,6 +265,8 @@ def build_dossiers(
             "statistics": statistics,
             "dialogue_analysis": dialogue_analysis,
             "dialogue_samples": samples,
+            "targeted_dialogue_samples": targeted_samples,
+            "sample_manifest": sample_manifest,
             "voice_evidence": [],
             "sources": game_source + [
                 {
