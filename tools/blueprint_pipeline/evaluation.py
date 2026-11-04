@@ -37,6 +37,7 @@ from .dialogue import (
     words,
 )
 from .jev import JevError, JevProvider, build_questions as build_style_questions
+from .listening import build_blind_listening_kit, package_judge_kits, summarize_answers
 
 try:
     import blueprint as blueprint_renderer
@@ -149,6 +150,14 @@ CONDITION_PAIRS = (
     ("nimble_assisted", "nimble_text_only"),
     ("qwen_base_assisted", "qwen_base_text_only"),
 )
+# One plain question per field, shown above the label select and in the guide.
+FIELD_QUESTIONS = {
+    "register": "How formal is the wording and the form of address?",
+    "lexical_complexity": "How difficult are the individual words?",
+    "sentence_complexity": "How complex is the clause structure of the sentences?",
+    "colloquialism": "How much informal grammar, slang, or casual wording appears?",
+    "discourse_style": "What does the speaker mostly do with their lines: state, explain, ask, persuade, urge, reflect, or narrate?",
+}
 # Boundary rules that keep the overlapping fields separable.
 FIELD_BOUNDARIES = {
     "register": "Rate formality of address and construction only. Do not raise the label because a line is long (sentence complexity) or contains rare words (vocabulary complexity).",
@@ -351,11 +360,16 @@ def _blank_annotation(benchmark_id: str, sample_count: int) -> dict:
 
 def _annotation_guide() -> str:
     lines = [
-        "# Oh My Voice speech-style benchmark v2 — annotation guide",
+        "# Oh My Voice speech-style benchmark v3 — annotation guide",
         "",
         "Annotate only the text lines shown in your form. You are rating wording, not a character, actor,",
         "personality, job, social position, race, sex, or voice. Do not look up names or characters: the",
         "benchmark ID is arbitrary. Do not discuss labels with the other annotator.",
+        "",
+        "That is deliberate: you are not told who the speaker is, and you do not need to know. Every field is a",
+        "property of the text alone. \"Formal\" means the wording is formal, not that the speaker is noble;",
+        "\"exhortative\" means the lines urge the listener to act, not that the speaker is a commander. If you",
+        "catch yourself reasoning about what kind of person would say this, stop and re-read the wording.",
         "",
         "The supplied lines are a fixed representative sample, not a full transcript. Do not infer pitch,",
         "timbre, accent, age, or any other acoustic feature. The number of lines and the benchmark ID carry",
@@ -373,8 +387,8 @@ def _annotation_guide() -> str:
         f"   {int(MIXED_MIN_UTTERANCE_SHARE * 100)}% of the lines and each has at least {MIXED_MIN_UTTERANCES_PER_SIDE} lines of its own.",
         "   One stray exception, or a single line that could be read either way, does not make a sample mixed.",
         "4. **Tie-break.** If neither label reaches a majority and the mixed test fails, choose the label supported",
-        "   by the larger share of lines. If the two shares are indistinguishable, choose the milder label",
-        "   (`neutral`, `ordinary`, `moderate`, or `measured`) rather than the extreme one.",
+        "   by the larger share of lines. If the two shares are indistinguishable, choose the least extreme label",
+        "   available for that field (`neutral`, `ordinary`, `simple`, or `moderate`) rather than one of the extremes.",
         "5. **Cite evidence.** Record 1 to 3 line IDs that actually support the chosen label, using the IDs printed",
         f"   with each line (maximum {MAX_CITED_LINES}). Cite at least 2 lines when you choose `mixed`, one per side.",
         "   Do not cite a line that contradicts the label.",
@@ -386,7 +400,7 @@ def _annotation_guide() -> str:
         "",
     ]
     for field, boundary in FIELD_BOUNDARIES.items():
-        lines.append(f"- `{field}` ({FIELD_SCALE_DISPLAY[field]}): {boundary}")
+        lines.append(f"- `{field}` ({FIELD_SCALE_DISPLAY[field]}): {FIELD_QUESTIONS[field]} {boundary}")
     lines += [
         "",
         "## Fields, labels, and boundary examples",
@@ -2142,6 +2156,139 @@ def _select_development_threshold(
     }
 
 
+def _annotation_form_html(
+    form: dict,
+    guide: str,
+    *,
+    scope: str,
+    annotator: str,
+) -> str:
+    """Render a self-contained offline HTML form that exports importable JSON."""
+    embedded = json.dumps(form, ensure_ascii=False, indent=1).replace("</", "<\\/")
+    rubric = {
+        field: {
+            "scale": FIELD_SCALE_DISPLAY[field],
+            "question": FIELD_QUESTIONS[field],
+            "options": list(options),
+            "descriptions": options,
+            "boundary": FIELD_BOUNDARIES[field],
+        }
+        for field, options in FIELDS.items()
+    }
+    payload = json.dumps(
+        {
+            "form": form,
+            "rubric": rubric,
+            "guide": guide,
+            "scope": scope,
+            "annotator": annotator,
+            "maxCited": MAX_CITED_LINES,
+        },
+        ensure_ascii=False,
+    ).replace("</", "<\\/")
+    return "\n".join([
+        "<!doctype html>",
+        "<html lang=\"en\"><head><meta charset=\"utf-8\">",
+        f"<title>Speech-style annotation — {scope} — {annotator}</title>",
+        "<style>",
+        ":root{color-scheme:light dark}",
+        "body{font:15px/1.5 system-ui,sans-serif;margin:0;padding:1.5rem;max-width:60rem;margin-inline:auto}",
+        "h1{font-size:1.3rem;margin:0 0 .25rem}h2{font-size:1.05rem;margin:1.5rem 0 .5rem}",
+        ".meta{color:#666;font-size:.85rem}",
+        ".item{border:1px solid #8884;border-radius:8px;padding:1rem;margin:1rem 0}",
+        ".item.ready{border-color:#2a7}",
+        ".lines{margin:.5rem 0;padding-left:0;list-style:none}",
+        ".lines li{display:flex;gap:.5rem;margin:.25rem 0}",
+        ".lines code{color:#666;white-space:nowrap}",
+        ".field{border-top:1px dashed #8884;padding:.6rem 0}",
+        "label{display:block;font-weight:600;margin:.2rem 0}",
+        "select,textarea,input[type=text]{font:inherit;padding:.2rem;border:1px solid #8886;border-radius:4px}",
+        "select{min-width:14rem}textarea{width:100%;min-height:2.2rem}",
+        ".hint{font-size:.8rem;color:#666}",
+        ".q{font-weight:600;margin:.15rem 0}",
+        ".warn{color:#b00;font-size:.85rem}",
+        "button{font:inherit;padding:.4rem 1rem;border-radius:6px;border:1px solid #8886;cursor:pointer}",
+        "#bar{position:sticky;top:0;background:Canvas;padding:.5rem 0;border-bottom:1px solid #8884;z-index:2}",
+        "details{margin:1rem 0}pre{white-space:pre-wrap;font-size:.8rem}",
+        "</style></head><body>",
+        "<div id=\"bar\"><strong id=\"progress\"></strong> <span class=\"meta\" id=\"status\"></span></div>",
+        f"<h1>Speech-style annotation — {scope} form</h1>",
+        "<p class=\"meta\">Annotator slot: <strong id=\"slot\"></strong>. Work alone. Do not look up "
+        "characters, and do not compare labels with the other annotator before both forms are finished.</p>",
+        "<p class=\"hint\">You are rating the <strong>wording only</strong>. You are deliberately not told who "
+        "speaks these lines — you do not need to know. Each field states the exact question it asks; answer "
+        "that question about the text, never about the kind of person you imagine saying it.</p>",
+        "<p class=\"hint\">Fill every field for every item, then press <em>Download completed form</em> and "
+        "send the downloaded JSON file back unchanged. Nothing you type leaves this browser.</p>",
+        "<details><summary>Read the full annotation guide</summary><pre id=\"guide\"></pre></details>",
+        "<div id=\"items\"></div>",
+        "<p><button id=\"export\">Download completed form</button> <span class=\"warn\" id=\"blocked\"></span></p>",
+        "<script id=\"payload\" type=\"application/json\">" + payload + "</script>",
+        "<script>",
+        "const P=JSON.parse(document.getElementById('payload').textContent);",
+        "const F=P.form, R=P.rubric, FIELDS=Object.keys(R);",
+        "document.getElementById('slot').textContent=P.annotator;",
+        "document.getElementById('guide').textContent=P.guide;",
+        "const esc=s=>String(s).replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]));",
+        "const root=document.getElementById('items');",
+        "const state=JSON.parse(JSON.stringify(F.items));",
+        "const problems=()=>{const out=[];state.forEach((it,i)=>{",
+        " if(!it.overall_evidence_sufficiency)out.push(`item ${i+1}: overall evidence sufficiency`);",
+        " FIELDS.forEach(f=>{const a=it.fields[f];const p=`item ${i+1} ${f}`;",
+        "  if(!a.label){out.push(p+': label');return}",
+        "  if(!a.evidence_sufficient){out.push(p+': evidence sufficiency');return}",
+        "  const ins=a.label==='insufficient_evidence';",
+        "  if(ins&&a.evidence_sufficient!=='no')out.push(p+\": insufficient_evidence needs evidence_sufficient 'no'\");",
+        "  if(!ins&&a.evidence_sufficient==='no')out.push(p+\": evidence_sufficient 'no' needs insufficient_evidence\");",
+        "  if(a.evidence_line_ids.length>P.maxCited)out.push(p+': cite at most '+P.maxCited+' lines');",
+        "  if(!ins&&!a.evidence_line_ids.length)out.push(p+': cite at least one supporting line');",
+        "  if(a.label==='mixed'&&a.evidence_line_ids.length<2)out.push(p+': mixed needs at least two cited lines');",
+        "  if(ins&&a.evidence_line_ids.length)out.push(p+': insufficient_evidence should cite no lines');",
+        " })});return out};",
+        "const refresh=()=>{const n=problems().length;",
+        " document.getElementById('progress').textContent=`${state.length} items · ${n===0?'complete':n+' problem'+(n===1?'':'s')+' left'}`;",
+        " document.querySelectorAll('.item').forEach((el,i)=>{const bad=problems().some(s=>s.startsWith('item '+(i+1)+' '));el.classList.toggle('ready',!bad)});};",
+        "const render=()=>{root.innerHTML='';state.forEach((it,i)=>{",
+        " const card=document.createElement('section');card.className='item';",
+        " card.innerHTML=`<div class=\"meta\">Item ${i+1} of ${state.length} · benchmark_id <code>${esc(it.benchmark_id)}</code> · ${it.sample_count} lines</div>`+",
+        "  '<ul class=\"lines\">'+it.dialogue_samples.map(s=>`<li><code>${esc(s.id)}</code><span>${esc(s.text)}</span></li>`).join('')+'</ul>';",
+        " FIELDS.forEach(f=>{const spec=R[f],a=it.fields[f];const box=document.createElement('div');box.className='field';",
+        "  box.innerHTML=`<label>${esc(f)} <span class=\"hint\">${esc(spec.scale)}</span></label>`+",
+        "   `<div class=\"q\">${esc(spec.question)}</div>`+",
+        "   `<div class=\"hint\">${esc(spec.boundary)}</div>`+",
+        "   `<label class=\"hint\">label</label><select data-k=\"label\"><option value=\"\">— choose —</option>`+",
+        "   spec.options.map(o=>`<option value=\"${esc(o)}\"${a.label===o?' selected':''}>${esc(o)} — ${esc(spec.descriptions[o])}</option>`).join('')+'</select>'+",
+        "   `<label class=\"hint\">evidence sufficient</label><select data-k=\"evidence_sufficient\"><option value=\"\">— choose —</option>`+",
+        "   ['yes','no','uncertain'].map(o=>`<option value=\"${o}\"${a.evidence_sufficient===o?' selected':''}>${o}</option>`).join('')+'</select>'+",
+        "   `<label class=\"hint\">supporting line IDs (1-${P.maxCited}; 2+ for mixed; none for insufficient_evidence)</label>`+",
+        "   it.dialogue_samples.map(s=>`<label class=\"hint\" style=\"font-weight:400\"><input type=\"checkbox\" data-line=\"${esc(s.id)}\"${a.evidence_line_ids.includes(s.id)?' checked':''}> ${esc(s.id)}</label>`).join('')+",
+        "   `<label class=\"hint\">notes</label><textarea data-k=\"notes\">${esc(a.notes)}</textarea>`;",
+        "  box.querySelectorAll('select,textarea').forEach(el=>el.addEventListener('input',()=>{a[el.dataset.k]=el.value;refresh()}));",
+        "  box.querySelectorAll('input[data-line]').forEach(el=>el.addEventListener('change',()=>{const id=el.dataset.line;",
+        "   const set=new Set(a.evidence_line_ids);el.checked?set.add(id):set.delete(id);",
+        "   a.evidence_line_ids=it.dialogue_samples.map(s=>s.id).filter(x=>set.has(x));refresh()}));",
+        "  card.appendChild(box)});",
+        " const tail=document.createElement('div');tail.className='field';",
+        " tail.innerHTML='<label class=\"hint\">overall evidence sufficiency</label><select data-k=\"overall\"><option value=\"\">— choose —</option>'+",
+        "  ['sufficient','insufficient','uncertain'].map(o=>`<option value=\"${o}\"${it.overall_evidence_sufficiency===o?' selected':''}>${o}</option>`).join('')+'</select>'+",
+        "  '<label class=\"hint\">annotator notes</label><textarea data-k=\"annotator_notes\">'+esc(it.annotator_notes)+'</textarea>';",
+        " tail.querySelector('select').addEventListener('input',e=>{it.overall_evidence_sufficiency=e.target.value;refresh()});",
+        " tail.querySelector('textarea').addEventListener('input',e=>{it.annotator_notes=e.target.value});",
+        " card.appendChild(tail);root.appendChild(card)});refresh()};",
+        "document.getElementById('export').addEventListener('click',()=>{const bad=problems();",
+        " const warn=document.getElementById('blocked');",
+        " if(bad.length){warn.textContent='Fix first: '+bad.slice(0,4).join('; ')+(bad.length>4?` … (+${bad.length-4})`:'');return}",
+        " warn.textContent='';const out=JSON.parse(JSON.stringify(F));out.items=state;",
+        " const blob=new Blob([JSON.stringify(out,null,2)],{type:'application/json'});",
+        " const a=document.createElement('a');a.href=URL.createObjectURL(blob);",
+        " a.download=`${P.scope}_${P.annotator}_completed.json`;a.click();URL.revokeObjectURL(a.href);",
+        " document.getElementById('status').textContent='downloaded — send that file back';});",
+        "render();",
+        "</script></body></html>",
+        "",
+    ])
+
+
 def build_share_packets(*, root: Path | str = DEFAULT_ROOT, scope: str = "pilot") -> dict:
     """Package a blind form plus the guide into a self-contained annotator ZIP."""
     if scope not in {"pilot", "full"}:
@@ -2165,22 +2312,33 @@ def build_share_packets(*, root: Path | str = DEFAULT_ROOT, scope: str = "pilot"
             "",
             "Annotate independently. Do not look up character names and do not compare labels with the other annotator.",
             "",
-            "Files in this packet:",
+            "## Easiest path (no tools needed)",
+            "",
+            f"1. Open `{scope}_{annotator}_form.html` in any browser (double-click it).",
+            "2. Fill every field for every item. The page counts what is still missing.",
+            "3. Press **Download completed form**. It saves "
+            f"`{scope}_{annotator}_completed.json`.",
+            "4. Send that JSON file back unchanged.",
+            "",
+            "The page is offline and self-contained: no server, no network, no installed software. "
+            "Progress is lost if you close the tab before downloading, so finish or leave it open.",
+            "",
+            "## Alternate path (text editor)",
             "",
             "- `annotation_form.json` — fill this in place.",
             "- `annotation_guide.md` — the full rubric, decision rules, and boundary examples.",
             "",
-            "For every item and every field, fill:",
+            "Either way, for every item and every field fill:",
             "",
             "- `label` — one label from the rubric for that field.",
             "- `evidence_sufficient` — `yes`, `no`, or `uncertain`. It must be `no` exactly when `label` is `insufficient_evidence`.",
-            "- `evidence_line_ids` — 1 to 3 line IDs from that item that support the label; at least 2 for `mixed`; empty only for `insufficient_evidence`.",
+            f"- `evidence_line_ids` — 1 to {MAX_CITED_LINES} line IDs from that item that support the label; at least 2 for `mixed`; empty only for `insufficient_evidence`.",
             "- `notes` — a short reason for `mixed`, `insufficient_evidence`, or any ambiguous case.",
             "",
             f"Also fill `overall_evidence_sufficiency` for the {item_count} items in this packet.",
             "",
             "Do not edit `benchmark_id`, `sample_count`, `dialogue_samples`, or any other field: the import rejects changed samples.",
-            "Return the completed `annotation_form.json`, or this ZIP with the form replaced.",
+            "Return the completed JSON file, or this ZIP with the form replaced.",
             "",
             f"Items in this packet: {item_count}.",
             "",
@@ -2188,6 +2346,9 @@ def build_share_packets(*, root: Path | str = DEFAULT_ROOT, scope: str = "pilot"
         members = {
             "annotation_form.json": form_bytes,
             "annotation_guide.md": guide.encode("utf-8"),
+            f"{scope}_{annotator}_form.html": _annotation_form_html(
+                form, guide, scope=scope, annotator=annotator,
+            ).encode("utf-8"),
             "README.md": readme.encode("utf-8"),
         }
         buffer = io.BytesIO()
@@ -3523,6 +3684,14 @@ def main() -> None:
     leakage.add_argument("--annotation-run")
     leakage.add_argument("--scope", choices=("pilot", "full"), default="full")
     leakage.add_argument("--permutation-draws", type=int, default=2000)
+    listening = subparsers.add_parser("blind-listening", help="build a randomized blind Identity vs Identity+Style listening kit")
+    listening.add_argument("--auditions", default="data/blueprints/auditions")
+    listening.add_argument("--out", default="data/blueprints/auditions/blind_ab")
+    listening.add_argument("--seed", type=int, default=20261104)
+    listening.add_argument("--judges", nargs="+", default=["judge_a", "judge_b"])
+    listening.add_argument("--dossiers", default="data/blueprints/cache/dossiers", help="source of the name-scrubbed speaker brief")
+    listening.add_argument("--pack", metavar="DIR", help="also write one self-contained ZIP per judge into DIR")
+    listening.add_argument("--answers", nargs="*", help="completed judge answer JSON files to unblind")
     args = parser.parse_args()
     if args.command == "prepare":
         result = prepare_benchmark(db=args.db, cache=args.cache, root=args.root, seed=args.seed, model_path=args.model)
@@ -3552,6 +3721,22 @@ def main() -> None:
         result = build_share_packets(root=args.root, scope=args.scope)
     elif args.command == "audit-leakage":
         result = audit_annotation_leakage(root=args.root, annotation_run=args.annotation_run, scope=args.scope, permutation_draws=args.permutation_draws)
+    elif args.command == "blind-listening":
+        out = Path(args.out)
+        result = build_blind_listening_kit(
+            audition_root=args.auditions, out=out, seed=args.seed, judges=tuple(args.judges),
+            dossiers=args.dossiers,
+        )
+        if args.pack:
+            result = {**result, "packages": package_judge_kits(out, args.pack, tuple(args.judges))}
+        if args.answers:
+            result = {
+                **result,
+                "summary": summarize_answers(
+                    [Path(path) for path in args.answers],
+                    [out / f"{judge}_key.json" for judge in args.judges],
+                ),
+            }
     else:
         result = evaluate_benchmark(root=args.root, auto_threshold=args.auto_threshold, annotation_run=args.annotation_run, scope=args.scope)
     print(json.dumps(result, ensure_ascii=False, indent=2))

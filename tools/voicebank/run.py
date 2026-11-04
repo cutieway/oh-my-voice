@@ -26,6 +26,7 @@ import hashlib
 import html
 import json
 import pathlib
+import shutil
 import sys
 
 SAMPLE_TEXTS = [
@@ -184,7 +185,7 @@ def write_audition(out: pathlib.Path, report: dict) -> None:
             + (f'<div class="verdict">same seed, {len(voice["takes"])} draws: '
                + ("byte-identical" if voice["identical"]
                   else f'{voice["distinct_references"]} different outputs')
-               + '</div>' if voice["repeat_seed"] else '')
+               + '</div>' if voice.get("repeat_seed") else '')
             + '<details><summary>instruct</summary>'
             f'<p>{html.escape(voice["instruct"])}</p></details>'
             + render_decisions(voice.get("profile"))
@@ -219,6 +220,134 @@ def write_audition(out: pathlib.Path, report: dict) -> None:
     )
 
 
+def _clone_from_pinned(args, plans, out, texts, report):
+    """Clone sample lines from reference WAVs that already exist on disk.
+
+    A same-voice test needs several different sentences from ONE pinned
+    reference. Re-drawing the reference would produce a different speaker (the
+    project's own earlier runs show that seed changes move the voice), so this
+    path never touches VoiceDesign: it reads the pinned WAVs recorded in
+    `--refs-from/report.json`, copies them into `--out`, and clones every line
+    from the same reference with only the sentence changing.
+    """
+    import soundfile as sf
+    import torch
+    from qwen_tts import Qwen3TTSModel
+
+    source_root = args.refs_from
+    if source_root is None:
+        print("--clone-only needs --refs-from pointing at an existing audition dir",
+              file=sys.stderr)
+        return 2
+    source_report = json.loads((source_root / "report.json").read_text(encoding="utf-8"))
+    report["reference_text"] = source_report.get("reference_text")
+    pinned: dict[tuple[str, str | None], list[dict]] = {}
+    for voice in source_report.get("voices") or []:
+        pinned.setdefault((voice["profile_id"], voice.get("condition")), []).append(voice)
+
+    base = Qwen3TTSModel.from_pretrained(
+        args.base_model, device_map=args.device, dtype=torch.bfloat16,
+        attn_implementation="sdpa",
+    )
+    if getattr(base.model, "tts_model_type", None) != "base":
+        print(f"not a Base model: {getattr(base.model, 'tts_model_type', None)}",
+              file=sys.stderr)
+        return 2
+
+    for plan in plans:
+        data = json.loads(plan.read_text(encoding="utf-8"))
+        key = (data["profile_id"], data.get("condition"))
+        voices = pinned.get(key)
+        if not voices:
+            print(f"no pinned reference for {key}", file=sys.stderr)
+            return 2
+        wanted_seed = data["seed"]
+        voice = next((v for v in voices if any(t["seed"] == wanted_seed for t in v.get("takes") or [])), None)
+        if voice is None:
+            print(f"no pinned reference for {key} seed {wanted_seed}", file=sys.stderr)
+            return 2
+        condition = data.get("condition")
+        voice_dir = out / "voices" / data["profile_id"]
+        if condition:
+            voice_dir = voice_dir / condition
+        (voice_dir / "refs").mkdir(parents=True, exist_ok=True)
+        takes = []
+        for take in [t for t in voice.get("takes") or [] if t["seed"] == wanted_seed]:
+            source_ref = source_root / take["ref"]
+            if not source_ref.is_file():
+                print(f"missing pinned reference: {source_ref}", file=sys.stderr)
+                return 2
+            destination = out / take["ref"]
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source_ref, destination)
+            if file_sha256(destination) != take["ref_sha256"]:
+                print(f"pinned reference hash changed: {source_ref}", file=sys.stderr)
+                return 2
+            entry = {
+                "take": take.get("take", 0),
+                "condition": condition,
+                "instruct": take.get("instruct") or voice.get("instruct"),
+                "instruct_hash": take.get("instruct_hash") or voice.get("instruct_hash"),
+                "seed": take["seed"],
+                "ref": take["ref"],
+                "ref_sha256": take["ref_sha256"],
+                "ref_seconds": take.get("ref_seconds"),
+                "ref_in_range": take.get("ref_in_range"),
+                "ref_f0": take.get("ref_f0"),
+                "lines": [],
+            }
+            prompt = base.create_voice_clone_prompt(
+                ref_audio=str(destination),
+                ref_text=report["reference_text"],
+                x_vector_only_mode=False,
+            )
+            stem = f"seed-{take['seed']}"
+            for index, text in enumerate(texts):
+                torch.manual_seed(take["seed"] + 101 + index)
+                wavs, sr = base.generate_voice_clone(
+                    text=text, language="English", voice_clone_prompt=prompt,
+                    non_streaming_mode=True, max_new_tokens=1024,
+                )
+                path = voice_dir / "lines" / f"{stem}.{index}.wav"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                sf.write(path, wavs[0], sr)
+                entry["lines"].append({
+                    "text": text,
+                    "file": str(path.relative_to(out)),
+                    "sha256": file_sha256(path),
+                    "seconds": round(len(wavs[0]) / sr, 3),
+                    "f0": median_f0(wavs[0], sr),
+                })
+                print(f"[clone-pinned] {data['profile_id']}/{stem}#{index} "
+                      f"{entry['lines'][-1]['seconds']:.2f}s", flush=True)
+            takes.append(entry)
+        report["voices"].append({
+            "profile_id": data["profile_id"],
+            "profile_version": data.get("profile_version"),
+            "condition": condition,
+            "instruct": data.get("instruct"),
+            "instruct_hash": data.get("instruct_hash"),
+            "seed": data["seed"],
+            "seed_step": data.get("seed_step", args.seed_step),
+            "takes": takes,
+            "repeat_seed": False,
+            "distinct_references": len({t["ref_sha256"] for t in takes}),
+            "identical": len({t["ref_sha256"] for t in takes}) == 1,
+        })
+        (out / "report.json").write_text(json.dumps(report, indent=2) + "\n",
+                                         encoding="utf-8")
+    report["reference_pin"] = {
+        "source": str(source_root),
+        "reference_text": report["reference_text"],
+        "note": "Every line in this run was cloned from the pinned references above; "
+                "VoiceDesign did not run.",
+    }
+    (out / "report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    write_audition(out, report)
+    print(f"wrote {out}")
+    return 0
+
+
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--plans", type=pathlib.Path, required=True)
@@ -239,6 +368,12 @@ def parse_args():
                    help="accept range for a reference clip")
     p.add_argument("--references-only", action="store_true",
                    help="render VoiceDesign references only; skip Base cloning")
+    p.add_argument("--refs-from", type=pathlib.Path,
+                   help="reuse the reference WAVs already recorded under this output dir "
+                        "instead of drawing new ones")
+    p.add_argument("--clone-only", action="store_true",
+                   help="skip VoiceDesign entirely and clone sample lines from the "
+                        "pinned references under --refs-from")
     return p.parse_args()
 
 
@@ -280,6 +415,18 @@ def main() -> int:
     out = args.out
     out.mkdir(parents=True, exist_ok=True)
 
+    report = {
+        "design_model": args.design_model,
+        "base_model": args.base_model,
+        "texts": texts,
+        "reference_text": None,
+        "voices": [],
+        "reference_pin": None,
+    }
+
+    if args.clone_only:
+        return _clone_from_pinned(args, plans, out, texts, report)
+
     design = Qwen3TTSModel.from_pretrained(
         args.design_model, device_map=args.device, dtype=torch.bfloat16,
         attn_implementation="sdpa",
@@ -289,13 +436,6 @@ def main() -> int:
               file=sys.stderr)
         return 2
 
-    report = {
-        "design_model": args.design_model,
-        "base_model": args.base_model,
-        "texts": texts,
-        "reference_text": None,
-        "voices": [],
-    }
     for plan in plans:
         data = json.loads(plan.read_text(encoding="utf-8"))
         report["reference_text"] = data["reference"]["text"]

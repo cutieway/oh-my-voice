@@ -1,7 +1,7 @@
 # Progress
 
 Snapshot of `data/dialogue.db` (English, harvest 2026-10-21) after linking the
-packs in `data/out/`, on 2026-11-01. Refresh the tables before committing when
+packs in `data/out/`, on 2026-11-04. Refresh the tables before committing when
 the database, generation output, or bucket definitions change:
 
 ```bash
@@ -51,20 +51,20 @@ voiced sentence for the same speaker, and 3 are skipped.
 | Has an SE reference | 667 | 75,231 | 25,450 | 49,781 |
 | Never appears in SE VO | 9,208 | 173,673 | 0 | 173,673 |
 
-Labels are speaker tokens, not actors. 322 of the 667 referenced labels still
-have unvoiced lines; the other 345 are fully voiced by SE.
+Labels are speaker tokens, not actors. 320 of the 667 referenced labels still
+have unvoiced lines; the other 347 are fully voiced by SE.
 
 ## Generation progress
 
 | Measure | Done | Total | Percent | Left |
 |---|---:|---:|---:|---:|
-| Phase 1: cloned | 32,840 | 48,200 | 68.1% | 15,360 |
+| Phase 1: cloned | 34,195 | 48,200 | 70.9% | 14,005 |
 | Phase 2: synthetic | 0 | 166,559 | 0.0% | 166,559 |
-| Project lines (1+2) | 32,840 | 214,759 | 15.3% | 181,919 |
-| All dialogue (incl. SE VO) | 57,945 | 239,864 | 24.2% | 181,919 |
+| Project lines (1+2) | 34,195 | 214,759 | 15.9% | 180,564 |
+| All dialogue (incl. SE VO) | 59,300 | 239,864 | 24.7% | 180,564 |
 
-- **Phase 1** is the current cloned-voice work. 32,840 unique lines are
-  generated (`v_generation_candidates`), 15,360 are queued, and every speaker
+- **Phase 1** is the current cloned-voice work. 34,195 unique lines are
+  generated (`v_generation_candidates`), 14,005 are queued, and every speaker
   with remaining work has an x-vector.
 - **Phase 2** classification and audition handoff are implemented. Audio
   generation remains at 0 lines; synthetic speakers are absent from

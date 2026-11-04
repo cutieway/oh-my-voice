@@ -1363,15 +1363,28 @@ class SpeechStyleBenchmarkProtocolTests(unittest.TestCase):
             for name in ("annotator_a", "annotator_b"):
                 packet = Path(result["packets"][name]["path"])
                 with zipfile.ZipFile(packet) as archive:
-                    self.assertEqual(sorted(archive.namelist()), ["README.md", "annotation_form.json", "annotation_guide.md"])
+                    self.assertEqual(sorted(archive.namelist()), [
+                        "README.md",
+                        "annotation_form.json",
+                        "annotation_guide.md",
+                        f"pilot_{name}_form.html",
+                    ])
                     self.assertEqual(
                         json.loads(archive.read("annotation_form.json")),
                         json.loads((form_root / f"{name}.json").read_text()),
                     )
-                    self.assertIn("Do not edit `benchmark_id`", archive.read("README.md").decode())
+                    readme = archive.read("README.md").decode()
+                    self.assertIn("Do not edit `benchmark_id`", readme)
+                    self.assertIn(f"pilot_{name}_form.html", readme)
+                    page = archive.read(f"pilot_{name}_form.html").decode()
                 _, _, parsed, is_zip = evaluation._read_annotation_source(packet)
                 self.assertTrue(is_zip)
                 self.assertEqual(parsed["scope"], "pilot")
+                self.assertIn('type="application/json"', page)
+                for option in ("conversational", "insufficient_evidence", "exhortative"):
+                    self.assertIn(option, page)
+                for forbidden in ("http://", "https://", "src="):
+                    self.assertNotIn(forbidden, page)
 
     def test_adjudication_requires_a_reason_per_label(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2960,3 +2973,215 @@ class StyleDecisionContractTests(unittest.TestCase):
         self.assertEqual([s["id"] for s in first], [s["id"] for s in repeated])
         self.assertEqual([s["id"] for s in first], [s["id"] for s in reversed_input])
         self.assertEqual(first, with_vocabulary)
+
+
+class BlindListeningKitTests(unittest.TestCase):
+    """The listening kit must hide the condition while the key stays unblinded."""
+
+    NAMES = {"npc_1": "Alyxandre", "npc_2": "Bramblewick"}
+
+    def _auditions(self, root: Path) -> Path:
+        auditions = root / "auditions"
+        dossiers = root / "dossiers"
+        dossiers.mkdir(parents=True)
+        for npc, spoken in (
+            ("npc_1", "The gate opens at dawn, and the watch changes then."),
+            ("npc_2", "Keep to the road and do not look back until the bells."),
+        ):
+            directory = auditions / npc
+            (directory / "plans").mkdir(parents=True)
+            # Proper nouns must be scrubbable; common capitals must survive.
+            (dossiers / f"{npc}.abc.json").write_text(json.dumps({
+                "dialogue_samples": [
+                    {"text": "'Tis true that Alyxandre said so, and I shall not deny it."},
+                    {"text": "The road is long, but I shall walk it anyway."},
+                    {"text": "Bramblewick? Aye, I shall ask the steward about that."},
+                ],
+            }), encoding="utf-8")
+            voices = []
+            for seed, conditions in ((101, ("identity_only", "identity_style")),
+                                     (102, ("identity_only", "identity_style"))):
+                for condition in conditions:
+                    ref = f"voices/{npc}/{condition}/refs/seed-{seed}.wav"
+                    path = directory / ref
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(f"{npc}-{condition}-{seed}".encode())
+                    voices.append({
+                        "profile_id": npc,
+                        "condition": condition,
+                        "instruct": f"{condition} instruct",
+                        "seed": seed,
+                        "takes": [{
+                            "condition": condition,
+                            "ref": ref,
+                            "seed": seed,
+                            "ref_seconds": 1.0,
+                            "ref_sha256": f"{npc}{condition}{seed}",
+                            "instruct": f"{condition} instruct",
+                        }],
+                    })
+            (directory / "report.json").write_text(json.dumps({
+                "texts": [spoken],
+                "reference_text": "Reference text.",
+                "voices": voices,
+            }), encoding="utf-8")
+        return auditions, dossiers
+
+    def _blocks(self, root: Path) -> None:
+        """Write per-NPC same_voice blocks: one pin, three different sentences."""
+        for npc in ("npc_1", "npc_2"):
+            dir_ = root / "auditions" / npc / "same_voice"
+            voices = []
+            for condition in ("identity_only", "identity_style"):
+                ref = f"voices/{npc}/{condition}/refs/seed-101.wav"
+                lines = []
+                for index in range(3):
+                    text = ("The satchel is on the table.",
+                            "We must leave before the bells ring!",
+                            "Have you spoken with the guildmaster?")[index]
+                    line = f"voices/{npc}/{condition}/lines/seed-101.{index}.wav"
+                    lines.append({"text": text, "file": line, "sha256": f"{npc}{condition}{index}"})
+                    path = dir_ / line
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(f"{npc}-{condition}-line{index}".encode())
+                voices.append({
+                    "profile_id": npc,
+                    "condition": condition,
+                    "seed": 101,
+                    "takes": [{"seed": 101, "ref": ref,
+                               "ref_sha256": f"{npc}{condition}ref", "lines": lines}],
+                })
+            dir_.mkdir(parents=True, exist_ok=True)
+            (dir_ / "report.json").write_text(json.dumps({"voices": voices}), encoding="utf-8")
+
+    def test_kit_randomizes_sides_and_hides_condition_labels(self):
+        from blueprint_pipeline import listening
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            auditions, dossiers = self._auditions(root)
+            self._blocks(root)
+            manifest = listening.build_blind_listening_kit(
+                audition_root=auditions, out=root / "out", judges=("judge_a", "judge_b"),
+                dossiers=dossiers,
+            )
+            self.assertEqual(manifest["pair_count"], 4)
+            self.assertEqual(manifest["clip_count"], 8)
+            # Two conditions x two profiles, each block one pin with three sentences.
+            self.assertEqual(manifest["block_count"], 4)
+            for judge in ("judge_a", "judge_b"):
+                page = (root / "out" / f"{judge}_blind_ab.html").read_text(encoding="utf-8")
+                for secret in ("identity_only", "identity_style", "npc_1", "npc_2",
+                               "Alyxandre", "Bramblewick"):
+                    self.assertNotIn(secret, page)
+                key = json.loads((root / "out" / f"{judge}_key.json").read_text())
+                for row in key["pairs"]:
+                    self.assertEqual({row["left"], row["right"]}, {"identity_only", "identity_style"})
+                self.assertEqual({row["condition"] for row in key["blocks"]},
+                                 {"identity_only", "identity_style"})
+            # Presentation order differs per judge, so compare side assignment
+            # per pair rather than positionally.
+            side_of = {
+                judge: {
+                    row["pair_id"]: row["left"]
+                    for row in json.loads((root / "out" / f"{judge}_key.json").read_text())["pairs"]
+                }
+                for judge in ("judge_a", "judge_b")
+            }
+            self.assertEqual(set(side_of["judge_a"]), set(side_of["judge_b"]))
+            self.assertTrue(any(
+                side_of["judge_a"][pair_id] != side_of["judge_b"][pair_id]
+                for pair_id in side_of["judge_a"]
+            ))
+            clips = sorted(path.name for path in (root / "out" / "clips").iterdir())
+            block_clips = [name for name in clips if not name.startswith("P")]
+            self.assertEqual(len(clips), 8 + 12)
+            self.assertEqual(len(set(clips)), len(clips))
+
+    def test_brief_is_name_scrubbed_and_shared_by_both_sides(self):
+        from blueprint_pipeline import listening
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            auditions, dossiers = self._auditions(root)
+            listening.build_blind_listening_kit(
+                audition_root=auditions, out=root / "out", judges=("judge_a",), dossiers=dossiers,
+            )
+            kit = json.loads(
+                (root / "out" / "judge_a_blind_ab.html").read_text(encoding="utf-8")
+                .split('<script id="payload" type="application/json">')[1]
+                .split("</script>")[0]
+            )
+            self.assertTrue(kit["pairs"])
+            for pair in kit["pairs"]:
+                self.assertGreaterEqual(len(pair["brief"]), 1)
+                joined = " ".join(pair["brief"])
+                self.assertNotIn("Alyxandre", joined)
+                self.assertNotIn("Bramblewick", joined)
+                self.assertIn("I shall", joined)
+            # Both sides of one pair render the same brief, so the brief cannot
+            # hint at which side is which.
+            self.assertEqual(kit["pairs"][0]["left"] is kit["pairs"][0]["right"], False)
+
+    def test_duplicate_judge_answers_are_rejected(self):
+        from blueprint_pipeline import listening
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            key = root / "A_key.json"
+            key.write_text(json.dumps({
+                "judge": "A", "seed": 0,
+                "pairs": [{"pair_id": "P01", "left": "identity_only", "right": "identity_style"}],
+                "blocks": [],
+            }), encoding="utf-8")
+            answer = {
+                "judge": "A", "seed": 0, "questions": ["fit_to_brief"],
+                "consistency_question": "same_speaker",
+                "pairs": [{"pair_id": "P01", "ratings": {"fit_to_brief|L": 5}, "preference": "L", "notes": ""}],
+                "blocks": [],
+            }
+            for name in ("one.json", "two.json"):
+                (root / name).write_text(json.dumps(answer), encoding="utf-8")
+            # Two people cannot share a kit label; merging would lose one set.
+            with self.assertRaises(ValueError):
+                listening.summarize_answers([root / "one.json", root / "two.json"], [key])
+
+    def test_answers_are_unblinded_against_the_key(self):
+        from blueprint_pipeline import listening
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            auditions, dossiers = self._auditions(root)
+            self._blocks(root)
+            out = root / "out"
+            listening.build_blind_listening_kit(
+                audition_root=auditions, out=out, judges=("judge_a",), dossiers=dossiers,
+            )
+            key = json.loads((out / "judge_a_key.json").read_text())
+            pairs = []
+            for row in key["pairs"]:
+                # Always praise the identity_style side, whichever side it is on.
+                ratings = {}
+                for side, label in (("left", "L"), ("right", "R")):
+                    value = 5 if row[side] == "identity_style" else 1
+                    for question in ("fit_to_brief", "naturalness"):
+                        ratings[f"{question}|{label}"] = value
+                preference = "L" if row["left"] == "identity_style" else "R"
+                pairs.append({"pair_id": row["pair_id"], "ratings": ratings,
+                              "preference": preference, "notes": ""})
+            blocks = [
+                {"block_id": row["block_id"],
+                 "rating": 5 if row["condition"] == "identity_style" else 2,
+                 "notes": ""}
+                for row in key["blocks"]
+            ]
+            answers = out / "judge_a_answers.json"
+            answers.write_text(json.dumps({
+                "judge": "judge_a", "seed": 0,
+                "questions": ["fit_to_brief", "naturalness"],
+                "consistency_question": "same_speaker",
+                "pairs": pairs, "blocks": blocks,
+            }), encoding="utf-8")
+            summary = listening.summarize_answers([answers], [out / "judge_a_key.json"])
+            self.assertEqual(summary["questions"]["fit_to_brief"]["identity_style"], {"n": 4, "mean": 5.0})
+            self.assertEqual(summary["questions"]["fit_to_brief"]["identity_only"], {"n": 4, "mean": 1.0})
+            self.assertEqual(summary["preferences"]["identity_style"], 4)
+            self.assertEqual(summary["preferences"]["identity_only"], 0)
+            self.assertEqual(summary["consistency"]["same_speaker"]["identity_style"], {"n": 2, "mean": 5.0})
+            self.assertEqual(summary["consistency"]["same_speaker"]["identity_only"], {"n": 2, "mean": 2.0})
